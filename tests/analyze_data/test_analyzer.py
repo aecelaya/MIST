@@ -410,6 +410,59 @@ class TestAnalyzerInit:
         Analyzer(args)
         assert capture_console == []
 
+    @pytest.mark.parametrize(
+        "modality",
+        [
+            pytest.param("ct", id="ct"),
+            pytest.param("CT", id="CT_uppercase"),
+            pytest.param("mr", id="mr"),
+            pytest.param("MR", id="MR_uppercase"),
+            pytest.param("other", id="other"),
+        ],
+    )
+    def test_valid_modality_accepted(self, args, monkeypatch, modality):
+        """Known modality strings (case-insensitive) do not raise."""
+        def _mod(path):
+            d = fake_dataset_json(path)
+            d["modality"] = modality
+            return d
+        monkeypatch.setattr(io_mod, "read_json_file", _mod, raising=True)
+        Analyzer(args)  # must not raise
+
+    def test_invalid_modality_raises_value_error(self, args, monkeypatch):
+        """An unrecognised modality string raises ValueError."""
+        def _bad(path):
+            d = fake_dataset_json(path)
+            d["modality"] = "xray"
+            return d
+        monkeypatch.setattr(io_mod, "read_json_file", _bad, raising=True)
+        with pytest.raises(ValueError, match="modality"):
+            Analyzer(args)
+
+    def test_final_classes_label_not_in_labels_raises(
+        self, args, monkeypatch
+    ):
+        """A label in final_classes that is absent from labels raises ValueError."""
+        def _bad(path):
+            d = fake_dataset_json(path)
+            # Label 99 is not in d["labels"].
+            d["final_classes"] = {"tumor": [1, 99]}
+            return d
+        monkeypatch.setattr(io_mod, "read_json_file", _bad, raising=True)
+        with pytest.raises(ValueError, match="final_classes"):
+            Analyzer(args)
+
+    def test_final_classes_all_known_labels_accepted(
+        self, args, monkeypatch
+    ):
+        """final_classes whose labels are all in labels does not raise."""
+        def _ok(path):
+            d = fake_dataset_json(path)
+            d["final_classes"] = {"tumor": [1]}
+            return d
+        monkeypatch.setattr(io_mod, "read_json_file", _ok, raising=True)
+        Analyzer(args)  # must not raise
+
 
 # ---------------------------------------------------------------------------
 # Per-sample analysis helpers
@@ -493,6 +546,176 @@ class TestAnalyzerHelpers:
             in m
             for m in capture_console
         )
+
+    def test_check_crop_fg_raises_on_worker_error(self, args, monkeypatch):
+        """An exception in the FG-crop worker propagates as RuntimeError."""
+        monkeypatch.setattr(
+            preprocessing_utils,
+            "get_fg_mask_bbox",
+            lambda _: (_ for _ in ()).throw(RuntimeError("bad bbox")),
+            raising=True,
+        )
+        with pytest.raises(RuntimeError):
+            Analyzer(args).check_crop_fg()
+
+    def test_check_nz_ratio_raises_on_worker_error(self, args, monkeypatch):
+        """An exception in the NZ-ratio worker propagates as RuntimeError."""
+        monkeypatch.setattr(
+            ants,
+            "image_read",
+            lambda _p: (_ for _ in ()).throw(RuntimeError("bad file")),
+            raising=True,
+        )
+        with pytest.raises(RuntimeError):
+            Analyzer(args).check_nz_ratio()
+
+    def test_get_target_spacing_raises_on_worker_error(
+        self, args, monkeypatch
+    ):
+        """An exception in the spacing worker propagates as RuntimeError."""
+        monkeypatch.setattr(
+            ants,
+            "image_read",
+            lambda _p: (_ for _ in ()).throw(RuntimeError("bad file")),
+            raising=True,
+        )
+        with pytest.raises(RuntimeError):
+            Analyzer(args).get_target_spacing()
+
+    def test_check_resampled_dims_raises_on_worker_error(
+        self, args, monkeypatch
+    ):
+        """An exception in the resampled-dims worker propagates as RuntimeError."""
+        monkeypatch.setattr(
+            ants,
+            "image_header_info",
+            lambda _p: (_ for _ in ()).throw(RuntimeError("bad header")),
+            raising=True,
+        )
+        with pytest.raises(RuntimeError):
+            Analyzer(args).check_resampled_dims(np.ones((TRAIN_N, 3)) * 5)
+
+    def test_check_resampled_dims_raises_if_called_before_analyze_dataset(
+        self, args
+    ):
+        """check_resampled_dims raises RuntimeError when config keys are absent."""
+        a = Analyzer(args)
+        # Remove the keys that analyze_dataset would have written.
+        a.config.get("preprocessing", {}).pop("crop_to_foreground", None)
+        a.config.get("preprocessing", {}).pop("target_spacing", None)
+        with pytest.raises(RuntimeError, match="analyze_dataset"):
+            a.check_resampled_dims(np.ones((TRAIN_N, 3)) * 5)
+
+
+# ---------------------------------------------------------------------------
+# get_ct_normalization_parameters
+# ---------------------------------------------------------------------------
+
+class TestGetCtNormalizationParameters:
+    """Integration tests for Analyzer.get_ct_normalization_parameters."""
+
+    def _make_ct_analyzer(self, args, monkeypatch, hu_value: float):
+        """Return an Analyzer whose image_read always returns a uniform HU image.
+
+        The mask is all-ones (full foreground) so every voxel is sampled.
+        """
+        def _image_read(path):
+            if "mask" in str(path):
+                return make_ants_image(fill=1.0)
+            return make_ants_image(fill=hu_value)
+
+        monkeypatch.setattr(ants, "image_read", _image_read, raising=True)
+        return Analyzer(args)
+
+    def test_output_keys_are_present(self, args, monkeypatch):
+        """Return dict contains all four expected keys."""
+        result = self._make_ct_analyzer(
+            args, monkeypatch, hu_value=0.0
+        ).get_ct_normalization_parameters()
+        assert set(result) == {"window_min", "window_max", "z_score_mean", "z_score_std"}
+
+    def test_constant_hu_gives_correct_mean(self, args, monkeypatch):
+        """Uniform HU images produce the correct mean."""
+        result = self._make_ct_analyzer(
+            args, monkeypatch, hu_value=100.0
+        ).get_ct_normalization_parameters()
+        assert result["z_score_mean"] == pytest.approx(100.0, abs=1.0)
+
+    def test_constant_hu_gives_zero_std(self, args, monkeypatch):
+        """Uniform HU images produce std ≈ 0."""
+        result = self._make_ct_analyzer(
+            args, monkeypatch, hu_value=100.0
+        ).get_ct_normalization_parameters()
+        assert result["z_score_std"] == pytest.approx(0.0, abs=1e-6)
+
+    def test_constant_hu_window_matches_value(self, args, monkeypatch):
+        """Both window bounds equal the uniform HU value within 1 HU."""
+        hu = 200.0
+        result = self._make_ct_analyzer(
+            args, monkeypatch, hu_value=hu
+        ).get_ct_normalization_parameters()
+        assert abs(result["window_min"] - hu) <= 1.0
+        assert abs(result["window_max"] - hu) <= 1.0
+
+    def test_window_min_less_than_window_max_with_variance(
+        self, args, monkeypatch
+    ):
+        """When patients have different HU values, window_min < window_max."""
+        call_count = [0]
+
+        def _image_read(path):
+            if "mask" in str(path):
+                return make_ants_image(fill=1.0)
+            # Alternate between low and high HU across patients.
+            hu = -500.0 if call_count[0] % 2 == 0 else 500.0
+            call_count[0] += 1
+            return make_ants_image(fill=hu)
+
+        monkeypatch.setattr(ants, "image_read", _image_read, raising=True)
+        result = Analyzer(args).get_ct_normalization_parameters()
+        assert result["window_min"] < result["window_max"]
+
+    def test_empty_foreground_is_skipped(self, args, monkeypatch):
+        """Patients with all-zero masks contribute nothing to statistics."""
+        def _image_read(path):
+            if "mask" in str(path):
+                return make_ants_image(fill=0.0)  # no foreground
+            return make_ants_image(fill=100.0)
+
+        monkeypatch.setattr(ants, "image_read", _image_read, raising=True)
+        result = Analyzer(args).get_ct_normalization_parameters()
+        assert set(result) == {
+            "window_min", "window_max", "z_score_mean", "z_score_std"
+        }
+
+    def test_out_of_range_hu_emits_warning(
+        self, args, monkeypatch, capture_console
+    ):
+        """Foreground HU values outside the histogram range trigger a warning."""
+        def _image_read(path):
+            if "mask" in str(path):
+                return make_ants_image(fill=1.0)
+            return make_ants_image(fill=5000.0)  # above CT_HU_HIST_MAX
+
+        monkeypatch.setattr(ants, "image_read", _image_read, raising=True)
+        Analyzer(args).get_ct_normalization_parameters()
+        assert any(
+            "HU values outside the histogram range" in m
+            for m in capture_console
+        )
+
+    def test_ct_normalization_raises_on_worker_error(
+        self, args, monkeypatch
+    ):
+        """An exception in the CT stats worker propagates as RuntimeError."""
+        monkeypatch.setattr(
+            ants,
+            "image_read",
+            lambda _p: (_ for _ in ()).throw(RuntimeError("bad file")),
+            raising=True,
+        )
+        with pytest.raises(RuntimeError):
+            Analyzer(args).get_ct_normalization_parameters()
 
 
 # ---------------------------------------------------------------------------
@@ -700,7 +923,24 @@ class TestAnalyzerRun:
 # ---------------------------------------------------------------------------
 
 class TestValidateDataset:
-    """Tests for Analyzer.validate_dataset."""
+    """Tests for Analyzer.validate_dataset.
+
+    validate_dataset is called before add_folds_to_df, so paths_df has
+    columns [id, mask, image_1, ...] with no 'fold' column. The autouse
+    fixture below overrides fake_get_files_df to reflect this.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_fold_df(self, monkeypatch):
+        """Override paths_df to match production state (no fold column)."""
+        no_fold = pd.DataFrame({
+            "id": list(range(TRAIN_N)),
+            "mask": [f"{i}_mask.nii.gz" for i in range(TRAIN_N)],
+            "ct": [f"{i}_ct.nii.gz" for i in range(TRAIN_N)],
+        })
+        monkeypatch.setattr(
+            au, "get_files_df", lambda *_a, **_k: no_fold, raising=True
+        )
 
     def test_happy_path_preserves_all_samples(self, args):
         """validate_dataset does not exclude any sample when all are valid."""
@@ -724,6 +964,29 @@ class TestValidateDataset:
         a = Analyzer(args)
         a.validate_dataset()
         assert len(a.paths_df) == TRAIN_N - 1
+
+    def test_non_runtime_error_excludes_one_sample_and_logs(
+        self, args, monkeypatch, capture_console
+    ):
+        """Non-RuntimeError exceptions from ANTs are also caught and exclude the patient."""
+        def _read_dispatch(path: str):
+            if "0_mask.nii.gz" in str(path):
+                raise Exception("ITK internal error")
+            return ants.from_numpy(
+                np.ones((10, 10, 10), dtype=np.float32)
+            )
+
+        monkeypatch.setattr(
+            ants, "image_read", _read_dispatch, raising=True
+        )
+        a = Analyzer(args)
+        a.validate_dataset()
+        assert len(a.paths_df) == TRAIN_N - 1
+        assert any(
+            "In 0:" in m and "ITK internal error" in m
+            for m in capture_console
+        )
+        assert_exclusion_summary(capture_console, 1)
 
     def test_runtime_error_excludes_one_sample_and_logs(
         self, args, monkeypatch, capture_console
@@ -749,14 +1012,14 @@ class TestValidateDataset:
         assert_exclusion_summary(capture_console, 1)
 
     def test_runtime_error_all_samples_raises(self, args, monkeypatch):
-        """RuntimeError on every sample raises AssertionError."""
+        """RuntimeError on every sample raises RuntimeError."""
         monkeypatch.setattr(
             ants,
             "image_read",
             lambda _p: (_ for _ in ()).throw(RuntimeError("boom")),
             raising=True,
         )
-        with pytest.raises(AssertionError):
+        with pytest.raises(RuntimeError):
             Analyzer(args).validate_dataset()
 
     def test_header_mismatch_excludes_one_and_logs(
@@ -822,7 +1085,7 @@ class TestValidateDataset:
             ),
             raising=True,
         )
-        with pytest.raises(AssertionError):
+        with pytest.raises(RuntimeError):
             Analyzer(args).validate_dataset()
 
     def test_4d_image_excludes_one_and_logs(
@@ -901,7 +1164,7 @@ class TestValidateDataset:
         assert_exclusion_summary(capture_console, 1)
 
     def test_4d_image_all_raise(self, args, monkeypatch):
-        """All-4D images cause validate_dataset to raise AssertionError."""
+        """All-4D images cause validate_dataset to raise RuntimeError."""
         def _hdr_router(path: str):
             if "mask" in path:
                 return {
@@ -919,5 +1182,89 @@ class TestValidateDataset:
         monkeypatch.setattr(
             ants, "image_header_info", _hdr_router, raising=True
         )
-        with pytest.raises(AssertionError):
+        with pytest.raises(RuntimeError):
             Analyzer(args).validate_dataset()
+
+    def test_corrupt_secondary_image_excludes_patient(
+        self, args, monkeypatch, capture_console
+    ):
+        """RuntimeError from ants.image_header_info inside the loop excludes patient."""
+        call_count = {"n": 0}
+
+        def _hdr_router(path: str):
+            # Raise on the second call for patient 0's image (inside the loop).
+            if "0_ct.nii.gz" in path:
+                call_count["n"] += 1
+                if call_count["n"] > 1:
+                    raise RuntimeError("corrupt secondary image header")
+            return {"dimensions": (10, 10, 10), "spacing": (1.0, 1.0, 1.0)}
+
+        monkeypatch.setattr(
+            ants, "image_header_info", _hdr_router, raising=True
+        )
+        monkeypatch.setattr(
+            au, "compare_headers", lambda h1, h2: True, raising=True
+        )
+
+        a = Analyzer(args)
+        a.validate_dataset()
+        assert len(a.paths_df) == TRAIN_N - 1
+        assert any("In 0:" in m for m in capture_console)
+
+    def test_multi_image_mismatch_excludes_one_and_logs(
+        self, args, monkeypatch, capture_console
+    ):
+        """Patient with mismatched image-to-image headers is excluded."""
+        two_image_df = pd.DataFrame({
+            "id": list(range(TRAIN_N)),
+            "mask": [f"{i}_mask.nii.gz" for i in range(TRAIN_N)],
+            "ct": [f"{i}_ct.nii.gz" for i in range(TRAIN_N)],
+            "t2": [f"{i}_t2.nii.gz" for i in range(TRAIN_N)],
+        })
+        monkeypatch.setattr(
+            au, "get_files_df", lambda *_a, **_k: two_image_df, raising=True
+        )
+
+        def _hdr_router(path: str):
+            # Tag headers so the comparison can distinguish mask-vs-image
+            # from image-vs-image without relying on spacing alone.
+            if "mask" in path:
+                return {
+                    "dimensions": (10, 10, 10),
+                    "spacing": (1.0, 1.0, 1.0),
+                    "_type": "mask",
+                }
+            if "0_t2" in path:
+                return {
+                    "dimensions": (10, 10, 10),
+                    "spacing": (2.0, 2.0, 2.0),
+                    "_type": "t2",
+                }
+            return {
+                "dimensions": (10, 10, 10),
+                "spacing": (1.0, 1.0, 1.0),
+                "_type": "image",
+            }
+
+        def _compare(h1: dict, h2: dict) -> bool:
+            # Mask-vs-any comparison always passes.
+            if h1.get("_type") == "mask" or h2.get("_type") == "mask":
+                return True
+            # Image-vs-image: compare spacing.
+            return (
+                tuple(h1.get("spacing", ())) == tuple(h2.get("spacing", ()))
+            )
+
+        monkeypatch.setattr(
+            ants, "image_header_info", _hdr_router, raising=True
+        )
+        monkeypatch.setattr(au, "compare_headers", _compare, raising=True)
+
+        a = Analyzer(args)
+        a.validate_dataset()
+        assert len(a.paths_df) == TRAIN_N - 1
+        assert any(
+            "In 0:" in m and "Mismatch between" in m and "images" in m
+            for m in capture_console
+        )
+        assert_exclusion_summary(capture_console, 1)

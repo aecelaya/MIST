@@ -174,6 +174,61 @@ def _make_dataset_info(base: Path) -> Dict[str, Any]:
 class TestGetFilesDF:
     """Tests for analyzer_utils.get_files_df."""
 
+    def test_patient_ids_are_sorted(self, monkeypatch, tmp_path: Path):
+        """Patient IDs are returned in sorted (deterministic) order."""
+        base = tmp_path
+        ds_info = _make_dataset_info(base)
+
+        for name in ("patient_c", "patient_a", "patient_b"):
+            (base / "train" / name).mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr("mist.utils.io.read_json_file", lambda _: ds_info)
+        df = au.get_files_df("fake/path/dataset.json", "train")
+        assert df["id"].tolist() == ["patient_a", "patient_b", "patient_c"]
+
+    def test_missing_image_emits_warning(
+        self, monkeypatch, tmp_path: Path, caplog
+    ):
+        """A patient missing an image file produces a warning."""
+        import logging
+
+        base = tmp_path
+        ds_info = _make_dataset_info(base)
+        p = base / "train" / "patient_x"
+        p.mkdir(parents=True, exist_ok=True)
+        # Only image_1 present; image_2 and image_3 are missing.
+        _touch(p / "image_1.nii.gz")
+        _touch(p / "mask.nii.gz")
+
+        monkeypatch.setattr("mist.utils.io.read_json_file", lambda _: ds_info)
+        with caplog.at_level(logging.WARNING):
+            au.get_files_df("fake/path/dataset.json", "train")
+
+        messages = [r.getMessage() for r in caplog.records]
+        patient_msgs = [m for m in messages if "patient_x" in m]
+        assert any("image_2" in m for m in patient_msgs)
+        assert any("image_3" in m for m in patient_msgs)
+
+    def test_absent_segmentation_file_emits_warning(
+        self, monkeypatch, tmp_path: Path, caplog
+    ):
+        """A patient missing a mask file produces a warning in train mode."""
+        import logging
+
+        base = tmp_path / "dataset"
+        ds_info = _make_dataset_info(base)
+        p = base / "train" / "patient_y"
+        p.mkdir(parents=True, exist_ok=True)
+        _touch(p / "image_1.nii.gz")
+        # No mask file.
+
+        monkeypatch.setattr("mist.utils.io.read_json_file", lambda _: ds_info)
+        with caplog.at_level(logging.WARNING):
+            au.get_files_df("fake/path/dataset.json", "train")
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("patient_y" in m and "mask" in m for m in messages)
+
     def test_train_mode_maps_paths(self, monkeypatch, tmp_path: Path):
         """Train mode includes mask and modality columns with absolute paths."""
         base = tmp_path
@@ -323,9 +378,9 @@ class TestGetBestPatchSize:
         """When med < max, choose nearest lower power of two; else cap at max."""
         assert au.get_best_patch_size([180, 65, 33]) == [128, 64, 32]
 
-    def test_input_too_small_raises_assertion(self):
-        """min(med) <= 1 raises AssertionError."""
-        with pytest.raises(AssertionError):
+    def test_input_too_small_raises_value_error(self):
+        """min(med) <= 1 raises ValueError."""
+        with pytest.raises(ValueError):
             au.get_best_patch_size([1, 64, 64])
 
 

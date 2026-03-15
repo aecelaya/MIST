@@ -42,8 +42,42 @@ class AnalyzeConstants:
     CT_GLOBAL_CLIP_MIN_PERCENTILE = 0.5
     CT_GLOBAL_CLIP_MAX_PERCENTILE = 99.5
 
+    # Histogram parameters for streaming CT percentile estimation. The range
+    # covers the full clinical HU scale; with CT_HU_HIST_BINS bins the
+    # resolution is 1 HU per bin, which is more than sufficient for windowing.
+    CT_HU_HIST_MIN = -1024.0
+    CT_HU_HIST_MAX = 3072.0
+    CT_HU_HIST_BINS = 4096
+
     # How many digits are printed for floating point numbers.
     PRINT_FLOATING_POINT_PRECISION = 4
+
+    # Maximum number of voxel coordinates sampled per label per patient for
+    # PCA-based shape descriptor computation.
+    MAX_SHAPE_COORDS = 10_000
+
+    # Labels with more voxels than this are skipped for skeletonization to
+    # bound compute time. Structures this large are rarely thin/tubular.
+    MAX_SKELETON_VOXELS = 500_000
+
+    # Skeleton ratio threshold for flagging a label as tubular/branching.
+    # Above this fraction of label voxels lie on the medial axis → thin
+    # branching structure; clDice loss is recommended.
+    TUBULAR_SKELETON_RATIO_THRESHOLD = 0.05
+
+    # Two-tier image-fraction thresholds. Labels below VERY_SPARSE get the
+    # "very sparse" observation; labels in [VERY_SPARSE, SPARSE) get "sparse".
+    # Both are relative to the effective image volume (fg bbox when
+    # crop_to_foreground is enabled, otherwise full original image).
+    # Distinct from size_category, which is relative to foreground only.
+    VERY_SPARSE_IMAGE_FRACTION_PCT_THRESHOLD = 1.0
+    SPARSE_IMAGE_FRACTION_PCT_THRESHOLD = 5.0
+
+    # Size categories considered "small" for the resampling warning. Labels
+    # in these categories that are also geometrically thin may lose structural
+    # detail when resampled to a heuristic target spacing derived from
+    # whole-image statistics.
+    SMALL_STRUCTURE_SIZE_CATEGORIES = frozenset({"tiny", "small"})
 
     # Create the base_config.json path.
     BASE_CONFIG_JSON_PATH = os.path.join(

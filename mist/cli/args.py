@@ -92,6 +92,12 @@ def add_analyzer_args(parser: ArgParser) -> None:
     g.add_argument("--data", type=str, help="Path to dataset JSON file.")
     g.add_argument("--results", type=str, help="Path to output of MIST pipeline.")
     g.add_argument("--nfolds", type=int, help="Number of cross-validation folds.")
+    g.add_argument(
+        "--num-workers-analyze",
+        type=positive_int,
+        default=1,
+        help="Number of parallel workers for dataset analysis.",
+    )
     parser.boolean_flag("--overwrite", default=False, help="Overwrite previous configuration/results.")
 
 
