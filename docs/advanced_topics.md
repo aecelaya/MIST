@@ -129,14 +129,26 @@ Below is an example of a valid `config.json` file.
   },
 
   "evaluation": {
-    "metrics": ["dice", "haus95"],
-    "final_classes": {
-      "wt": [1, 2, 4],
-      "tc": [1, 4],
-      "et": [4]
+    "wt": {
+      "labels": [1, 2, 4],
+      "metrics": {
+        "dice": {},
+        "haus95": {}
+      }
     },
-    "params": {
-      "surf_dice_tol": 1.0
+    "tc": {
+      "labels": [1, 4],
+      "metrics": {
+        "dice": {},
+        "haus95": {}
+      }
+    },
+    "et": {
+      "labels": [4],
+      "metrics": {
+        "dice": {},
+        "haus95": {}
+      }
     }
   }
 }
@@ -195,14 +207,26 @@ mist_train --numpy /path/to/preprocessed/npy/files \
 MIST's default loss function is the Dice with cross entropy loss function.
 However, the following loss functions are available in MIST:
 
-| Loss function          | `training.loss.name`  |
-|------------------------|-----------------------|
-| Dice w/ cross entropy  | `dice_ce`             |
-| Dice                   | `dice`                |
-| Boundary               | `bl`                  |
-| One-sided Hausdorff    | `hdos`                |
-| Generalized surface    | `gsl`                 |
-| clDice                 | `cldice`              |
+| Loss function                             | `training.loss.name` |
+|-------------------------------------------|----------------------|
+| Dice w/ cross entropy                     | `dice_ce`            |
+| Dice                                      | `dice`               |
+| Boundary                                  | `bl`                 |
+| One-sided Hausdorff                       | `hdos`               |
+| Generalized surface                       | `gsl`                |
+| clDice                                    | `cldice`             |
+| Volumetric surface Dice dilation *(experimental)* | `volumetric_sddl` |
+| Vessel surface Dice dilation *(experimental)*     | `vessel_sddl`     |
+
+!!! warning "Experimental loss functions"
+    `volumetric_sddl` and `vessel_sddl` are experimental loss functions that
+    are still under active development. They are available for testing but
+    results may vary and the API is subject to change.
+
+    `volumetric_sddl` combines Dice+CE with a Surface Dice Dilation term and
+    is intended for general volumetric segmentation tasks. `vessel_sddl`
+    combines clDice with a Surface Dice Dilation term and is designed for
+    thin, branching structures such as vessels or airways.
 
 The loss function can be specified with the `--loss` flag in the `mist_run_all`
 or `mist_train` commands or set in the `config.json` file under the
@@ -483,3 +507,92 @@ use GPUs `0` and `5`, then run `mist_run_all <other arguments> --gpus 0 5`.
 Note that `training.hardware.master_port` controls the port used for multi-GPU
 communication. If you run multiple jobs on the same machine, ensure each job
 uses a different `master_port` value.
+
+## Evaluation metrics
+
+The `evaluation` section of `config.json` controls which metrics are computed
+for each segmentation class during training and when using `mist_evaluate`
+standalone. It is generated automatically by the analysis step but can be
+freely edited afterward.
+
+Each key in the section is a class name. Each class specifies its constituent
+labels and the metrics to compute:
+
+```json
+"class_name": {
+  "labels": [list of label integers],
+  "metrics": {
+    "metric_name": { "param": value },
+    "another_metric": {}
+  }
+}
+```
+
+The value for each metric entry is a dict of keyword arguments passed directly
+to the metric function. For metrics with no parameters, use an empty dict `{}`.
+This structure means each class can use a completely different set of metrics
+and parameters — there is no requirement to evaluate every class the same way.
+
+### Available metrics
+
+| Metric | `name` | Parameters |
+|---|---|---|
+| Dice coefficient | `dice` | none |
+| 95th percentile Hausdorff distance | `haus95` | none |
+| Average surface distance | `avg_surf` | none |
+| Surface Dice | `surf_dice` | `tolerance` (mm, default: `1.0`) |
+
+### Example: different metrics per class
+
+The following configuration computes only Dice for the whole tumor class, and
+Dice + surface Dice for the enhancing tumor class:
+
+```json
+"evaluation": {
+  "wt": {
+    "labels": [1, 2, 4],
+    "metrics": {
+      "dice": {}
+    }
+  },
+  "et": {
+    "labels": [4],
+    "metrics": {
+      "dice": {},
+      "surf_dice": {"tolerance": 1.0}
+    }
+  }
+}
+```
+
+### Example: per-class surface Dice tolerances
+
+Surface Dice tolerance is clinically meaningful — a tight tolerance is
+appropriate for fine structures like vessels but too strict for larger
+structures. Each class can use a different tolerance:
+
+```json
+"evaluation": {
+  "wt": {
+    "labels": [1, 2, 4],
+    "metrics": {
+      "dice": {},
+      "surf_dice": {"tolerance": 3.0}
+    }
+  },
+  "tc": {
+    "labels": [1, 4],
+    "metrics": {
+      "dice": {},
+      "surf_dice": {"tolerance": 2.0}
+    }
+  },
+  "et": {
+    "labels": [4],
+    "metrics": {
+      "dice": {},
+      "surf_dice": {"tolerance": 1.0}
+    }
+  }
+}
+```

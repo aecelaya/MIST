@@ -55,6 +55,8 @@ results/
     models/
     predictions/
     config.json
+    data_dump.json
+    data_dump.md
     results.csv
     train_paths.csv
     evaluation_paths.csv
@@ -70,6 +72,8 @@ results/
 | `models/`              | Trained PyTorch models for each fold.                                       |
 | `predictions/`         | Predictions from cross validation and test set (if specified).              |
 | `config.json`          | Dataset configuration (target spacing, normalization, patch size, etc.).    |
+| `data_dump.json`       | Full structured dataset statistics produced by the analysis step (machine-readable). |
+| `data_dump.md`         | Narrativized dataset summary optimized for review and LLM consumption.      |
 | `results.csv`          | Evaluation results from five-fold cross validation.                         |
 | `train_paths.csv`      | CSV with `id`, `fold`, and paths to images/masks for training.              |
 | `evaluation_paths.csv` | CSV with `id`, `mask`, and `prediction` paths for evaluation.               |
@@ -88,10 +92,19 @@ The **analysis step** computes dataset parameters (target spacing, normalization
 Run analysis alone with the `mist_analyze` command. This command has the
 following arguments:
 
-- `--data` (**required**): Path to your dataset JSON file.  
+- `--data` (**required**): Path to your dataset JSON file.
 - `--results`: Directory to save analysis outputs. *(default: `./results`)*
 - `--nfolds`: How many folds to split the dataset into. *(default: 5)*
+- `--num-workers-analyze`: Number of parallel workers for dataset analysis.
+*(default: 1)*
 - `--overwrite`: Overwrite previous results/configuration.
+
+!!!note
+    Paths in the dataset JSON file (i.e., `train-data` and `test-data`) can be
+    absolute or relative. Relative paths are resolved relative to the **location
+    of the JSON file itself**, so the JSON and its data can be moved to a
+    different location or machine without editing the paths, as long as their
+    relative structure is preserved.
 
 ### Example
 
@@ -101,6 +114,37 @@ Run the MIST analysis pipeline.
 mist_analyze --data /path/to/dataset.json \
              --results /path/to/analysis/results
 ```
+
+### Data Dump
+
+After computing dataset parameters, the analysis step produces two additional
+files alongside `config.json`: `data_dump.json` and `data_dump.md`.
+
+`data_dump.json` contains a full structured summary of the dataset statistics,
+including:
+
+- **Spacing and anisotropy** – per-axis voxel spacing statistics and anisotropy
+ratio.
+- **Image dimensions** – original and estimated resampled dimensions.
+- **Intensity distributions** – per-channel foreground intensity statistics
+(mean, std, and key percentiles).
+- **Label statistics** – per-label voxel counts, presence rates, volume
+fractions (relative to both foreground and the effective image region), and
+shape descriptors:
+    - *PCA-based descriptors* (linearity, planarity, sphericity) characterising
+    the global geometry of each label.
+    - *Isoperimetric Quotient (IQ)* measuring compactness relative to a sphere.
+    - *Skeleton ratio* — the fraction of label voxels on the morphological
+    medial axis, which is the primary signal for thin, branching structures
+    such as vessels or airways.
+- **Observations** – auto-generated notes flagging anisotropy, sparse labels,
+thin/branching structures, and other dataset characteristics that may influence
+architecture or loss function choices.
+
+`data_dump.md` is a human-readable Markdown version of the same statistics,
+pre-filled with metric definitions and auto-generated observations. It is
+intended to be reviewed and annotated by the user before being passed to an LLM
+for architecture and training configuration advice (this feature is currently in progress, stay tuned!).
 
 ## Preprocessing
 
