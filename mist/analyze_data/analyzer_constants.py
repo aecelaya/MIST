@@ -1,7 +1,9 @@
 """Constants for the Analyzer class."""
 import dataclasses
 import os
+
 import numpy as np
+
 
 @dataclasses.dataclass(frozen=True)
 class AnalyzeConstants:

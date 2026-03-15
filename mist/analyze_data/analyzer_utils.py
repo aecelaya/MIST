@@ -2,6 +2,7 @@
 from typing import Dict, Any, Tuple, List
 import os
 import glob
+
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import KFold
@@ -65,7 +66,7 @@ def get_resampled_image_dimensions(
         new_dimensions: New image dimensions after resampling.
     """
     new_dimensions = [
-        int(np.round(dimensions[i] * spacing[i] / target_spacing[i])) 
+        int(np.round(dimensions[i] * spacing[i] / target_spacing[i]))
         for i in range(len(dimensions))
     ]
     return (new_dimensions[0], new_dimensions[1], new_dimensions[2])
@@ -119,7 +120,9 @@ def get_files_df(path_to_dataset_json: str, train_or_test: str) -> pd.DataFrame:
     df = pd.DataFrame(columns=columns)
 
     # Get list of patient IDs.
-    patient_ids = [f for f in os.listdir(base_dir) if not f.startswith('.')]
+    patient_ids = [
+        f for f in os.listdir(base_dir) if not f.startswith('.')
+    ]
 
     # Iterate over each patient and get the file paths for each patient.
     for patient_id in patient_ids:
@@ -128,7 +131,9 @@ def get_files_df(path_to_dataset_json: str, train_or_test: str) -> pd.DataFrame:
 
         # Path to patient data.
         patient_dir = os.path.join(base_dir, patient_id)
-        patient_files = glob.glob(os.path.join(patient_dir, '*'))
+        patient_files = glob.glob(
+            os.path.join(patient_dir, '*')
+        )
 
         # Map file paths to their respective columns.
         for image_type, identifying_strings in dataset_info["images"].items():
@@ -156,7 +161,7 @@ def get_files_df(path_to_dataset_json: str, train_or_test: str) -> pd.DataFrame:
     return df
 
 
-def add_folds_to_df(df: pd.DataFrame, n_splits: int=5) -> pd.DataFrame:
+def add_folds_to_df(df: pd.DataFrame, n_splits: int = 5) -> pd.DataFrame:
     """Add folds to the dataframe for k-fold cross-validation.
 
     Args:
@@ -164,10 +169,10 @@ def add_folds_to_df(df: pd.DataFrame, n_splits: int=5) -> pd.DataFrame:
         n_splits: Number of splits for k-fold cross-validation.
 
     Returns:
-        df: Dataframe with folds added. The folds are added as a new column. The
-            dataframe is sorted by the fold column. The fold next to each 
-            patient ID is the fold that the patient belongs to the test set for
-            that given fold.
+        df: Dataframe with folds added. The folds are added as a new column.
+            The dataframe is sorted by the fold column. The fold next to each
+            patient ID is the fold that the patient belongs to the test set
+            for that given fold.
     """
     # Initialize KFold object
     kfold = KFold(n_splits=n_splits, shuffle=True, random_state=42)
@@ -206,6 +211,57 @@ def get_best_patch_size(med_img_size: List[int]) -> List[int]:
     return [
         int(2 ** np.floor(np.log2(med_sz))) for med_sz in med_img_size
     ]
+
+
+def build_evaluation_config(dataset: Dict[str, Any]) -> Dict[str, Any]:
+    """Build evaluation field for the MIST configuration.
+
+    Args:
+        dataset: The dictionary containing the dataset description. This MUST
+            contain the 'final_classes' field with the following format:
+            {
+                'final_classes': {
+                    'final_class_1': [1, 3],
+                    'final_class_2': [2, 4]
+                }
+            }
+
+    Returns:
+        A dictionary with the following format:
+            {
+                'evaluation': {
+                    'final_class_1': {
+                        'labels': [1, 3],
+                        'metrics': {
+                            'dice': {},
+                            'haus95': {},
+                        }
+                    },
+                    'final_class_2': {
+                        'labels': [2, 4],
+                        'metrics': {
+                            'dice': {},
+                            'haus95': {},
+                        }
+                    }
+                }
+            }
+    """
+    final_classes = dataset.get("final_classes", None)
+
+    if final_classes is None:
+        raise ValueError("Missing 'final_classes' in the dataset.")
+
+    evaluation = {}
+    for class_name, labels in final_classes.items():
+        evaluation[class_name] = {
+            'labels': labels,
+            'metrics': {
+                'dice': {},
+                'haus95': {},
+            }
+        }
+    return {'evaluation': evaluation}
 
 
 def build_base_config() -> Dict[str, Any]:
@@ -304,13 +360,6 @@ def build_base_config() -> Dict[str, Any]:
             "tta": {
                 "enabled": True,
                 "strategy": "all_flips",
-            },
-        },
-        "evaluation": {
-            "metrics": ["dice", "haus95"],
-            "final_classes": None,
-            "params": {
-                "surf_dice_tol": 1.0,
             },
         },
     }
