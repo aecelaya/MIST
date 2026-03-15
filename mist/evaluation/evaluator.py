@@ -1,107 +1,93 @@
 """Evaluation class for computing segmentation accuracy metrics."""
-from typing import Dict, List, Tuple, Union, Optional
-from pathlib import Path
+
+import concurrent.futures
+import gc
 import os
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple, Union
+
 import ants
-import pandas as pd
 import numpy as np
+import pandas as pd
 import rich
 
-# MIST imports.
-from mist.utils import progress_bar
 from mist.analyze_data import analyzer_utils
 from mist.evaluation import evaluation_utils
 from mist.metrics.metrics_registry import get_metric
+from mist.utils import progress_bar
 
 
 class Evaluator:
     """Evaluator class for computing segmentation accuracy metrics.
 
     This class evaluates segmentation predictions against ground truth masks
-    using various metrics such as Dice coefficient, Hausdorff distance, surface
-    Dice, and average surface distance. It reads file paths from a DataFrame
-    containing columns 'id', 'mask', and 'prediction', where 'mask' is the path
-    to the ground truth mask and 'prediction' is the path to the predicted
-    segmentation. The results are saved to a CSV file.
+    using various metrics defined in a class-specific configuration format.
+    Evaluation is parallelized to significantly speed up processing over large
+    datasets while maintaining memory safety.
 
     Attributes:
-        filepaths_dataframe: DataFrame containing columns 'id', 'mask', and
-            'prediction' with paths to ground truth masks and predictions.
-        evaluation_classes: Dictionary containing class names as keys and
-            lists of class labels as values for evaluation. This can be found
-            in the MIST configuration file under the `final_classes` key.
+        filepaths_dataframe: DataFrame indexed by 'id', containing 'mask' and
+            'prediction' columns with paths to files.
+        evaluation_config: Dictionary containing class names as keys and
+            their respective 'labels' and 'metrics' configuration as values.
         output_csv_path: Path to save the evaluation results as a CSV file.
-        selected_metrics: List of metric names to compute. Currently supported
-            metrics include 'dice', 'haus95', 'surf_dice', and 'avg_surf'.
-        metric_kwargs: Additional keyword arguments for metrics. Right now, the
-            only metric that needs additional parameters is 'surf_dice', which
-            requires a `surf_dice_tol` parameter to specify the tolerance for
-            surface distance calculations.
-        results_df: DataFrame to store the evaluation results.
-        console: Rich console for displaying progress and error messages.
+        results_dataframe: DataFrame storing the evaluation results.
     """
+
     def __init__(
         self,
         filepaths_dataframe: pd.DataFrame,
-        evaluation_classes: Dict[str, List[int]],
+        evaluation_config: Dict[str, Any],
         output_csv_path: Union[str, Path],
-        selected_metrics: List[str],
-        **metric_kwargs,
+        validate_masks: bool = False,
     ):
         """Initialize the Evaluator.
 
         Args:
             filepaths_dataframe: DataFrame containing columns 'id', 'mask', and
-                'prediction' with paths to ground truth masks and predictions.
-            evaluation_classes: Dictionary containing class names as keys and
-                lists of class labels as values for evaluation. This can be
-                found in the MIST configuration file under the `final_classes`
-                key.
-            output_csv_path: Path to save the evaluation results as a CSV file.
-            selected_metrics: List of metric names to compute. Currently
-                supported metrics include 'dice', 'haus95', 'surf_dice', and
-                'avg_surf'.
-            metric_kwargs: Additional keyword arguments for metrics. Right now,
-                the only metric that needs additional parameters is 'surf_dice',
-                which requires a `surf_dice_tol` parameter to specify the
-                tolerance for surface distance calculations.
+                'prediction'.
+            evaluation_config: Dictionary mapping class names to their labels 
+                and metrics configurations, OR a legacy evaluation dictionary.
+            output_csv_path: Path where the CSV results will be saved.
+            validate_masks: Opt-in flag to validate ground truth and prediction
+                masks before evaluation. This will perform basic checks like
+                verifying that images are 3D, checking if there are no
+                unexpected labels, and that the dtype of the data is integer
+                or boolean.
         """
-        self.filepaths_dataframe = self._validate_filepaths_dataframe(
-            filepaths_dataframe
-        )
-        self.evaluation_classes = self._validate_evaluation_classes(
-            evaluation_classes
+        # 1. Validate columns first.
+        df = self._validate_filepaths_dataframe(filepaths_dataframe)
+
+        # 2. Check for duplicates and set index to 'id' for O(1) lookups.
+        if df["id"].duplicated().any():
+            raise ValueError(
+                "Duplicate patient IDs found in DataFrame. IDs must be unique."
+            )
+
+        self.filepaths_dataframe = df.set_index("id")
+
+        # 3. Validate and store the evaluation configuration (converts legacy if
+        # needed).
+        self.evaluation_config = self._validate_evaluation_config(
+            evaluation_config
         )
         self.output_csv_path = output_csv_path
 
-        # This is validated with the METRIC_REGISTRY.
-        self.selected_metrics = selected_metrics
-        self.metric_kwargs = metric_kwargs
-
-        # Initialize the results DataFrame.
+        # 4. Initialize the results DataFrame structure using the validated
+        # config.
         self.results_dataframe = evaluation_utils.initialize_results_dataframe(
-            self.evaluation_classes, self.selected_metrics
+            self.evaluation_config
         )
 
-        # Rich console for displaying progress and error messages.
-        self.console = rich.console.Console()
+        # Set opt-in validation flag. This is not necessary for MIST pipelines,
+        # but should be used for evaluation on external data.
+        self.validate_masks = validate_masks
 
     @staticmethod
     def _validate_filepaths_dataframe(
         filepaths_dataframe: pd.DataFrame
     ) -> pd.DataFrame:
-        """Check if the filepaths DataFrame has the required columns.
-
-        Args:
-            filepaths_dataframe: DataFrame that should contain columns 'id',
-                'mask', and 'prediction'.
-
-        Returns:
-            pd.DataFrame: The validated DataFrame.
-
-        Raises:
-            ValueError: If the DataFrame does not contain the required columns.
-        """
+        """Check if the filepaths DataFrame has the required columns."""
         required_columns = ["id", "mask", "prediction"]
         if not all(
             col in filepaths_dataframe.columns for col in required_columns
@@ -109,28 +95,59 @@ class Evaluator:
             raise ValueError(
                 f"DataFrame must contain columns: {', '.join(required_columns)}"
             )
-        return filepaths_dataframe
+        return filepaths_dataframe.copy()
 
     @staticmethod
-    def _validate_evaluation_classes(
-        evaluation_classes: Dict[str, List[int]]
-    ) -> Dict[str, List[int]]:
-        """Validate the evaluation classes dictionary.
-
-        Each key should contain at least one class label.
+    def _validate_evaluation_config(
+        evaluation_config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Validate the evaluation configuration dictionary.
 
         Args:
-            evaluation_classes: Dictionary containing class names as keys and
-                lists of class labels as values for evaluation.
+            evaluation_config: Nested config mapping class names to labels and
+                metrics, or a legacy config with 'metrics', 'final_classes', and
+                'params'.
 
         Returns:
-            The validated evaluation classes dictionary.
+            The validated (and potentially converted) dictionary in the new
+                format.
 
         Raises:
-            ValueError: If any class name does not have a list with at least one
-                class label that is greater than 0.
+            ValueError: If structure is incorrect, or class labels are empty 
+                or non-positive.
         """
-        for class_name, class_labels in evaluation_classes.items():
+        # 1. Detect and convert legacy format
+        if (
+            "metrics" in evaluation_config
+            and isinstance(evaluation_config["metrics"], list)
+        ):
+            legacy_classes = evaluation_config.get("final_classes")
+            legacy_metrics = evaluation_config.get("metrics", [])
+            legacy_params = evaluation_config.get("params") or {}
+
+            if not legacy_classes:
+                raise ValueError(
+                    "Legacy config requires 'final_classes' to be defined and "
+                    "not None."
+                )
+
+            converted_config = {}
+            for class_name, labels in legacy_classes.items():
+                converted_config[class_name] = {
+                    "labels": labels,
+                    "metrics": {m: legacy_params for m in legacy_metrics}
+                }
+            evaluation_config = converted_config
+
+        # 2. Proceed with standard validation for the new format.
+        for class_name, class_info in evaluation_config.items():
+            if "labels" not in class_info or "metrics" not in class_info:
+                raise ValueError(
+                    f"Class '{class_name}' must contain both 'labels' and "
+                    "'metrics' keys."
+                )
+
+            class_labels = class_info["labels"]
             if not isinstance(class_labels, list) or not class_labels:
                 raise ValueError(
                     f"Class '{class_name}' must have a non-empty list of class "
@@ -140,29 +157,20 @@ class Evaluator:
                 raise ValueError(
                     f"Class labels for '{class_name}' must be greater than 0."
                 )
-        return evaluation_classes
+
+            if not isinstance(class_info["metrics"], dict):
+                raise ValueError(
+                    f"Metrics for '{class_name}' must be a dictionary."
+                )
+
+        return evaluation_config
 
     @staticmethod
     def _compute_diagonal_distance(
-        shape: Tuple[int, int, int],
-        spacing: Tuple[float, float, float],
+        shape: Tuple[int, ...],
+        spacing: Tuple[float, ...],
     ) -> float:
-        """Compute the Euclidean diagonal distance of an image in millimeters.
-
-        This diagonal distance represents the maximum possible distance
-        between any two points in the image, taking into account the
-        physical spacing of the voxels. This value is useful for representing
-        a worst-case scenario for metrics like Hausdorff distance. Otherwise,
-        we would have to compute the overall statistics with infinite values,
-        which is not practical.
-
-        Args:
-            shape: Image shape (x, y, z).
-            spacing: Physical spacing in mm.
-
-        Returns:
-            Euclidean diagonal length in mm.
-        """
+        """Compute the Euclidean diagonal distance of an image in mm."""
         dims_mm = np.multiply(shape, spacing)
         return np.linalg.norm(dims_mm).item()
 
@@ -173,20 +181,10 @@ class Evaluator:
         best_case_value: float,
         worst_case_value: float
     ) -> Union[float, None]:
-        """Return best/worst case values for empty masks.
-
-        Args:
-            num_mask_voxels: Number of foreground voxels in ground truth.
-            num_prediction_voxels: Number of foreground voxels in prediction.
-            best_case_value: Best possible metric value.
-            worst_case_value: Worst possible metric value.
-
-        Returns:
-            Metric value to use in case of edge cases, or None.
-        """
+        """Return best/worst case values for empty masks."""
         if num_mask_voxels == 0 and num_prediction_voxels == 0:
             return best_case_value
-        if bool(num_mask_voxels == 0) ^ bool(num_prediction_voxels == 0):
+        if (num_mask_voxels == 0) ^ (num_prediction_voxels == 0):
             return worst_case_value
         return None
 
@@ -194,66 +192,36 @@ class Evaluator:
         self,
         patient_id: str
     ) -> Dict[str, ants.core.ants_image.ANTsImage]:
-        """Load the ground truth and prediction paths for a given patient ID.
-
-        Args:
-            patient_id: Unique identifier for the patient, which corresponds to
-                the 'id' column in the filepaths DataFrame.
-
-        Returns:
-            A dictionary containing with keys 'mask' and 'prediction' and
-                the loaded ANTs images for the ground truth mask and
-                prediction, respectively.
-
-        Raises:
-            ValueError: If the patient ID does not exist in the DataFrame,
-                or if there are multiple entries for the same patient ID.
-            FileNotFoundError: If the ground truth mask or prediction file does
-                not exist at the specified paths.
-        """
-        # Search for the patient ID in the DataFrame.
-        row = self.filepaths_dataframe[
-            self.filepaths_dataframe["id"] == patient_id
-        ]
-
-        # Check if the patient ID exists in the DataFrame.
-        if row.empty:
-            raise ValueError(f"No data found for patient ID: {patient_id}")
-
-        # Check if there are multiple rows for the same patient ID.
-        if len(row) > 1:
+        """Load the ground truth and prediction paths for a given patient ID."""
+        try:
+            row = self.filepaths_dataframe.loc[patient_id]
+        except KeyError as e:
             raise ValueError(
-                f"Multiple entries found for patient ID: {patient_id}. "
-                "Please ensure unique IDs in the DataFrame."
-            )
+                f"No data found for patient ID: {patient_id}. "
+                f"See the following exception: {e}."
+            ) from e
 
-        # If row is not empty and unique, safely access the row as a dictionary.
-        row = row.iloc[0].to_dict()  # Convert to dictionary for easier access.
+        row_data = row.to_dict()
 
-        # Check if mask and prediction paths exist.
-        if not os.path.exists(row['mask']):
+        if not os.path.exists(row_data['mask']):
+            raise FileNotFoundError(f"Mask not found: {row_data['mask']}")
+        if not os.path.exists(row_data['prediction']):
             raise FileNotFoundError(
-                f"Ground truth mask does not exist: {row['mask']}"
-            )
-        if not os.path.exists(row['prediction']):
-            raise FileNotFoundError(
-                f"Prediction file does not exist: {row['prediction']}"
-            )
+                f"Prediction not found: {row_data['prediction']}")
 
-        # Load the image headers and compare them before loading the images.
-        mask_header = ants.image_header_info(row['mask'])
-        prediction_header = ants.image_header_info(row['prediction'])
-        if not analyzer_utils.compare_headers(mask_header, prediction_header):
+        # Validate headers before loading heavy image data.
+        mask_header = ants.image_header_info(row_data['mask'])
+        pred_header = ants.image_header_info(row_data['prediction'])
+
+        if not analyzer_utils.compare_headers(mask_header, pred_header):
             raise ValueError(
-                f"Image headers do not match for patient ID: {patient_id}. "
-                "Ensure that the ground truth mask and prediction have the "
-                "same dimensions and spacing."
+                f"Header mismatch for {patient_id}. Ensure mask and prediction "
+                "have identical geometry."
             )
 
-        # Load the ANTs images for mask and prediction.
         return {
-            "mask": ants.image_read(row['mask']),
-            "prediction": ants.image_read(row['prediction'])
+            "mask": ants.image_read(row_data['mask']),
+            "prediction": ants.image_read(row_data['prediction'])
         }
 
     def _compute_metrics(
@@ -261,81 +229,64 @@ class Evaluator:
         patient_id: str,
         mask: np.ndarray,
         prediction: np.ndarray,
-        spacing: Tuple[float, float, float],
+        spacing: Tuple[float, ...],
+        class_metrics_config: Dict[str, Dict[str, Any]],
+        diagonal_distance_override: Optional[float] = None
     ) -> Tuple[Dict[str, float], Optional[str]]:
-        """Compute metrics for a binary mask pair.
-
-        We construct binary masks from the ground truth and prediction based
-        on the class labels defined in the evaluation_classes dictionary.
-        This method computes the metrics for the given binary masks using
-        the specified spacing. It handles edge cases where either mask is empty
-        and returns the best or worst case values accordingly.
-
-        The metrics are computed using the metric functions defined in the
-        METRIC_REGISTRY. Each metric function is expected to take the truth
-        mask, predicted mask, spacing, and an optional metric-specific arguments
-        in the metric_kwargs dictionary.
-
-        Args:
-            patient_id: Unique identifier for the patient, used for logging.
-            mask: Ground truth binary mask.
-            prediction: Predicted binary mask.
-            spacing: Physical voxel spacing in mm.
-
-        Returns:
-            Tuple containing:
-                A dictionary mapping metric names to computed values.
-                A string with error messages, or None if no errors occurred.
-        """
+        """Compute metrics for a binary mask pair."""
         result = {}
         error_messages = []
         sum_of_mask = mask.sum()
         sum_of_prediction = prediction.sum()
-        diagonal_distance_mm = self._compute_diagonal_distance(
-            mask.shape, spacing
-        )
 
-        for metric_name in self.selected_metrics:
+        # Calculate worst-case distance (diagonal of the FOV).
+        if diagonal_distance_override is not None:
+            diagonal_distance_mm = diagonal_distance_override
+        else:
+            diagonal_distance_mm = self._compute_diagonal_distance(
+                mask.shape, spacing
+            )
+
+        for metric_name, metric_kwargs in class_metrics_config.items():
             metric = get_metric(metric_name)
-            best, worst = (
-                metric.best,
-                (
-                    diagonal_distance_mm if metric.worst == float("inf")
-                    else metric.worst
-                )
+
+            # Determine worst-case value for this metric (e.g. inf or diagonal).
+            worst = (
+                diagonal_distance_mm if metric.worst == float("inf")
+                else metric.worst
             )
 
+            # Check for edge cases (empty masks).
             metric_value = self._handle_edge_cases(
-                sum_of_mask, sum_of_prediction, best, worst
+                sum_of_mask, sum_of_prediction, metric.best, worst
             )
+
             if metric_value is not None:
                 result[metric_name] = metric_value
             else:
                 try:
-                    metric_value = metric(
-                        mask, prediction, spacing, **self.metric_kwargs
+                    # Unpack the specific kwargs mapped to this metric from the
+                    # config.
+                    val = metric(
+                        mask, prediction, spacing, **metric_kwargs
                     )
-                except ValueError as e:
-                    error_messages.append(
-                        f"Error computing metric '{metric_name}' for "
-                        f"patient {patient_id}: {e}"
-                    )
-                    result[metric_name] = worst
-                else:
-                    # Check for NaN or Inf values in the metric result before
-                    # assigning it to the result. If the value is NaN or Inf,
-                    # we assign the worst case value and log a warning message.
-                    if (
-                        metric_value and
-                        (np.isnan(metric_value) or np.isinf(metric_value))
-                    ):
+
+                    # Sanity check for NaNs or Infs.
+                    if np.isnan(val) or np.isinf(val):
                         error_messages.append(
-                            f"Metric '{metric_name}' returned NaN or Inf for "
-                            f"patient {patient_id}. Using worst case value."
+                            f"{metric_name} returned NaN/Inf for {patient_id}. "
+                            "Using worst-case value."
                         )
                         result[metric_name] = worst
                     else:
-                        result[metric_name] = metric_value
+                        result[metric_name] = val
+
+                except Exception as e:  # pylint: disable=broad-except
+                    error_messages.append(
+                        f"Error in {metric_name} for {patient_id}: {e}"
+                    )
+                    result[metric_name] = worst
+
         return result, "\n".join(error_messages) if error_messages else None
 
     def _evaluate_single_patient(
@@ -343,111 +294,154 @@ class Evaluator:
         patient_id: str,
         mask: np.ndarray,
         prediction: np.ndarray,
-        spacing: Tuple[float, float, float],
+        spacing: Tuple[float, ...],
     ) -> Tuple[Dict[str, Union[str, float]], Optional[str]]:
-        """Evaluate a single patient example and compute metrics for each class.
-
-        For each class defined in the evaluation_classes argument, this method
-        constructs binary masks for both ground truth and prediction. It then
-        computes the selected metrics using `_compute_metrics`, aggregating
-        the results and any errors into a final dictionary and error message.
-
-        Args:
-            patient_id: Unique identifier for the patient.
-            mask: Ground truth segmentation mask.
-            prediction: Predicted segmentation mask.
-            spacing: Physical voxel spacing (mm) of the input data.
-
-        Returns:
-            Tuple containing:
-                A dictionary of computed metrics for each class and metric
-                    name, keyed as "{class_name}_{metric}".
-                A combined string of error messages, or None if no errors
-                    occurred.
-        """
+        """Evaluate single patient and compute metrics for each class."""
         results: Dict[str, Union[str, float]] = {"id": patient_id}
-        error_messages = []
+        patient_errors = []
 
-        for class_name, class_labels in self.evaluation_classes.items():
-            # Group labels into binary masks for the current class.
-            binary_sub_mask = np.isin(mask, class_labels)
-            binary_sub_prediction = np.isin(prediction, class_labels)
+        full_diagonal_distance = self._compute_diagonal_distance(
+            mask.shape, spacing
+        )
 
-            class_metrics, class_error_messages = self._compute_metrics(
+        for class_name, class_info in self.evaluation_config.items():
+            class_labels = class_info["labels"]
+            class_metrics_config = class_info["metrics"]
+
+            if len(class_labels) == 1:
+                binary_sub_mask = mask == class_labels[0]
+                binary_sub_prediction = prediction == class_labels[0]
+            else:
+                binary_sub_mask = np.isin(mask, class_labels)
+                binary_sub_prediction = np.isin(prediction, class_labels)
+
+            binary_sub_mask, binary_sub_prediction = (
+                evaluation_utils.crop_to_union(
+                    binary_sub_mask, binary_sub_prediction
+                )
+            )
+
+            class_metrics, class_errs = self._compute_metrics(
                 patient_id=patient_id,
                 mask=binary_sub_mask,
                 prediction=binary_sub_prediction,
                 spacing=spacing,
+                class_metrics_config=class_metrics_config,
+                diagonal_distance_override=full_diagonal_distance,
             )
 
+            # Flatten metrics into result dict (i.e., "Tumor_dice").
             for metric_name, value in class_metrics.items():
                 results[f"{class_name}_{metric_name}"] = value
 
-            if class_error_messages:
-                error_messages.append(class_error_messages)
+            if class_errs:
+                patient_errors.append(f"[{class_name}] {class_errs}")
 
         return (
-            results, "\n".join(error_messages) if class_error_messages else None
+            results, "\n".join(patient_errors) if patient_errors else None
         )
 
-    def run(self) -> None:
+    def _evaluate_patient_pipeline(
+        self,
+        patient_id: str
+    ) -> Tuple[Optional[Dict], Optional[str]]:
+        """Complete evaluation for a single patient to be run in parallel."""
+        patient_data = None
+        result = None
+        patient_errors = None
+
+        try:
+            # 1. Load data.
+            patient_data = self._load_patient_data(patient_id)
+            spacing = patient_data["mask"].spacing
+
+            # 2. Convert to numpy.
+            mask_np = patient_data["mask"].numpy()
+            pred_np = patient_data["prediction"].numpy()
+
+            # 3. Compute metrics.
+            result, errors = self._evaluate_single_patient(
+                patient_id=patient_id,
+                mask=mask_np,
+                prediction=pred_np,
+                spacing=spacing,
+            )
+
+            if errors:
+                patient_errors = f"Patient {patient_id}: {errors}"
+
+        except Exception as e:  # pylint: disable=broad-except
+            patient_errors = f"CRITICAL FAILURE for {patient_id}: {str(e)}"
+
+        finally:
+            # Explicit memory cleanup is critical in multiprocessing.
+            if patient_data:
+                del patient_data
+            gc.collect()
+
+        return result, patient_errors
+
+    def run(self, max_workers: Optional[int] = None) -> None:
         """Run evaluation over all patients and write results to CSV.
 
-        This method iterates over all patient IDs in the input DataFrame,
-        loads the corresponding mask and prediction files, computes metrics,
-        logs any errors encountered during the evaluation process, and saves
-        the final results to a CSV file. The statistics for the results are
-        computed using the `utils.compute_results_stats` function, which
-        aggregates the metrics across all patients and classes and reports the
-        mean, standard deviation, and other relevant statistics.
+        Args:
+            max_workers: The maximum number of parallel processes to use. 
+                If None, defaults to the number of processors on the machine.
+                Reduce this if you encounter Out-Of-Memory (OOM) errors.
         """
-        error_messages = []
-        patient_ids = self.filepaths_dataframe["id"].tolist()
-        with progress_bar.get_progress_bar("Evaluating predictions") as pb:
-            for patient_id in pb.track(patient_ids):
-                try:
-                    # Load ground truth and prediction images.
-                    patient_data = self._load_patient_data(patient_id)
-                    mask = patient_data["mask"].numpy()
-                    prediction = patient_data["prediction"].numpy()
+        # Create a local console object for printing to avoid pickling errors.
+        console = rich.console.Console()
 
-                    # We already checked that the headers match, so we can
-                    # safely extract the spacing from the mask.
-                    spacing = patient_data["mask"].spacing
+        all_error_messages = []
+        results_list = []
 
-                    # Compute and collect metrics.
-                    result, patient_errors = self._evaluate_single_patient(
-                        patient_id=patient_id,
-                        mask=mask,
-                        prediction=prediction,
-                        spacing=spacing,
-                    )
+        # Iterate over index (which is now 'id').
+        patient_ids = self.filepaths_dataframe.index.tolist()
 
-                    # Append result to DataFrame.
-                    self.results_dataframe = pd.concat(
-                        [
-                            self.results_dataframe,
-                            pd.DataFrame(result, index=[0])
-                        ],
-                        ignore_index=True
-                    )
+        # Execute in parallel
+        with (
+            concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
+            as executor
+        ):
+            # Submit all patient tasks to the executor.
+            future_to_patient = {
+                executor.submit(self._evaluate_patient_pipeline, pid): pid
+                for pid in patient_ids
+            }
 
-                    # Collect any error messages for this patient.
+            with progress_bar.get_progress_bar("Evaluating predictions") as pb:
+                # Track them as they complete (order doesn't matter).
+                for future in pb.track(
+                    concurrent.futures.as_completed(future_to_patient),
+                    total=len(patient_ids)
+                ):
+                    result, patient_errors = future.result()
+
+                    if result is not None:
+                        results_list.append(result)
                     if patient_errors:
-                        error_messages.append(patient_errors)
+                        all_error_messages.append(patient_errors)
 
-                except (ValueError, FileNotFoundError) as e:
-                    error_messages.append(
-                        f"Failed to evaluate patient '{patient_id}': {e}."
-                    )
+        # Report errors.
+        if all_error_messages:
+            console.print("\n".join(all_error_messages))
 
-        # Print error messages to the console.
-        if error_messages:
-            full_error_text = "\n".join(error_messages)
-            self.console.print(rich.text.Text(full_error_text)) # type: ignore
+        # Create DataFrame.
+        if results_list:
+            self.results_dataframe = pd.DataFrame(
+                results_list,
+                columns=self.results_dataframe.columns
+            )
 
-        # Compute summary statistics and write results.
-        self.results_dataframe = evaluation_utils.compute_results_stats(
-            self.results_dataframe
-        )
+        # Compute summary stats (Mean, Std, etc.).
+        if not self.results_dataframe.empty:
+            self.results_dataframe = evaluation_utils.compute_results_stats(
+                self.results_dataframe
+            )
+
+        # Save to disk.
         self.results_dataframe.to_csv(self.output_csv_path, index=False)
+        console.print(
+            "[bold green]Evaluation complete. Results saved to "
+            f"{self.output_csv_path}[/bold green]"
+        )
