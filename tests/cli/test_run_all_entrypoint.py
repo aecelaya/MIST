@@ -22,6 +22,7 @@ def _patch_minimal_cli(monkeypatch) -> None:
         parser.add_argument("--data", type=str)
         parser.add_argument("--results", type=str)
         parser.add_argument("--nfolds", type=int)
+        parser.add_argument("--num-workers-analyze", type=int, default=1)
         parser.add_argument("--overwrite", action="store_true")
 
     def _add_preprocess_args(parser: argparse.ArgumentParser) -> None:
@@ -207,7 +208,7 @@ def test_run_all_entry_forwards_subsets_correctly(monkeypatch, tmp_path):
 
     # Build expected subsets from the parsed Namespace.
     ns = entry._parse_run_all_args(argv=argv)
-    analyzer_keys = ["data", "results", "nfolds", "overwrite"]
+    analyzer_keys = ["data", "results", "nfolds", "num_workers_analyze", "overwrite"]
     preprocess_keys = [
         "results", "numpy", "no_preprocess", "compute_dtms", "overwrite"
     ]
@@ -274,7 +275,7 @@ def test_run_all_entry_handles_false_flags_and_empty_lists(monkeypatch):
     ns.use_dtms = False
     ns.folds = []  # Empty -> should not appear.
 
-    analyze_keys = ["data", "results", "nfolds", "overwrite"]
+    analyze_keys = ["data", "results", "nfolds", "num_workers_analyze", "overwrite"]
     preprocess_keys = [
         "results", "numpy", "no_preprocess", "compute_dtms", "overwrite"
     ]
@@ -300,3 +301,21 @@ def test_run_all_entry_handles_false_flags_and_empty_lists(monkeypatch):
     assert calls["analyze"] == expected_an
     assert calls["preprocess"] == expected_pre
     assert calls["train"] == expected_tr
+
+
+def test_run_all_entry_forwards_num_workers_analyze(monkeypatch):
+    """--num-workers-analyze is forwarded to analyze_entry."""
+    _patch_minimal_cli(monkeypatch)
+
+    calls = {"analyze": None}
+    monkeypatch.setattr(
+        entry, "analyze_entry", lambda a: calls.__setitem__("analyze", list(a)),
+        raising=True,
+    )
+    monkeypatch.setattr(entry, "preprocess_entry", lambda _: None, raising=True)
+    monkeypatch.setattr(entry, "train_entry", lambda _: None, raising=True)
+
+    entry.run_all_entry(argv=["--data", "d.json", "--num-workers-analyze", "4"])
+
+    assert "--num-workers-analyze" in calls["analyze"]
+    assert calls["analyze"][calls["analyze"].index("--num-workers-analyze") + 1] == "4"

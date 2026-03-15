@@ -66,7 +66,9 @@ def run_all_entry(argv: Optional[List[str]] = None) -> None:
     """Entrypoint for running analyze, preprocess, and train sequentially."""
     ns = _parse_run_all_args(argv)
 
-    analyzer_keys = ["data", "results", "nfolds", "overwrite"]
+    analyzer_keys = [
+        "data", "results", "nfolds", "num_workers_analyze", "overwrite"
+    ]
     preprocess_keys = [
         "results", "numpy", "no_preprocess", "compute_dtms", "overwrite"
     ]
