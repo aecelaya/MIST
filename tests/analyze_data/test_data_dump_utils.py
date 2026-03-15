@@ -8,6 +8,7 @@ import pytest
 import ants
 
 from mist.analyze_data import data_dump_utils as ddu
+from mist.analyze_data.analyzer_constants import AnalyzeConstants as constants
 from mist.utils import progress_bar as pb_mod
 from tests.analyze_data.helpers import FakePB
 
@@ -56,12 +57,14 @@ def _make_config(resampled=(64, 64, 32)) -> Dict[str, Any]:
     return {"preprocessing": {"median_resampled_image_size": list(resampled)}}
 
 
-def _make_raw_stats(n=3, non_bg=(1, 2)) -> Dict[str, Any]:
+def _make_raw_stats(n=3, non_bg=(1, 2), effective_dims=None) -> Dict[str, Any]:
     """Build a controlled raw_stats dict for pure-function tests."""
+    original = np.tile([64.0, 64.0, 32.0], (n, 1))
     return {
         "spacings": np.tile([1.0, 1.0, 2.5], (n, 1)),
-        "original_dims": np.tile([64.0, 64.0, 32.0], (n, 1)),
-        "nonzero_fractions": np.full(n, 0.8),
+        "original_dims": original,
+        "effective_dims": effective_dims if effective_dims is not None else original,
+        "foreground_fractions": np.full(n, 0.8),
         "total_fg_voxels": [1000] * n,
         "channel_intensities": {
             "t1": list(np.linspace(-100, 400, 200))
@@ -77,6 +80,8 @@ def _make_raw_stats(n=3, non_bg=(1, 2)) -> Dict[str, Any]:
                     "planarity": 0.2,
                     "sphericity": 0.1,
                     "shape_class": "tubular",
+                    "compactness": 0.05,
+                    "skeleton_ratio": 0.12,
                 }
             ]
             for lbl in non_bg
@@ -181,9 +186,9 @@ class TestComputeShapeDescriptors:
         assert result["sphericity"] > 0.2
 
     def test_large_input_is_subsampled(self):
-        """Inputs > _MAX_SHAPE_COORDS are subsampled and still valid."""
+        """Inputs > MAX_SHAPE_COORDS are subsampled and still valid."""
         rng = np.random.default_rng(1)
-        n = ddu._MAX_SHAPE_COORDS + 500
+        n = constants.MAX_SHAPE_COORDS + 500
         coords = np.column_stack([
             np.linspace(0, 100, n),
             rng.normal(0, 0.1, n),
@@ -202,6 +207,90 @@ class TestComputeShapeDescriptors:
         """2-column coords produce a (2,2) covariance → returns None."""
         coords_2d = np.random.default_rng(0).normal(0, 1, (50, 2))
         assert ddu.compute_shape_descriptors(coords_2d) is None
+
+
+# ---------------------------------------------------------------------------
+# compute_compactness
+# ---------------------------------------------------------------------------
+
+class TestComputeCompactness:
+    """Tests for the isoperimetric-quotient compactness helper."""
+
+    def test_empty_mask_returns_none(self):
+        """All-zero mask → voxel_count == 0 → returns None."""
+        mask = np.zeros((5, 5, 5), dtype=bool)
+        assert ddu.compute_compactness(mask, np.array([1.0, 1.0, 1.0])) is None
+
+    def test_near_zero_surface_area_returns_none(self):
+        """Single voxel with negligibly small spacing → SA < 1e-8 → None."""
+        mask = np.zeros((3, 3, 3), dtype=bool)
+        mask[1, 1, 1] = True
+        # Tiny spacing makes each face contribution ~ (1e-4)^2 = 1e-8.
+        # With 6 faces × (1e-4)^2 = 6e-8 — still above threshold, so use
+        # extremely small spacing to force SA below 1e-8.
+        spacing = np.array([1e-5, 1e-5, 1e-5])
+        result = ddu.compute_compactness(mask, spacing)
+        assert result is None
+
+    def test_valid_sphere_like_mask_returns_float_in_range(self):
+        """A compact cube returns a float value in (0, 1]."""
+        mask = np.zeros((7, 7, 7), dtype=bool)
+        mask[1:6, 1:6, 1:6] = True  # 5^3 = 125 voxel cube
+        spacing = np.array([1.0, 1.0, 1.0])
+        result = ddu.compute_compactness(mask, spacing)
+        assert result is not None
+        assert 0.0 < result <= 1.0
+
+    def test_thin_mask_has_lower_compactness_than_cube(self):
+        """A thin tube has lower compactness (more SA per volume) than a cube."""
+        # Cube
+        cube = np.zeros((10, 10, 10), dtype=bool)
+        cube[2:8, 2:8, 2:8] = True
+        spacing = np.array([1.0, 1.0, 1.0])
+        iq_cube = ddu.compute_compactness(cube, spacing)
+
+        # Thin tube: 1×1×8
+        tube = np.zeros((10, 10, 10), dtype=bool)
+        tube[4, 4, 1:9] = True
+        iq_tube = ddu.compute_compactness(tube, spacing)
+
+        assert iq_cube is not None and iq_tube is not None
+        assert iq_tube < iq_cube
+
+
+# ---------------------------------------------------------------------------
+# compute_skeleton_ratio
+# ---------------------------------------------------------------------------
+
+class TestComputeSkeletonRatio:
+    """Tests for the skeleton-ratio helper."""
+
+    def test_empty_mask_returns_none(self):
+        """All-zero mask → voxel_count == 0 → returns None."""
+        mask = np.zeros((5, 5, 5), dtype=bool)
+        assert ddu.compute_skeleton_ratio(mask) is None
+
+    def test_oversized_mask_returns_none(self):
+        """Labels exceeding MAX_SKELETON_VOXELS → skipped → returns None."""
+        # 80^3 = 512 000 > MAX_SKELETON_VOXELS (500 000)
+        mask = np.ones((80, 80, 80), dtype=bool)
+        assert ddu.compute_skeleton_ratio(mask) is None
+
+    def test_thin_line_has_high_ratio(self):
+        """A 1-voxel-wide line → nearly all voxels on skeleton → high ratio."""
+        mask = np.zeros((3, 3, 20), dtype=bool)
+        mask[1, 1, :] = True  # 20 voxels in a straight line
+        result = ddu.compute_skeleton_ratio(mask)
+        assert result is not None
+        assert result > 0.5
+
+    def test_solid_cube_has_low_ratio(self):
+        """A filled cube has far more interior than skeleton voxels → low ratio."""
+        mask = np.zeros((15, 15, 15), dtype=bool)
+        mask[2:13, 2:13, 2:13] = True  # 11^3 = 1331 voxels
+        result = ddu.compute_skeleton_ratio(mask)
+        assert result is not None
+        assert result < 0.2
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +364,7 @@ class TestBuildImageStatistics:
         assert "original" in result["dimensions"]
         assert "resampled_median" in result["dimensions"]
         assert "per_channel" in result["intensity"]
-        assert "nonzero_fraction" in result["intensity"]
+        assert "foreground_fraction" in result["intensity"]
 
     def test_spacing_stats_per_axis(self):
         """Per-axis spacing statistics match the input spacings."""
@@ -363,6 +452,30 @@ class TestBuildLabelStatistics:
         assert vc["mean"] == pytest.approx(150.0)
         assert vc["min"] == 100
         assert vc["max"] == 200
+
+    def test_image_fraction_correct(self):
+        """Vol. fraction of image = mean label voxels / mean effective image voxels."""
+        raw = _make_raw_stats(n=2, non_bg=(1,))
+        # effective_dims defaults to original_dims: 64×64×32 = 131072 voxels.
+        raw["label_voxel_counts"] = {1: [1310, 1310]}  # ~1% of 131072
+        ds_info = _make_dataset_info(labels=(0, 1), final_classes={"fg": [1]})
+        result = ddu.build_label_statistics(raw, ds_info)
+        img_frac = result["per_label"]["1"]["mean_volume_fraction_of_image_pct"]
+        expected = 1310 / (64 * 64 * 32) * 100
+        assert img_frac == pytest.approx(expected, rel=0.01)
+
+    def test_image_fraction_uses_effective_dims_when_crop_active(self):
+        """When effective_dims differs from original_dims, uses effective_dims."""
+        # Simulate crop_to_foreground: bounding box is 32×32×20 per patient.
+        eff = np.tile([32.0, 32.0, 20.0], (2, 1))
+        raw = _make_raw_stats(n=2, non_bg=(1,), effective_dims=eff)
+        raw["label_voxel_counts"] = {1: [200, 200]}
+        ds_info = _make_dataset_info(labels=(0, 1), final_classes={"fg": [1]})
+        result = ddu.build_label_statistics(raw, ds_info)
+        img_frac = result["per_label"]["1"]["mean_volume_fraction_of_image_pct"]
+        # Denominator is 32*32*20 = 20480, not 64*64*32 = 131072.
+        expected = 200 / (32 * 32 * 20) * 100
+        assert img_frac == pytest.approx(expected, rel=0.01)
 
     def test_presence_rate_correct(self):
         """Presence rate is percentage of patients where label appears."""
@@ -480,7 +593,7 @@ def _base_image_stats() -> Dict[str, Any]:
     return {
         "spacing": {"anisotropy_ratio": 1.5, "is_anisotropic": False},
         "intensity": {
-            "nonzero_fraction": {"mean": 0.9},
+            "foreground_fraction": {"mean": 0.9},
             "per_channel": {
                 "t1": {
                     "p01": -100.0,
@@ -504,6 +617,7 @@ def _base_label_stats() -> Dict[str, Any]:
         "per_label": {
             "1": {
                 "mean_volume_fraction_of_foreground_pct": 30.0,
+                "mean_volume_fraction_of_image_pct": 5.0,
                 "presence_rate_pct": 100.0,
                 "size_category": "large",
                 "shape": {
@@ -511,6 +625,8 @@ def _base_label_stats() -> Dict[str, Any]:
                     "linearity": 0.1,
                     "planarity": 0.2,
                     "sphericity": 0.7,
+                    "compactness": None,
+                    "skeleton_ratio": None,
                 },
             }
         },
@@ -602,21 +718,30 @@ class TestGenerateObservations:
 
     # --- sparse images ---
 
-    def test_sparse_triggers_obs(self):
-        """mean_nz < 0.2 → sparse observation."""
+    def test_low_foreground_density_triggers_obs_multi_label(self):
+        """foreground_fraction < 0.2 with multiple labels → obs emitted."""
         img = _base_image_stats()
-        img["intensity"]["nonzero_fraction"]["mean"] = 0.1
+        img["intensity"]["foreground_fraction"]["mean"] = 0.1
+        lbl = _base_label_stats()
+        lbl["per_label"]["2"] = lbl["per_label"]["1"].copy()
+        obs = ddu.generate_observations(img, lbl, _base_summary())
+        assert any("foreground density" in o for o in obs)
+
+    def test_low_foreground_density_suppressed_for_single_label(self):
+        """foreground_fraction < 0.2 with one label → obs suppressed."""
+        img = _base_image_stats()
+        img["intensity"]["foreground_fraction"]["mean"] = 0.1
         obs = ddu.generate_observations(
             img, _base_label_stats(), _base_summary()
         )
-        assert any("Sparse" in o for o in obs)
+        assert not any("foreground density" in o for o in obs)
 
-    def test_not_sparse_no_obs(self):
-        """mean_nz >= 0.2 → no sparse observation."""
+    def test_high_foreground_density_no_obs(self):
+        """foreground_fraction >= 0.2 → no foreground density observation."""
         obs = ddu.generate_observations(
             _base_image_stats(), _base_label_stats(), _base_summary()
         )
-        assert not any("Sparse" in o for o in obs)
+        assert not any("foreground density" in o for o in obs)
 
     # --- CT modality ---
 
@@ -715,21 +840,49 @@ class TestGenerateObservations:
         )
         assert not any("absent in" in o for o in obs)
 
+    # --- image volume fraction ---
+
+    def test_very_sparse_image_fraction_triggers_obs(self):
+        """img_frac < VERY_SPARSE threshold → 'very sparse' obs."""
+        lbl = _base_label_stats()
+        lbl["per_label"]["1"]["mean_volume_fraction_of_image_pct"] = 0.1
+        obs = ddu.generate_observations(
+            _base_image_stats(), lbl, _base_summary()
+        )
+        assert any("very sparse" in o and "image volume" in o for o in obs)
+
+    def test_sparse_image_fraction_triggers_obs(self):
+        """VERY_SPARSE <= img_frac < SPARSE threshold → 'sparse' (not 'very sparse') obs."""
+        lbl = _base_label_stats()
+        lbl["per_label"]["1"]["mean_volume_fraction_of_image_pct"] = 2.0
+        obs = ddu.generate_observations(
+            _base_image_stats(), lbl, _base_summary()
+        )
+        matching = [o for o in obs if "image volume" in o]
+        assert len(matching) == 1
+        assert "sparse" in matching[0]
+        assert "very sparse" not in matching[0]
+
+    def test_large_image_fraction_no_obs(self):
+        """img_frac >= SPARSE threshold → no image volume obs."""
+        obs = ddu.generate_observations(
+            _base_image_stats(), _base_label_stats(), _base_summary()
+        )
+        assert not any("image volume" in o for o in obs)
+
     # --- shape-based observations ---
 
     @pytest.mark.parametrize("shape_class,expected_keyword", [
-        pytest.param("tubular", "clDice", id="tubular"),
-        pytest.param("planar", "boundary-aware", id="planar"),
-        pytest.param("blob", "Dice and cross-entropy", id="blob"),
+        pytest.param("planar", "planar/sheet-like", id="planar"),
+        pytest.param("blob", "compact/blob-like", id="blob"),
     ])
     def test_shape_class_triggers_correct_obs(
         self, shape_class, expected_keyword
     ):
-        """Each shape class emits its corresponding advice keyword."""
+        """Each shape class emits its corresponding descriptive keyword."""
         lbl = _base_label_stats()
         lbl["per_label"]["1"]["shape"]["shape_class"] = shape_class
         lin, plan, sph = {
-            "tubular": (0.6, 0.3, 0.1),
             "planar": (0.3, 0.6, 0.1),
             "blob": (0.1, 0.2, 0.7),
         }[shape_class]
@@ -742,6 +895,96 @@ class TestGenerateObservations:
             _base_image_stats(), lbl, _base_summary()
         )
         assert any(expected_keyword in o for o in obs)
+
+    def test_high_skeleton_ratio_triggers_branching_obs(self):
+        """skeleton_ratio above threshold → thin or branching structure obs."""
+        lbl = _base_label_stats()
+        lbl["per_label"]["1"]["shape"].update({
+            "shape_class": "tubular",
+            "linearity": 0.6,
+            "planarity": 0.3,
+            "sphericity": 0.1,
+            "skeleton_ratio": 0.12,
+            "compactness": 0.04,
+        })
+        obs = ddu.generate_observations(
+            _base_image_stats(), lbl, _base_summary()
+        )
+        assert any("thin or branching" in o for o in obs)
+
+    def test_tubular_without_skeleton_ratio_emits_elongated_obs(self):
+        """Tubular shape_class with no skeleton ratio → elongated observation."""
+        lbl = _base_label_stats()
+        lbl["per_label"]["1"]["shape"].update({
+            "shape_class": "tubular",
+            "linearity": 0.6,
+            "planarity": 0.3,
+            "sphericity": 0.1,
+            "skeleton_ratio": None,
+            "compactness": None,
+        })
+        obs = ddu.generate_observations(
+            _base_image_stats(), lbl, _base_summary()
+        )
+        assert any("elongated" in o for o in obs)
+
+    # --- resampling risk ---
+
+    def test_small_thin_label_triggers_resampling_warning(self):
+        """Small thin label → resampling risk observation."""
+        lbl = _base_label_stats()
+        lbl["per_label"]["1"]["size_category"] = "small"
+        lbl["per_label"]["1"]["shape"].update({
+            "shape_class": "tubular",
+            "skeleton_ratio": 0.12,
+        })
+        obs = ddu.generate_observations(
+            _base_image_stats(), lbl, _base_summary()
+        )
+        assert any("target spacing" in o for o in obs)
+
+    def test_tiny_planar_label_triggers_resampling_warning(self):
+        """Tiny planar label → resampling risk observation."""
+        lbl = _base_label_stats()
+        lbl["per_label"]["1"]["size_category"] = "tiny"
+        lbl["per_label"]["1"]["mean_volume_fraction_of_foreground_pct"] = 0.05
+        lbl["per_label"]["1"]["shape"].update({
+            "shape_class": "planar",
+            "linearity": 0.3,
+            "planarity": 0.6,
+            "sphericity": 0.1,
+            "skeleton_ratio": None,
+        })
+        obs = ddu.generate_observations(
+            _base_image_stats(), lbl, _base_summary()
+        )
+        assert any("target spacing" in o for o in obs)
+
+    def test_large_thin_label_no_resampling_warning(self):
+        """Large thin label → no resampling warning (only small/tiny trigger)."""
+        lbl = _base_label_stats()
+        lbl["per_label"]["1"]["size_category"] = "large"
+        lbl["per_label"]["1"]["shape"].update({
+            "shape_class": "tubular",
+            "skeleton_ratio": 0.12,
+        })
+        obs = ddu.generate_observations(
+            _base_image_stats(), lbl, _base_summary()
+        )
+        assert not any("target spacing" in o for o in obs)
+
+    def test_small_blob_label_no_resampling_warning(self):
+        """Small blob label → no resampling warning (only thin structures)."""
+        lbl = _base_label_stats()
+        lbl["per_label"]["1"]["size_category"] = "small"
+        lbl["per_label"]["1"]["shape"].update({
+            "shape_class": "blob",
+            "skeleton_ratio": 0.01,
+        })
+        obs = ddu.generate_observations(
+            _base_image_stats(), lbl, _base_summary()
+        )
+        assert not any("target spacing" in o for o in obs)
 
     def test_shape_unknown_is_skipped(self):
         """shape_class == 'unknown' → no shape observation emitted."""
@@ -808,12 +1051,13 @@ class TestCollectPerPatientStats:
         return ddu.collect_per_patient_stats(df, ds_info)
 
     def test_returns_all_required_keys(self):
-        """Output contains all eight required keys."""
+        """Output contains all required keys including effective_dims."""
         result = self._run()
         assert set(result.keys()) == {
             "spacings",
             "original_dims",
-            "nonzero_fractions",
+            "effective_dims",
+            "foreground_fractions",
             "total_fg_voxels",
             "channel_intensities",
             "label_voxel_counts",
@@ -834,12 +1078,12 @@ class TestCollectPerPatientStats:
         assert result["original_dims"].shape == (2, 3)
         np.testing.assert_array_equal(result["original_dims"][0], [10, 10, 10])
 
-    def test_nonzero_fraction_full_foreground(self):
+    def test_foreground_fraction_full_foreground(self):
         """Non-zero fraction is > 0 when foreground voxels are present."""
         result = self._run()
-        assert all(f > 0 for f in result["nonzero_fractions"])
+        assert all(f > 0 for f in result["foreground_fractions"])
 
-    def test_nonzero_fraction_empty_foreground(self, monkeypatch):
+    def test_foreground_fraction_empty_foreground(self, monkeypatch):
         """Non-zero fraction is 0 when the mask is all background."""
         empty_mask = _ants_image(np.zeros((10, 10, 10), dtype=np.float32))
         monkeypatch.setattr(
@@ -848,7 +1092,7 @@ class TestCollectPerPatientStats:
         df = _make_paths_df(["p0_mask.nii.gz"], {"t1": ["p0_t1.nii.gz"]})
         ds_info = _make_dataset_info(labels=(0, 1), channels=("t1",))
         result = ddu.collect_per_patient_stats(df, ds_info)
-        assert result["nonzero_fractions"][0] == 0.0
+        assert result["foreground_fractions"][0] == 0.0
 
     def test_label_voxel_counts_match_mask(self):
         """Label 1 has 27 voxels and label 2 has 8 voxels in the test mask."""
@@ -889,6 +1133,28 @@ class TestCollectPerPatientStats:
         """Channel intensities list is non-empty after processing."""
         result = self._run(n=2)
         assert len(result["channel_intensities"]["t1"]) > 0
+
+    def test_effective_dims_defaults_to_original_dims(self):
+        """When effective_dims is None, effective_dims key equals original_dims."""
+        result = self._run(n=2)
+        np.testing.assert_array_equal(
+            result["effective_dims"], result["original_dims"]
+        )
+
+    def test_effective_dims_override_used_for_foreground_fraction(self):
+        """Passing effective_dims uses them as the fg-fraction denominator."""
+        n = 2
+        # Each mask is 10×10×10 = 1000 voxels; supply a smaller effective dim.
+        eff = np.tile([5.0, 5.0, 5.0], (n, 1))  # 125 voxels per patient
+        df = _make_paths_df(
+            [f"p{i}_mask.nii.gz" for i in range(n)],
+            {"t1": [f"p{i}_t1.nii.gz" for i in range(n)]},
+        )
+        ds_info = _make_dataset_info(labels=(0, 1, 2), channels=("t1",))
+        result = ddu.collect_per_patient_stats(df, ds_info, effective_dims=eff)
+        # fg voxels = 27 + 8 = 35; fraction relative to 125, not 1000.
+        assert result["effective_dims"].shape == (n, 3)
+        assert all(f > 35 / 125 * 0.9 for f in result["foreground_fractions"])
 
     def test_missing_channel_value_skipped(self):
         """NaN channel path is silently skipped without error."""

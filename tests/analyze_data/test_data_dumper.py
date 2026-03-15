@@ -112,7 +112,7 @@ def _make_controlled_dump(results_dir: str) -> Dict[str, Any]:
                         "p75": 140.0, "p95": 190.0, "p99": 210.0,
                     },
                 },
-                "nonzero_fraction": {
+                "foreground_fraction": {
                     "mean": 0.85, "std": 0.05, "min": 0.8,
                     "p25": 0.83, "median": 0.85, "p75": 0.87,
                     "max": 0.9,
@@ -127,6 +127,7 @@ def _make_controlled_dump(results_dir: str) -> Dict[str, Any]:
                         "median": 500.0, "max": 550,
                     },
                     "mean_volume_fraction_of_foreground_pct": 50.0,
+                    "mean_volume_fraction_of_image_pct": 2.0,
                     "presence_rate_pct": 100.0,
                     "size_category": "large",
                     "shape": {
@@ -134,6 +135,8 @@ def _make_controlled_dump(results_dir: str) -> Dict[str, Any]:
                         "linearity": 0.65,
                         "planarity": 0.25,
                         "sphericity": 0.10,
+                        "compactness": 0.05,
+                        "skeleton_ratio": 0.08,
                     },
                 },
                 "2": {
@@ -142,6 +145,7 @@ def _make_controlled_dump(results_dir: str) -> Dict[str, Any]:
                         "median": 50.0, "max": 60,
                     },
                     "mean_volume_fraction_of_foreground_pct": 5.0,
+                    "mean_volume_fraction_of_image_pct": 0.2,
                     "presence_rate_pct": 80.0,
                     "size_category": "medium",
                     "shape": {
@@ -149,6 +153,8 @@ def _make_controlled_dump(results_dir: str) -> Dict[str, Any]:
                         "linearity": None,
                         "planarity": None,
                         "sphericity": None,
+                        "compactness": None,
+                        "skeleton_ratio": None,
                     },
                 },
             },
@@ -202,6 +208,16 @@ class TestDataDumperInit:
         assert d.dataset_info is info
         assert d.config is cfg
         assert d.results_dir == str(tmp_path)
+        assert d.cropped_dims is None
+
+    def test_cropped_dims_stored(self, tmp_path):
+        """cropped_dims argument is stored as an instance attribute."""
+        dims = np.ones((2, 3))
+        d = DataDumper(
+            _make_paths_df(), _make_dataset_info(), _make_config(),
+            str(tmp_path), cropped_dims=dims,
+        )
+        assert d.cropped_dims is dims
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +259,7 @@ class TestBuildDataDump:
         """Returned dict contains all five top-level keys."""
         # Stub heavy helpers to return minimal dicts.
         monkeypatch.setattr(
-            ddu, "collect_per_patient_stats", lambda *_: {}, raising=True
+            ddu, "collect_per_patient_stats", lambda *_, **__: {}, raising=True
         )
         monkeypatch.setattr(
             ddu,
@@ -277,7 +293,7 @@ class TestBuildDataDump:
     def test_mist_config_path_points_to_results_dir(self, dumper, monkeypatch):
         """mist_config_path is <results_dir>/config.json."""
         monkeypatch.setattr(
-            ddu, "collect_per_patient_stats", lambda *_: {}, raising=True
+            ddu, "collect_per_patient_stats", lambda *_, **__: {}, raising=True
         )
         monkeypatch.setattr(
             ddu, "build_image_statistics", lambda *_: {}, raising=True
@@ -301,7 +317,7 @@ class TestBuildDataDump:
         calls = []
         monkeypatch.setattr(
             ddu, "collect_per_patient_stats",
-            lambda df, info: (calls.append((df, info)) or {}),
+            lambda df, info, **kw: (calls.append((df, info)) or {}),
             raising=True,
         )
         monkeypatch.setattr(
