@@ -1,6 +1,6 @@
 """Shared test helpers for tests/analyze_data."""
 import types
-from typing import Any, Self
+from typing import Any
 
 import numpy as np
 import ants
@@ -9,7 +9,7 @@ import ants
 class FakePB:
     """Minimal progress-bar context manager that yields items unchanged."""
 
-    def __enter__(self) -> Self:
+    def __enter__(self) -> "FakePB":
         return self
 
     def __exit__(
