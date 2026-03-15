@@ -1,6 +1,5 @@
 """Tests for mist.analyze_data.data_dumper."""
 import json
-import os
 from pathlib import Path
 from typing import Dict, Any
 
@@ -176,7 +175,7 @@ def _make_controlled_dump(results_dir: str) -> Dict[str, Any]:
             "Observation one.",
             "Observation two.",
         ],
-        "mist_config_path": os.path.join(results_dir, "config.json"),
+        "mist_config_path": str(Path(results_dir) / "config.json"),
     }
 
 
@@ -207,7 +206,7 @@ class TestDataDumperInit:
         assert d.paths_df is df
         assert d.dataset_info is info
         assert d.config is cfg
-        assert d.results_dir == str(tmp_path)
+        assert d.results_dir == tmp_path
         assert d.cropped_dims is None
 
     def test_cropped_dims_stored(self, tmp_path):
@@ -306,8 +305,8 @@ class TestBuildDataDump:
         )
 
         result = dumper.build_data_dump()
-        assert result["mist_config_path"] == os.path.join(
-            dumper.results_dir, "config.json"
+        assert result["mist_config_path"] == str(
+            dumper.results_dir / "config.json"
         )
 
     def test_collect_called_with_paths_df_and_dataset_info(
@@ -452,14 +451,3 @@ class TestDataDumperRun:
         md = (tmp_path / "data_dump.md").read_text(encoding="utf-8")
         assert len(md) > 0
         assert "## Dataset Summary" in md
-
-    def test_console_print_called(self, dumper, _stub_build, monkeypatch):
-        """run() prints a confirmation message to the Rich console."""
-        printed = []
-        def _print(self, *a, **k):
-            """Capture printed messages."""
-            printed.append(" ".join(map(str, a)))
-
-        monkeypatch.setattr("rich.console.Console.print", _print)
-        dumper.run()
-        assert any("data_dump" in msg for msg in printed)

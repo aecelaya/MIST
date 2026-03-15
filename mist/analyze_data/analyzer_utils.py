@@ -1,7 +1,6 @@
 """Utilities for the analyzer module."""
 import logging
-import os
-import glob
+from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
@@ -122,13 +121,18 @@ def get_files_df(
         columns.append("mask")
     columns.extend(dataset_info["images"].keys())
 
-    # Base directory for the dataset.
-    base_dir = os.path.abspath(dataset_info[f"{train_or_test}-data"])
+    # Base directory for the dataset. Relative paths are resolved relative to
+    # the dataset JSON file so the JSON and its data can be co-located and
+    # moved together without adjusting the working directory.
+    base_dir = (
+        Path(path_to_dataset_json).resolve().parent
+        / dataset_info[f"{train_or_test}-data"]
+    ).resolve()
 
     # Get sorted list of patient IDs, skipping hidden files.
     # Sorting ensures deterministic ordering across platforms and runs.
     patient_ids = sorted(
-        f for f in os.listdir(base_dir) if not f.startswith(".")
+        p.name for p in base_dir.iterdir() if not p.name.startswith(".")
     )
 
     # Build one row dict per patient, then create the DataFrame in one call.
@@ -136,8 +140,8 @@ def get_files_df(
     for patient_id in patient_ids:
         row_data: dict[str, Any] = {"id": patient_id}
 
-        patient_dir = os.path.join(base_dir, patient_id)
-        patient_files = glob.glob(os.path.join(patient_dir, "*"))
+        patient_dir = base_dir / patient_id
+        patient_files = [str(p) for p in patient_dir.glob("*")]
 
         for image_type, identifying_strings in dataset_info["images"].items():
             matching_file = next(

@@ -270,9 +270,9 @@ class TestAnalyzerInit:
         assert a.paths_df.columns.tolist()[:4] == [
             "id", "fold", "mask", "ct"
         ]
-        assert a.paths_csv.endswith("train_paths.csv")
-        assert a.fg_bboxes_csv.endswith("fg_bboxes.csv")
-        assert a.config_json.endswith("config.json")
+        assert a.paths_csv.name == "train_paths.csv"
+        assert a.fg_bboxes_csv.name == "fg_bboxes.csv"
+        assert a.config_json.name == "config.json"
 
     def test_missing_required_field_raises(self, args, monkeypatch):
         """Missing required field in dataset.json raises KeyError."""
@@ -834,7 +834,7 @@ class TestAnalyzerRun:
         )
         a = Analyzer(args)
         a.run()
-        cfg = json.loads(Path(a.config_json).read_text(encoding="utf-8"))
+        cfg = json.loads(a.config_json.read_text(encoding="utf-8"))
         assert cfg["training"]["nfolds"] == args.nfolds
         assert cfg["training"]["folds"] == list(range(args.nfolds))
         df = pd.read_csv(a.paths_csv)

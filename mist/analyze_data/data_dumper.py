@@ -9,8 +9,8 @@ Two output files are saved to the results directory:
     - data_dump.json: Full structured statistics (machine-readable).
     - data_dump.md: Narrativized summary optimized for LLM consumption.
 """
-import os
-from typing import Dict, Any, Optional
+from pathlib import Path
+from typing import Dict, Any, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -36,13 +36,13 @@ class DataDumper:
         paths_df: pd.DataFrame,
         dataset_info: Dict[str, Any],
         config: Dict[str, Any],
-        results_dir: str,
+        results_dir: Union[str, Path],
         cropped_dims: Optional[np.ndarray] = None,
     ):
         self.paths_df = paths_df
         self.dataset_info = dataset_info
         self.config = config
-        self.results_dir = results_dir
+        self.results_dir = Path(results_dir).resolve()
         self.cropped_dims = cropped_dims
         self.console = rich.console.Console()
 
@@ -107,7 +107,7 @@ class DataDumper:
             "image_statistics": image_stats,
             "label_statistics": label_stats,
             "observations": observations,
-            "mist_config_path": os.path.join(self.results_dir, "config.json"),
+            "mist_config_path": str(self.results_dir / "config.json"),
         }
 
     def generate_markdown_summary(self, dump: Dict[str, Any]) -> str:
@@ -479,14 +479,9 @@ class DataDumper:
         """Build data dump and save data_dump.json and data_dump.md."""
         dump = self.build_data_dump()
 
-        data_dump_json = os.path.join(self.results_dir, "data_dump.json")
+        data_dump_json = self.results_dir / "data_dump.json"
         io_utils.write_json_file(data_dump_json, dump)
 
-        data_dump_md = os.path.join(self.results_dir, "data_dump.md")
+        data_dump_md = self.results_dir / "data_dump.md"
         with open(data_dump_md, "w", encoding="utf-8") as f:
             f.write(self.generate_markdown_summary(dump))
-
-        self.console.print(
-            f"[green]Data dump saved to {data_dump_json} "
-            f"and {data_dump_md}[/green]"
-        )

@@ -1,6 +1,6 @@
 """Constants for the Analyzer class."""
 import dataclasses
-import os
+from pathlib import Path
 
 import numpy as np
 
@@ -80,6 +80,4 @@ class AnalyzeConstants:
     SMALL_STRUCTURE_SIZE_CATEGORIES = frozenset({"tiny", "small"})
 
     # Create the base_config.json path.
-    BASE_CONFIG_JSON_PATH = os.path.join(
-        os.path.dirname(__file__), "base_config.json"
-    )
+    BASE_CONFIG_JSON_PATH = Path(__file__).parent / "base_config.json"

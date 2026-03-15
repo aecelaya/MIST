@@ -10,7 +10,6 @@ configuration file and the paths dataframe to the results directory, which will
 be used for preprocessing and training models.
 """
 import argparse
-import os
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -128,17 +127,18 @@ class Analyzer:
         )
 
         # Set file paths for saving files like the training paths,
-        # foreground bounding boxes, and configuration file.
-        self.results_dir = self.mist_arguments.results
-        self.paths_csv = os.path.join(self.results_dir, "train_paths.csv")
-        self.fg_bboxes_csv = os.path.join(self.results_dir, "fg_bboxes.csv")
-        self.config_json = os.path.join(self.results_dir, "config.json")
+        # foreground bounding boxes, and configuration file. Resolve so that
+        # relative paths passed via the CLI become absolute Path objects.
+        self.results_dir = Path(self.mist_arguments.results).resolve()
+        self.paths_csv = self.results_dir / "train_paths.csv"
+        self.fg_bboxes_csv = self.results_dir / "fg_bboxes.csv"
+        self.config_json = self.results_dir / "config.json"
 
         # If the config.json file already exists, we will overwrite it and
         # print a warning to the console. This is to ensure that the user
         # is aware that the configuration file is being overwritten and that
         # they should check the new configuration file for any changes.
-        if os.path.exists(self.config_json) and self.mist_arguments.overwrite:
+        if self.config_json.exists() and self.mist_arguments.overwrite:
             self.console.print(
                 "[yellow]Overwriting existing configuration at "
                 f"{self.config_json}[/yellow]"
@@ -205,15 +205,22 @@ class Analyzer:
                 )
 
             # Check that the train data folder exists and is not empty.
+            # Relative paths are resolved relative to the dataset JSON file so
+            # that the JSON and its data can be moved together without needing
+            # to adjust the working directory.
             if field == "train-data":
-                if not os.path.exists(self.dataset_info[field]):
+                train_data_path = (
+                    Path(self.mist_arguments.data).resolve().parent
+                    / self.dataset_info[field]
+                ).resolve()
+                if not train_data_path.exists():
                     raise FileNotFoundError(
                         "In the 'train-data' entry, the directory does "
                         "not exist. No such file or directory: "
                         f"{self.dataset_info[field]}"
                     )
 
-                if not os.listdir(self.dataset_info[field]):
+                if not any(train_data_path.iterdir()):
                     raise FileNotFoundError(
                         "In the 'train-data' entry, the directory is empty: "
                         f"{self.dataset_info[field]}"
@@ -960,9 +967,10 @@ class Analyzer:
         # Step 6: If the user specified test data in the dataset JSON file,
         # create a test paths dataframe and save it as CSV.
         if self.dataset_info.get("test-data"):
-            test_data_dir = Path(
-                self.dataset_info["test-data"]
-            ).expanduser().resolve()
+            test_data_dir = (
+                Path(self.mist_arguments.data).resolve().parent
+                / self.dataset_info["test-data"]
+            ).resolve()
             if not test_data_dir.exists():
                 raise FileNotFoundError(
                     f"Test data directory does not exist: {test_data_dir}"
@@ -973,6 +981,5 @@ class Analyzer:
                 self.mist_arguments.data, "test"
             )
 
-            # Stay consistent with earlier string-based paths.
-            test_paths_csv = os.path.join(self.results_dir, "test_paths.csv")
+            test_paths_csv = self.results_dir / "test_paths.csv"
             test_paths_df.to_csv(test_paths_csv, index=False)
