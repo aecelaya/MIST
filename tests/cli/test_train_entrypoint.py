@@ -414,11 +414,13 @@ def test_train_entry_happy_path_with_eval_and_test_infer(
 
     # Config for folds/eval params.
     config = {
-        "training": {"folds": [2]},
+        "training": {
+            "folds": [2],
+            "hardware": {"num_cpu_workers": 4},
+        },
         "evaluation": {
-            "final_classes": {"background": [0], "foreground": [1]},
-            "metrics": ["dice"],
-            "params": {"surf_dice_tol": 0.5},
+            "background": {"labels": [0], "metrics": {"dice": {}}},
+            "foreground": {"labels": [1], "metrics": {"dice": {}}},
         },
     }
     (results_dir / "config.json").write_text(json.dumps(config))
@@ -463,15 +465,9 @@ def test_train_entry_happy_path_with_eval_and_test_infer(
     # Evaluator stub that writes results.csv.
     runs = {"called": False}
 
-    def _mk_eval(
-        filepaths_dataframe,
-        evaluation_classes,
-        output_csv_path,
-        selected_metrics,
-        surf_dice_tol,
-    ):
+    def _mk_eval(filepaths_dataframe, evaluation_config, output_csv_path):
         class _E:
-            def run(self_nonlocal):
+            def run(self_nonlocal, max_workers=None):
                 runs["called"] = True
                 Path(output_csv_path).write_text("metric,value\n")
 

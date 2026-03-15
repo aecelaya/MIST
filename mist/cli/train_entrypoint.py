@@ -171,12 +171,12 @@ def train_entry(argv: Optional[List[str]] = None) -> None:
 
         evaluator = Evaluator(
             filepaths_dataframe=filepaths_df,
-            evaluation_classes=config["evaluation"]["final_classes"],
+            evaluation_config=config["evaluation"],
             output_csv_path=results_csv,
-            selected_metrics=config["evaluation"]["metrics"],
-            surf_dice_tol=config["evaluation"]["params"]["surf_dice_tol"],
         )
-        evaluator.run()
+        evaluator.run(
+            max_workers=config["training"]["hardware"]["num_cpu_workers"]
+        )
 
     # Optional test inference
     if has_test_paths:

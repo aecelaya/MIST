@@ -1,14 +1,14 @@
 """Command line tool to evaluate predictions from MIST output."""
+
+import argparse
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
-from typing import Optional, List, Dict
-import argparse
+from typing import List, Optional
+
 import pandas as pd
 
-# MIST imports.
 from mist.cli.args import ArgParser
 from mist.evaluation.evaluator import Evaluator
-from mist.metrics.metrics_registry import list_registered_metrics
 from mist.utils import io
 
 
@@ -31,28 +31,12 @@ def _parse_eval_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Where to write the evaluation results CSV."
     )
     parser.arg(
-        "--metrics", nargs="+", default=["dice", "haus95"],
-        choices=list_registered_metrics(),
-        help="Metrics to compute."
-    )
-    parser.arg(
-        "--surf-dice-tol", type=float, default=1.0,
-        help="Tolerance for surface dice."
+        "--num-workers", type=int, required=False,
+        help="Number of parallel workers to use for evaluation."
     )
 
     ns = parser.parse_args(argv)
     return ns
-
-
-def _read_eval_classes(config_path: Path) -> Dict:
-    """Read evaluation classes from a MIST config file."""
-    cfg = io.read_json_file(str(config_path))
-    try:
-        return cfg["evaluation"]["final_classes"]
-    except KeyError as e:
-        raise ValueError(
-            f"'evaluation.final_classes' not found in config: {config_path}"
-        ) from e
 
 
 def _ensure_output_dir(output_csv: Path) -> None:
@@ -70,17 +54,19 @@ def run_evaluation(ns: argparse.Namespace) -> None:
 
     # Load inputs.
     df = pd.read_csv(paths_csv)
-    eval_classes = _read_eval_classes(config_path)
+    full_config = io.read_json_file(config_path)
+
+    # Extract just the evaluation portion (fallback to the full config if it's
+    # already scoped).
+    eval_config = full_config.get("evaluation", full_config)
 
     # Initialize and run.
     evaluator = Evaluator(
         filepaths_dataframe=df,
-        evaluation_classes=eval_classes,
+        evaluation_config=eval_config,
         output_csv_path=str(output_csv),
-        selected_metrics=ns.metrics,
-        surf_dice_tol=ns.surf_dice_tol,
     )
-    evaluator.run()
+    evaluator.run(max_workers=ns.num_workers)
 
 
 def evaluation_entry(argv: Optional[List[str]] = None) -> None:
