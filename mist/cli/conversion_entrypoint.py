@@ -54,6 +54,13 @@ def parse_conversion_args(
     p.arg("--msd-source", type=str, help="Directory containing MSD formatted dataset.")
     p.arg("--train-csv", type=str, help="Path to CSV with ids, mask, and images.")
     p.arg("--test-csv", type=str, help="(Optional) Path to CSV with test ids and images.")
+    p.arg(
+        "--num-workers", type=int, required=False,
+        help=(
+            "Number of parallel threads for file copying. Defaults to the "
+            "ThreadPoolExecutor default. Reduce if you encounter I/O errors."
+        ),
+    )
 
     ns = p.parse_args(argv)
     _validate_format_args(p, ns)
@@ -70,14 +77,14 @@ def run_conversion(ns: argparse.Namespace) -> None:
 
     if ns.format == "msd":
         msd_source = Path(ns.msd_source).expanduser().resolve()
-        convert_fn(str(msd_source), str(out_dir))
+        convert_fn(msd_source, out_dir, max_workers=ns.num_workers)
     elif ns.format == "csv":
         train_csv = Path(ns.train_csv).expanduser().resolve()
         test_csv = (
             Path(ns.test_csv).expanduser().resolve() if ns.test_csv else None
         )
         convert_fn(
-            str(train_csv), str(out_dir), str(test_csv) if test_csv else None
+            train_csv, out_dir, test_csv, max_workers=ns.num_workers
         )
     else:
         # Should never happen due to argparse choices, but guard anyway.
