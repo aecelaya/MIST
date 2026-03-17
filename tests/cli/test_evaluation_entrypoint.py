@@ -50,6 +50,25 @@ class TestParseEvalArgs:
         ])
         assert ns.num_workers == 4
 
+    def test_validate_defaults_to_false(self, tmp_path):
+        """--validate is optional and defaults to False."""
+        ns = entry._parse_eval_args([
+            "--config", str(tmp_path / "c.json"),
+            "--paths-csv", str(tmp_path / "p.csv"),
+            "--output-csv", str(tmp_path / "o.csv"),
+        ])
+        assert ns.validate is False
+
+    def test_validate_flag_sets_true(self, tmp_path):
+        """Passing --validate sets validate to True."""
+        ns = entry._parse_eval_args([
+            "--config", str(tmp_path / "c.json"),
+            "--paths-csv", str(tmp_path / "p.csv"),
+            "--output-csv", str(tmp_path / "o.csv"),
+            "--validate",
+        ])
+        assert ns.validate is True
+
     def test_missing_required_arg_exits(self, tmp_path):
         """Omitting a required flag causes SystemExit."""
         with pytest.raises(SystemExit):
@@ -87,13 +106,14 @@ class TestEnsureOutputDir:
 class TestRunEvaluation:
     """Tests for evaluation_entrypoint.run_evaluation."""
 
-    def _make_ns(self, tmp_path, num_workers=None):
+    def _make_ns(self, tmp_path, num_workers=None, validate=False):
         """Return a minimal Namespace for run_evaluation."""
         return argparse.Namespace(
             config=str(tmp_path / "cfg.json"),
             paths_csv=str(tmp_path / "paths.csv"),
             output_csv=str(tmp_path / "out" / "metrics.csv"),
             num_workers=num_workers,
+            validate=validate,
         )
 
     def test_evaluator_constructed_with_correct_args(
@@ -128,7 +148,7 @@ class TestRunEvaluation:
 
         assert isinstance(captured["filepaths_dataframe"], pd.DataFrame)
         assert captured["evaluation_config"] == fake_config["evaluation"]
-        assert "metrics.csv" in captured["output_csv_path"]
+        assert "metrics.csv" in str(captured["output_csv_path"])
         assert captured["max_workers"] is None
 
     def test_num_workers_forwarded_to_run(self, monkeypatch, tmp_path):
@@ -158,6 +178,34 @@ class TestRunEvaluation:
         entry.run_evaluation(self._make_ns(tmp_path, num_workers=8))
 
         assert captured["max_workers"] == 8
+
+    def test_validate_forwarded_to_evaluator(self, monkeypatch, tmp_path):
+        """The validate flag from the Namespace is forwarded to Evaluator."""
+        monkeypatch.setattr(
+            entry.io, "read_json_file",
+            lambda _: {"tumor": {"labels": [1], "metrics": {"dice": {}}}},
+            raising=True,
+        )
+        monkeypatch.setattr(
+            entry.pd, "read_csv",
+            lambda _: pd.DataFrame([{"id": "p1"}]),
+            raising=True,
+        )
+
+        captured = {}
+
+        class _EvalStub:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            def run(self, max_workers=None):
+                pass
+
+        monkeypatch.setattr(entry, "Evaluator", _EvalStub, raising=True)
+
+        entry.run_evaluation(self._make_ns(tmp_path, validate=True))
+
+        assert captured["validate_masks"] is True
 
     def test_config_without_evaluation_key_used_directly(
         self, monkeypatch, tmp_path

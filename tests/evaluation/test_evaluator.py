@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from mist.analyze_data import analyzer_utils
+from mist.evaluation import evaluation_utils
 from mist.evaluation.evaluator import Evaluator
 from mist.utils import progress_bar as pb_mod
 from tests.evaluation.helpers import (
@@ -314,6 +315,90 @@ class TestLoadPatientData:
         )
         with pytest.raises(ValueError, match="Header mismatch"):
             evaluator._load_patient_data("p0")
+
+    def test_validate_masks_false_skips_validation(
+        self, filepaths_df, tmp_path, monkeypatch
+    ):
+        """When validate_masks=False, validate_mask is never called."""
+        mock_img = make_ants_image()
+        monkeypatch.setattr(
+            ants, "image_header_info",
+            lambda _: {"dimensions": (10, 10, 10), "spacing": (1.0, 1.0, 1.0),
+                       "origin": (0.0, 0.0, 0.0),
+                       "direction": np.eye(3).flatten().tolist()},
+        )
+        monkeypatch.setattr(ants, "image_read", lambda _: mock_img)
+        monkeypatch.setattr(analyzer_utils, "compare_headers", lambda *_: True)
+
+        called = {"count": 0}
+        monkeypatch.setattr(
+            evaluation_utils,
+            "validate_mask",
+            lambda *_a, **_k: called.__setitem__("count", called["count"] + 1),
+        )
+
+        ev = Evaluator(
+            filepaths_df,
+            make_eval_config(),
+            tmp_path / "out.csv",
+            validate_masks=False,
+        )
+        ev._load_patient_data("p0")
+        assert called["count"] == 0
+
+    def test_validate_masks_true_calls_validate_mask(
+        self, filepaths_df, tmp_path, monkeypatch
+    ):
+        """When validate_masks=True, validate_mask is called for both files."""
+        mock_img = make_ants_image()
+        monkeypatch.setattr(
+            ants, "image_header_info",
+            lambda _: {"dimensions": (10, 10, 10), "spacing": (1.0, 1.0, 1.0),
+                       "origin": (0.0, 0.0, 0.0),
+                       "direction": np.eye(3).flatten().tolist()},
+        )
+        monkeypatch.setattr(ants, "image_read", lambda _: mock_img)
+        monkeypatch.setattr(analyzer_utils, "compare_headers", lambda *_: True)
+        monkeypatch.setattr(
+            evaluation_utils, "validate_mask", lambda *_a, **_k: None
+        )
+
+        called = {"count": 0}
+        original = evaluation_utils.validate_mask
+
+        def _counting_validate(*a, **k):
+            called["count"] += 1
+            return original(*a, **k)
+
+        monkeypatch.setattr(evaluation_utils, "validate_mask", _counting_validate)
+
+        ev = Evaluator(
+            filepaths_df,
+            make_eval_config(),
+            tmp_path / "out.csv",
+            validate_masks=True,
+        )
+        ev._load_patient_data("p0")
+        assert called["count"] == 2  # mask + prediction
+
+    def test_validate_masks_true_raises_on_invalid_mask(
+        self, filepaths_df, tmp_path, monkeypatch
+    ):
+        """validate_masks=True raises ValueError when validation fails."""
+        monkeypatch.setattr(
+            evaluation_utils,
+            "validate_mask",
+            lambda path, *_a, **_k: "bad dtype",
+        )
+
+        ev = Evaluator(
+            filepaths_df,
+            make_eval_config(),
+            tmp_path / "out.csv",
+            validate_masks=True,
+        )
+        with pytest.raises(ValueError, match="Mask validation failed"):
+            ev._load_patient_data("p0")
 
 
 # ---------------------------------------------------------------------------

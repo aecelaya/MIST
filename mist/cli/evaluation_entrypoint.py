@@ -20,19 +20,40 @@ def _parse_eval_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     parser.arg(
         "--config", type=str, required=True,
-        help="Path to config.json from a MIST run (must contain evaluation.final_classes)."
+        help=(
+            "Path to an evaluation config JSON. Accepts either a full MIST "
+            "config.json (the 'evaluation' key is extracted automatically) or "
+            "a standalone evaluation config with the nested per-class structure: "
+            "{\"class\": {\"labels\": [...], \"metrics\": {\"metric\": {params}}}}."
+        ),
     )
     parser.arg(
         "--paths-csv", type=str, required=True,
-        help="CSV with paths to predictions/masks."
+        help=(
+            "CSV with columns 'id', 'mask', and 'prediction' containing the "
+            "patient ID and absolute paths to the ground truth mask and "
+            "predicted segmentation for each case."
+        ),
     )
     parser.arg(
         "--output-csv", type=str, required=True,
-        help="Where to write the evaluation results CSV."
+        help="Path where the evaluation results CSV will be written."
     )
     parser.arg(
         "--num-workers", type=int, required=False,
-        help="Number of parallel workers to use for evaluation."
+        help=(
+            "Number of parallel workers for evaluation. Defaults to the number "
+            "of CPU cores. Reduce if you encounter out-of-memory errors."
+        ),
+    )
+    parser.arg(
+        "--validate", action="store_true", default=False,
+        help=(
+            "Validate each mask pair before evaluation. Checks that images are "
+            "3D, have an integer or boolean dtype, and contain only labels "
+            "defined in the config. Adds I/O overhead; recommended for external "
+            "data you do not fully trust."
+        ),
     )
 
     ns = parser.parse_args(argv)
@@ -64,7 +85,8 @@ def run_evaluation(ns: argparse.Namespace) -> None:
     evaluator = Evaluator(
         filepaths_dataframe=df,
         evaluation_config=eval_config,
-        output_csv_path=str(output_csv),
+        output_csv_path=output_csv,
+        validate_masks=ns.validate,
     )
     evaluator.run(max_workers=ns.num_workers)
 

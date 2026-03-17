@@ -2,7 +2,6 @@
 
 import concurrent.futures
 import gc
-import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
@@ -71,7 +70,7 @@ class Evaluator:
         self.evaluation_config = self._validate_evaluation_config(
             evaluation_config
         )
-        self.output_csv_path = output_csv_path
+        self.output_csv_path = Path(output_csv_path)
 
         # 4. Initialize the results DataFrame structure using the validated
         # config.
@@ -203,11 +202,31 @@ class Evaluator:
 
         row_data = row.to_dict()
 
-        if not os.path.exists(row_data['mask']):
+        if not Path(row_data['mask']).exists():
             raise FileNotFoundError(f"Mask not found: {row_data['mask']}")
-        if not os.path.exists(row_data['prediction']):
+        if not Path(row_data['prediction']).exists():
             raise FileNotFoundError(
                 f"Prediction not found: {row_data['prediction']}")
+
+        # Optional validation: checks 3D shape, integer dtype, and valid labels.
+        # Adds I/O overhead (extra image read) but catches bad data early.
+        if self.validate_masks:
+            mask_error = evaluation_utils.validate_mask(
+                row_data['mask'],
+                self.evaluation_config,
+                mask_type="ground truth mask",
+            )
+            pred_error = evaluation_utils.validate_mask(
+                row_data['prediction'],
+                self.evaluation_config,
+                mask_type="prediction",
+            )
+            errors = [e for e in (mask_error, pred_error) if e]
+            if errors:
+                raise ValueError(
+                    f"Mask validation failed for {patient_id}: "
+                    + " | ".join(errors)
+                )
 
         # Validate headers before loading heavy image data.
         mask_header = ants.image_header_info(row_data['mask'])
