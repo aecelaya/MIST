@@ -137,6 +137,27 @@ def test_copy_msd_data_skips_missing_files(tmp_path):
     assert not (dest / "raw" / "train" / "missing").exists()
 
 
+def test_copy_msd_data_prints_error_summary_on_failures(tmp_path, monkeypatch):
+    """copy_msd_data prints a 'N of M patients had errors' summary."""
+    source = tmp_path / "src"
+    dest = tmp_path / "dst"
+    (source / "imagesTr").mkdir(parents=True)
+    (source / "labelsTr").mkdir()
+    msd_json = {
+        "training": [
+            {"image": "imagesTr/p1.nii.gz", "label": "labelsTr/p1.nii.gz"},
+            {"image": "imagesTr/p2.nii.gz", "label": "labelsTr/p2.nii.gz"},
+        ]
+    }
+    printed = []
+    monkeypatch.setattr(
+        "mist.conversion_tools.msd.console.print",
+        lambda *a, **k: printed.append(str(a[0])),
+    )
+    copy_msd_data(source, dest, msd_json, {0: "ct"}, "training", "Test")
+    assert any("2 of 2" in msg for msg in printed)
+
+
 def test_copy_msd_data_skips_missing_mask(tmp_path):
     """Tests that copy_msd_data skips when mask is missing but image exists."""
     source = tmp_path / "src"

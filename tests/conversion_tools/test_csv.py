@@ -7,7 +7,11 @@ import pytest
 # MIST imports.
 from mist.utils import io, progress_bar
 from mist.conversion_tools import conversion_utils
-from mist.conversion_tools.csv import convert_csv, copy_csv_data
+from mist.conversion_tools.csv import (
+    _validate_csv_columns,
+    convert_csv,
+    copy_csv_data,
+)
 from tests.conversion_tools.helpers import DummyProgressBar
 
 
@@ -115,6 +119,80 @@ def test_convert_csv_raises_if_test_missing(tmp_path, temp_csv_data):
         convert_csv(train_csv, tmp_path, tmp_path / "no_test.csv")
 
 
+# ---------------------------------------------------------------------------
+# _validate_csv_columns
+# ---------------------------------------------------------------------------
+
+class TestValidateCsvColumns:
+    """Tests for csv._validate_csv_columns."""
+
+    def test_valid_training_csv_passes(self):
+        """A well-formed training CSV does not raise."""
+        df = pd.DataFrame({"id": [], "mask": [], "ct": []})
+        _validate_csv_columns(df, "training")  # no exception
+
+    def test_valid_test_csv_passes(self):
+        """A well-formed test CSV does not raise."""
+        df = pd.DataFrame({"id": [], "ct": []})
+        _validate_csv_columns(df, "test")  # no exception
+
+    @pytest.mark.parametrize(
+        "columns, match",
+        [
+            pytest.param(
+                ["id", "mask"],
+                "at least 3 columns",
+                id="training_too_few_columns",
+            ),
+            pytest.param(
+                ["patient", "mask", "ct"],
+                "first column must be 'id'",
+                id="training_wrong_first_column",
+            ),
+            pytest.param(
+                ["id", "ct", "mask"],
+                "second column must be 'mask'",
+                id="training_wrong_second_column",
+            ),
+        ],
+    )
+    def test_invalid_training_csv_raises(self, columns, match):
+        """Invalid training CSV structures raise ValueError."""
+        df = pd.DataFrame(columns=columns)
+        with pytest.raises(ValueError, match=match):
+            _validate_csv_columns(df, "training")
+
+    @pytest.mark.parametrize(
+        "columns, match",
+        [
+            pytest.param(
+                ["id"],
+                "at least 2 columns",
+                id="test_too_few_columns",
+            ),
+            pytest.param(
+                ["patient", "ct"],
+                "first column must be 'id'",
+                id="test_wrong_first_column",
+            ),
+        ],
+    )
+    def test_invalid_test_csv_raises(self, columns, match):
+        """Invalid test CSV structures raise ValueError."""
+        df = pd.DataFrame(columns=columns)
+        with pytest.raises(ValueError, match=match):
+            _validate_csv_columns(df, "test")
+
+    def test_convert_csv_raises_on_bad_column_order(self, tmp_path):
+        """convert_csv raises ValueError if training CSV columns are wrong."""
+        bad_csv = tmp_path / "bad.csv"
+        pd.DataFrame({
+            "id": [0], "ct": ["/img.nii.gz"], "mask": ["/mask.nii.gz"]
+        }).to_csv(bad_csv, index=False)
+        with pytest.raises(ValueError, match="second column must be 'mask'"):
+            convert_csv(bad_csv, tmp_path / "out")
+
+
 def test_copy_csv_data_skips_missing_files(tmp_path):
     """Tests copy_csv_data skips patients where files are missing."""
     df = pd.DataFrame({
@@ -128,6 +206,28 @@ def test_copy_csv_data_skips_missing_files(tmp_path):
     patient_dir = out_dir / "0"
     assert not (patient_dir / "ct.nii.gz").exists()
     assert not (patient_dir / "mask.nii.gz").exists()
+
+
+def test_copy_csv_data_prints_error_summary_on_failures(tmp_path, monkeypatch):
+    """copy_csv_data prints a 'N of M patients had errors' summary."""
+    df = pd.DataFrame({
+        "id": [0, 1],
+        "mask": [
+            str(tmp_path / "missing_mask_0.nii.gz"),
+            str(tmp_path / "missing_mask_1.nii.gz"),
+        ],
+        "ct": [
+            str(tmp_path / "missing_img_0.nii.gz"),
+            str(tmp_path / "missing_img_1.nii.gz"),
+        ],
+    })
+    printed = []
+    monkeypatch.setattr(
+        "mist.conversion_tools.csv.console.print",
+        lambda *a, **k: printed.append(str(a[0])),
+    )
+    copy_csv_data(df, tmp_path / "out", "training", "Test")
+    assert any("2 of 2" in msg for msg in printed)
 
 
 def test_copy_csv_data_test_mode_skips_mask(tmp_path):

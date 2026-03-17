@@ -2,7 +2,6 @@
 import concurrent.futures
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
-import pprint
 import rich
 import numpy as np
 import SimpleITK as sitk
@@ -141,6 +140,10 @@ def copy_msd_data(
 
     if error_messages:
         console.print(rich.text.Text("\n".join(error_messages)))  # type: ignore
+        console.print(rich.text.Text(  # type: ignore
+            f"{len(error_messages)} of {len(patients)} patient(s) had errors "
+            "and were skipped."
+        ))
 
 
 def convert_msd(
@@ -238,10 +241,9 @@ def convert_msd(
     console.print(rich.text.Text(  # type: ignore
         f"MIST dataset parameters written to {output_json_path}\n"
     ))
-    pprint.pprint(dataset_json, sort_dicts=False)
-    console.print(rich.text.Text("\n"))  # type: ignore
+    console.print(dataset_json)
     console.print(rich.text.Text(  # type: ignore
-        "Please add task, modality, labels, and final classes to parameters.\n"
+        "\nPlease add task, modality, labels, and final classes to parameters.\n"
     ))
 
     io.write_json_file(output_json_path, dataset_json)

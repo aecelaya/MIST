@@ -2,7 +2,6 @@
 import concurrent.futures
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
-import pprint
 import rich
 import pandas as pd
 
@@ -12,6 +11,48 @@ from mist.conversion_tools import conversion_utils
 
 # Set up console for rich text.
 console = rich.console.Console()
+
+
+def _validate_csv_columns(df: pd.DataFrame, mode: str) -> None:
+    """Validate that a CSV DataFrame has the expected column structure.
+
+    Training CSVs must start with 'id', 'mask', then at least one image
+    column. Test CSVs must start with 'id', then at least one image column.
+
+    Args:
+        df: DataFrame read from the CSV file.
+        mode: "training" or "test".
+
+    Raises:
+        ValueError: If the column structure does not match the expected format.
+    """
+    columns = list(df.columns)
+
+    if mode == "training":
+        if len(columns) < 3:
+            raise ValueError(
+                "Training CSV must have at least 3 columns: id, mask, "
+                f"image1. Got: {columns}."
+            )
+        if columns[0] != "id":
+            raise ValueError(
+                f"Training CSV first column must be 'id', got '{columns[0]}'."
+            )
+        if columns[1] != "mask":
+            raise ValueError(
+                f"Training CSV second column must be 'mask', got '{columns[1]}'. "
+                "Expected format: id, mask, image1 [, image2, ...]."
+            )
+    else:
+        if len(columns) < 2:
+            raise ValueError(
+                "Test CSV must have at least 2 columns: id, image1. "
+                f"Got: {columns}."
+            )
+        if columns[0] != "id":
+            raise ValueError(
+                f"Test CSV first column must be 'id', got '{columns[0]}'."
+            )
 
 
 def _copy_single_patient_csv(
@@ -98,6 +139,10 @@ def copy_csv_data(
 
     if error_messages:
         console.print(rich.text.Text("\n".join(error_messages)))  # type: ignore
+        console.print(rich.text.Text(  # type: ignore
+            f"{len(error_messages)} of {len(patients)} patient(s) had errors "
+            "and were skipped."
+        ))
 
 
 def convert_csv(
@@ -119,6 +164,7 @@ def convert_csv(
 
     Raises:
         FileNotFoundError: If train_csv or test_csv does not exist.
+        ValueError: If train_csv or test_csv have incorrect column structure.
     """
     dest = Path(dest).resolve()
     train_csv = Path(train_csv).resolve()
@@ -131,15 +177,23 @@ def convert_csv(
         if not test_csv.exists():
             raise FileNotFoundError(f"{test_csv} does not exist!")
 
-    # Create destination directories for train (and test if provided).
+    # Read and validate CSVs before creating any directories.
+    train_df = pd.read_csv(train_csv)
+    _validate_csv_columns(train_df, "training")
+
+    test_df = None
+    if test_csv is not None:
+        test_df = pd.read_csv(test_csv)
+        _validate_csv_columns(test_df, "test")
+
+    # Create destination directories.
     train_dest = dest / "raw" / "train"
     train_dest.mkdir(parents=True, exist_ok=True)
-    if test_csv is not None:
+    if test_df is not None:
         test_dest = dest / "raw" / "test"
         test_dest.mkdir(parents=True, exist_ok=True)
 
     # Convert training data to MIST-compatible format.
-    train_df = pd.read_csv(train_csv)
     copy_csv_data(
         train_df,
         train_dest,
@@ -149,8 +203,7 @@ def convert_csv(
     )
 
     # Convert testing data to MIST-compatible format.
-    if test_csv is not None:
-        test_df = pd.read_csv(test_csv)
+    if test_df is not None:
         copy_csv_data(
             test_df,
             test_dest,
@@ -165,7 +218,7 @@ def convert_csv(
         "task": None,
         "modality": None,
         "train-data": "raw/train",
-        "test-data": "raw/test" if test_csv is not None else None,
+        "test-data": "raw/test" if test_df is not None else None,
         "mask": ["mask.nii.gz"],
         "images": {
             modality: [f"{modality}.nii.gz"]
@@ -175,7 +228,7 @@ def convert_csv(
         "final_classes": None,
     }
 
-    if test_csv is None:
+    if test_df is None:
         dataset_json.pop("test-data")
 
     # Write MIST dataset description to json file.
@@ -183,10 +236,9 @@ def convert_csv(
     console.print(rich.text.Text(  # type: ignore
         f"MIST dataset parameters written to {dataset_json_path}\n"
     ))
-    pprint.pprint(dataset_json, sort_dicts=False)
-    console.print(rich.text.Text("\n"))  # type: ignore
+    console.print(dataset_json)
     console.print(rich.text.Text(  # type: ignore
-        "Please add task, modality, labels, and final classes to parameters.\n"
+        "\nPlease add task, modality, labels, and final classes to parameters.\n"
     ))
 
     io.write_json_file(dataset_json_path, dataset_json)
