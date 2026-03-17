@@ -61,7 +61,8 @@ mist_train = "mist.cli.train_entrypoint:train_entry"
 mist_predict = "mist.cli.inference_entrypoint:inference_entry"
 mist_evaluate = "mist.cli.evaluation_entrypoint:evaluation_entry"
 mist_postprocess = "mist.cli.postprocess_entrypoint:postprocess_entry"
-mist_convert_dataset = "mist.cli.conversion_entrypoint:conversion_entry"
+mist_convert_msd = "mist.cli.convert_msd_entrypoint:convert_msd_entry"
+mist_convert_csv = "mist.cli.convert_csv_entrypoint:convert_csv_entry"
 
 [tool.codespell]
 skip = ".git"
