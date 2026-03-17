@@ -210,7 +210,8 @@ def test_run_all_entry_forwards_subsets_correctly(monkeypatch, tmp_path):
     ns = entry._parse_run_all_args(argv=argv)
     analyzer_keys = ["data", "results", "nfolds", "num_workers_analyze", "overwrite"]
     preprocess_keys = [
-        "results", "numpy", "no_preprocess", "compute_dtms", "overwrite"
+        "results", "numpy", "num_workers_preprocess",
+        "no_preprocess", "compute_dtms", "overwrite"
     ]
     train_keys = [
         "results", "numpy",
@@ -277,7 +278,8 @@ def test_run_all_entry_handles_false_flags_and_empty_lists(monkeypatch):
 
     analyze_keys = ["data", "results", "nfolds", "num_workers_analyze", "overwrite"]
     preprocess_keys = [
-        "results", "numpy", "no_preprocess", "compute_dtms", "overwrite"
+        "results", "numpy", "num_workers_preprocess",
+        "no_preprocess", "compute_dtms", "overwrite"
     ]
     train_keys = [
         "results", "numpy",

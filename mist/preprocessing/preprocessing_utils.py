@@ -73,7 +73,6 @@ def get_fg_mask_bbox(
 
     Args:
         img_ants: ANTs image object.
-        patient_id: Optional patient ID for identification.
 
     Returns:
         fg_bbox: Dictionary containing the bounding box coordinates and original
@@ -97,7 +96,7 @@ def get_fg_mask_bbox(
     og_size = img_ants.shape
 
     # Create the bounding box based on non-zero values.
-    if nz[0].size > 0 or nz[1].size > 0 or nz[2].size > 0:
+    if nz[0].size > 0:
         fg_bbox = {
             "x_start": int(np.min(nz[0])),
             "x_end": int(np.max(nz[0])),
@@ -222,7 +221,7 @@ def make_onehot(
     masks_sitk = []
     for current_label in labels_list:
         sitk_label_i = sitk.GetImageFromArray(
-            (mask_npy == current_label).T.astype("float32")
+            (mask_npy == current_label).T.astype(np.float32)
         )
         sitk_label_i.SetSpacing(spacing)
         sitk_label_i.SetOrigin(origin)

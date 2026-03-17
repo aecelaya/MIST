@@ -106,6 +106,12 @@ def add_preprocess_args(parser: ArgParser) -> None:
     g = parser.add_argument_group("Preprocess")
     g.add_argument("--results", type=str, help="Path to output of MIST pipeline.")
     g.add_argument("--numpy", type=str, help="Path to save preprocessed NumPy data.")
+    g.add_argument(
+        "--num-workers-preprocess",
+        type=positive_int,
+        default=1,
+        help="Number of parallel workers for preprocessing. Defaults to 1.",
+    )
     parser.boolean_flag("--no-preprocess", default=False, help="Turn off most preprocessing.")
     parser.boolean_flag("--compute-dtms", default=False, help="Compute DTMs.")
     parser.boolean_flag("--overwrite", default=False, help="Overwrite previous configuration/results.")

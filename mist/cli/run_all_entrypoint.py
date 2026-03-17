@@ -70,7 +70,8 @@ def run_all_entry(argv: Optional[List[str]] = None) -> None:
         "data", "results", "nfolds", "num_workers_analyze", "overwrite"
     ]
     preprocess_keys = [
-        "results", "numpy", "no_preprocess", "compute_dtms", "overwrite"
+        "results", "numpy", "num_workers_preprocess",
+        "no_preprocess", "compute_dtms", "overwrite"
     ]
     train_keys = [
         "results", "numpy",

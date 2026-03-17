@@ -1,4 +1,5 @@
 """Tests for mist.preprocessing.preprocess."""
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Tuple, Optional
@@ -242,7 +243,7 @@ class _PB:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def track(self, iterable):
+    def track(self, iterable, **kwargs):
         """Track progress of an iterable."""
         return iterable
 
@@ -337,6 +338,34 @@ def test_window_and_normalize_nonct_full_image():
     out = pp.window_and_normalize(img, cfg)
     assert out.dtype == np.float32
     assert np.isclose(out.mean(), 0.0, atol=1e-5)
+
+
+def test_window_and_normalize_nonzero_mask_all_zeros_falls_back_to_full_image():
+    """All-zero image with nonzero-mask flag falls back to full-image normalization."""
+    img = np.zeros(5, dtype=np.float32)
+    cfg = {
+        "dataset_info": {"modality": "mri"},
+        "preprocessing": {"normalize_with_nonzero_mask": True},
+    }
+    out = pp.window_and_normalize(img, cfg)
+    assert out.dtype == np.float32
+    assert out.shape == img.shape
+    np.testing.assert_array_equal(out, np.zeros(5, dtype=np.float32))
+
+
+def test_window_and_normalize_zero_std_returns_zeros():
+    """Constant (non-zero) image with std=0 returns all-zeros without warning."""
+    img = np.full(5, 3.0, dtype=np.float32)
+    cfg = {
+        "dataset_info": {"modality": "mri"},
+        "preprocessing": {"normalize_with_nonzero_mask": False},
+    }
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # any RuntimeWarning becomes an error
+        out = pp.window_and_normalize(img, cfg)
+    assert out.dtype == np.float32
+    np.testing.assert_array_equal(out, np.zeros(5, dtype=np.float32))
 
 
 def test_resample_image_calls_utils_and_resample(monkeypatch):
@@ -1107,6 +1136,9 @@ def test_preprocess_dataset_end_to_end_saves_arrays_and_updates_config(
     monkeypatch.setattr(
         pp.progress_bar, "get_progress_bar", lambda *_: _PB(), raising=True
     )
+    monkeypatch.setattr(
+        pp.concurrent.futures, "ProcessPoolExecutor", ThreadPoolExecutor
+    )
 
     def _pe(config, image_paths_list, mask_path, fg_bbox):
         img = np.ones((2, 2, 2, 1), dtype=np.float32)
@@ -1121,6 +1153,7 @@ def test_preprocess_dataset_end_to_end_saves_arrays_and_updates_config(
         numpy=str(numpy_dir),
         compute_dtms=True,
         no_preprocess=True,
+        num_workers_preprocess=None,
     )
     pp.preprocess_dataset(ns)
 
@@ -1245,6 +1278,9 @@ def test_preprocess_dataset_sets_fg_bbox_none_when_crop_disabled(
         lambda p: json.loads(Path(p).read_text(encoding="utf-8")),
         raising=True,
     )
+    monkeypatch.setattr(
+        pp.concurrent.futures, "ProcessPoolExecutor", ThreadPoolExecutor
+    )
 
     observed: Dict[str, Any] = {}
 
@@ -1265,6 +1301,7 @@ def test_preprocess_dataset_sets_fg_bbox_none_when_crop_disabled(
         numpy=str(numpy_dir),
         no_preprocess=False,
         compute_dtms=False,
+        num_workers_preprocess=None,
     )
     pp.preprocess_dataset(ns)
 
@@ -1272,3 +1309,176 @@ def test_preprocess_dataset_sets_fg_bbox_none_when_crop_disabled(
     assert observed["fg_bbox"] is None
     assert (numpy_dir / "images" / "p1.npy").exists()
     assert (numpy_dir / "labels" / "p1.npy").exists()
+
+
+# ---------------------------------------------------------------------------
+# _preprocess_single_patient
+# ---------------------------------------------------------------------------
+
+def test_preprocess_single_patient_happy_path_saves_arrays(
+    tmp_path, monkeypatch
+):
+    """_preprocess_single_patient saves image, mask, and dtm and returns None."""
+    output_dirs = {
+        "images": tmp_path / "images",
+        "labels": tmp_path / "labels",
+        "dtms": tmp_path / "dtms",
+    }
+    for d in output_dirs.values():
+        d.mkdir()
+
+    def _pe(config, image_paths_list, mask_path, fg_bbox):
+        return {
+            "image": np.ones((2, 2, 2, 1), dtype=np.float32),
+            "mask": np.zeros((2, 2, 2, 1), dtype=np.uint8),
+            "dtm": np.full((2, 2, 2, 2), 3.0, dtype=np.float32),
+            "fg_bbox": fg_bbox,
+        }
+
+    monkeypatch.setattr(pp, "preprocess_example", _pe, raising=True)
+
+    config = {
+        "dataset_info": {"labels": [0, 1]},
+        "preprocessing": {"skip": False},
+    }
+    patient = {"id": "pat_01", "image": "/fake/img.nii.gz", "mask": "/fake/msk.nii.gz"}
+
+    err = pp._preprocess_single_patient(
+        config=config,
+        patient=patient,
+        image_columns=["image"],
+        fg_bbox=None,
+        output_dirs=output_dirs,
+        compute_dtms=True,
+    )
+
+    assert err is None
+    assert (output_dirs["images"] / "pat_01.npy").exists()
+    assert (output_dirs["labels"] / "pat_01.npy").exists()
+    assert (output_dirs["dtms"] / "pat_01.npy").exists()
+    np.testing.assert_array_equal(
+        np.load(output_dirs["images"] / "pat_01.npy"),
+        np.ones((2, 2, 2, 1), dtype=np.float32),
+    )
+
+
+def test_preprocess_single_patient_returns_error_on_exception(
+    tmp_path, monkeypatch
+):
+    """_preprocess_single_patient returns an error string when processing fails."""
+    output_dirs = {
+        "images": tmp_path / "images",
+        "labels": tmp_path / "labels",
+        "dtms": tmp_path / "dtms",
+    }
+    for d in output_dirs.values():
+        d.mkdir()
+
+    def _pe_raises(**kwargs):
+        raise RuntimeError("simulated failure")
+
+    monkeypatch.setattr(pp, "preprocess_example", _pe_raises, raising=True)
+
+    patient = {"id": "bad_pat", "image": "/fake/img.nii.gz", "mask": "/fake/msk.nii.gz"}
+
+    err = pp._preprocess_single_patient(
+        config={},
+        patient=patient,
+        image_columns=["image"],
+        fg_bbox=None,
+        output_dirs=output_dirs,
+        compute_dtms=False,
+    )
+
+    assert err is not None
+    assert "bad_pat" in err
+    assert "simulated failure" in err
+
+
+def test_preprocess_single_patient_skips_dtm_when_disabled(
+    tmp_path, monkeypatch
+):
+    """_preprocess_single_patient does not write dtm file when compute_dtms=False."""
+    output_dirs = {
+        "images": tmp_path / "images",
+        "labels": tmp_path / "labels",
+        "dtms": tmp_path / "dtms",
+    }
+    for d in output_dirs.values():
+        d.mkdir()
+
+    def _pe(**kwargs):
+        return {
+            "image": np.zeros((2, 2, 2, 1), dtype=np.float32),
+            "mask": np.zeros((2, 2, 2, 1), dtype=np.uint8),
+            "dtm": np.zeros((2, 2, 2, 2), dtype=np.float32),
+            "fg_bbox": None,
+        }
+
+    monkeypatch.setattr(pp, "preprocess_example", _pe, raising=True)
+
+    patient = {"id": "p1", "image": "/img.nii.gz", "mask": "/msk.nii.gz"}
+    pp._preprocess_single_patient(
+        config={},
+        patient=patient,
+        image_columns=["image"],
+        fg_bbox=None,
+        output_dirs=output_dirs,
+        compute_dtms=False,
+    )
+
+    assert (output_dirs["images"] / "p1.npy").exists()
+    assert (output_dirs["labels"] / "p1.npy").exists()
+    assert not (output_dirs["dtms"] / "p1.npy").exists()
+
+
+def test_preprocess_dataset_prints_error_summary_on_failures(
+    tmp_path, monkeypatch, base_config
+):
+    """preprocess_dataset prints 'N of M patients had errors' on failure."""
+    results = tmp_path / "results"
+    numpy_dir = tmp_path / "numpy"
+    results.mkdir(parents=True)
+    _write_json(results / "config.json", base_config)
+    _write_csv(
+        results / "train_paths.csv",
+        pd.DataFrame([
+            {"id": "p1", "image": "/a.nii.gz", "mask": "/a_msk.nii.gz"},
+            {"id": "p2", "image": "/b.nii.gz", "mask": "/b_msk.nii.gz"},
+        ]),
+    )
+    _write_csv(
+        results / "fg_bboxes.csv",
+        pd.DataFrame([
+            {"id": "p1", "x0": 0, "x1": 1, "y0": 0, "y1": 1, "z0": 0, "z1": 1},
+            {"id": "p2", "x0": 0, "x1": 1, "y0": 0, "y1": 1, "z0": 0, "z1": 1},
+        ]),
+    )
+
+    monkeypatch.setattr(
+        pp.progress_bar, "get_progress_bar", lambda *_: _PB(), raising=True
+    )
+    monkeypatch.setattr(
+        pp.concurrent.futures, "ProcessPoolExecutor", ThreadPoolExecutor
+    )
+
+    def _pe_always_fail(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(pp, "preprocess_example", _pe_always_fail, raising=True)
+
+    printed = []
+    monkeypatch.setattr(
+        pp.console, "print", lambda *a, **k: printed.append(str(a[0]))
+    )
+
+    ns = argparse.Namespace(
+        results=str(results),
+        numpy=str(numpy_dir),
+        compute_dtms=False,
+        no_preprocess=False,
+        num_workers_preprocess=None,
+    )
+    pp.preprocess_dataset(ns)
+
+    assert any("2 of 2" in msg for msg in printed)

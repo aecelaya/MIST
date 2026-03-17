@@ -30,11 +30,9 @@ def _parse_preprocess_args(
         )
 
     # Default NumPy output to ./numpy (under the current working directory)
-    # if not provided. Default results to ./results.
+    # if not provided.
     if not ns.numpy:
         ns.numpy = str(Path("./numpy").expanduser().resolve())
-    if not ns.results:
-        ns.results = str(Path("./results").expanduser().resolve())
     return ns
 
 

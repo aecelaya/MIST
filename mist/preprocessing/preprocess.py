@@ -1,7 +1,8 @@
 """Preprocessing functions for medical images and masks."""
-from typing import Dict, List, Tuple, Any, Optional
-import os
 import argparse
+import concurrent.futures
+from pathlib import Path
+from typing import Dict, List, Tuple, Any, Optional
 import ants
 import numpy as np
 import numpy.typing as npt
@@ -16,6 +17,8 @@ from mist.preprocessing import preprocessing_utils
 from mist.preprocessing.preprocessing_constants import (
     PreprocessingConstants as pc
 )
+
+console = rich.console.Console()
 
 
 def resample_image(
@@ -196,7 +199,7 @@ def window_and_normalize(
     else:
         # For all other modalities, we clip with the 0.5 and 99.5 percentiles
         # values of either the entire image or the nonzero values.
-        if config["preprocessing"]["normalize_with_nonzero_mask"]:
+        if config["preprocessing"]["normalize_with_nonzero_mask"] and len(nonzeros) > 0:
             # Compute the window range based on the 0.5 and 99.5 percentiles
             # of the nonzero values.
             lower = np.percentile(nonzeros, pc.WINDOW_PERCENTILE_LOW)
@@ -219,6 +222,9 @@ def window_and_normalize(
     image = np.clip(image, lower, upper)
 
     # Normalize the image based on the mean and standard deviation.
+    # Guard against std=0 (e.g. constant or all-zero images).
+    if std == 0:
+        return np.zeros_like(image, dtype=np.float32)
     image = (image - mean) / std
 
     # Apply nonzero mask if necessary.
@@ -338,18 +344,23 @@ def preprocess_example(
       - Window & normalize images
       - (Optionally) compute DTMs
 
+    This function is used for both training (mask_path provided) and
+    inference (mask_path=None). In inference mode mask and dtm are always
+    None in the returned dict.
+
     Args:
         config: Dictionary with information from config.json.
         image_paths_list: List containing paths to images for the example.
-        mask_path: Path to segmentation mask.
+        mask_path: Path to segmentation mask. Pass None for inference.
         fg_bbox: Information about the bounding box for the foreground.
     Returns:
         preprocessed_output: Dictionary containing the following keys:
             image: Preprocessed image(s) as a numpy array.
-            mask: Segmentation mask as one-hot encoded numpy array.
-            fg_bbox: Foreground bounding box is None is given as the fg_bbox 
+            mask: Segmentation mask as one-hot encoded numpy array, or None
+                in inference mode.
+            fg_bbox: Foreground bounding box is None is given as the fg_bbox
                 input and the config file calls for its use.
-            dtm: DTM(s) as a numpy array.
+            dtm: DTM(s) as a numpy array, or None in inference mode.
     """
     # Set the training flag based on the presence of a mask.
     training = bool(mask_path)
@@ -421,7 +432,7 @@ def preprocess_example(
         dtm = None
 
     # Get dimensions of image in standard space.
-    image = np.zeros((*images[0].shape, len(images)))
+    image = np.zeros((*images[0].shape, len(images)), dtype=np.float32)
     for i, image_i in enumerate(images):
         if not skip:
             # Apply windowing and normalization if not skipping preprocessing.
@@ -441,6 +452,50 @@ def preprocess_example(
     }
 
 
+def _preprocess_single_patient(
+    config: Dict,
+    patient: Dict,
+    image_columns: List[str],
+    fg_bbox: Optional[Dict],
+    output_dirs: Dict[str, Path],
+    compute_dtms: bool,
+) -> Optional[str]:
+    """Preprocess a single patient and save outputs to disk.
+
+    Args:
+        config: MIST configuration dictionary.
+        patient: Row from train_paths.csv as a dictionary.
+        image_columns: List of image column names from config.
+        fg_bbox: Foreground bounding box dict for this patient, or None.
+        output_dirs: Mapping of output type to destination directory.
+        compute_dtms: Whether to compute and save DTMs.
+
+    Returns:
+        An error message string if processing fails, otherwise None.
+    """
+    try:
+        patient_id = str(patient["id"])
+        image_list = [patient[col] for col in image_columns]
+        mask = patient["mask"]
+
+        result = preprocess_example(
+            config=config,
+            image_paths_list=image_list,
+            mask_path=mask,
+            fg_bbox=fg_bbox,
+        )
+
+        patient_npy = f"{patient_id}.npy"
+        np.save(output_dirs["images"] / patient_npy, result["image"])
+        np.save(output_dirs["labels"] / patient_npy, result["mask"])
+        if compute_dtms and result["dtm"] is not None:
+            np.save(output_dirs["dtms"] / patient_npy, result["dtm"])
+
+        return None
+    except Exception as exc:  # pylint: disable=broad-except
+        return f"Patient {patient['id']}: {exc}"
+
+
 def preprocess_dataset(args: argparse.Namespace) -> None:
     """Preprocess a MIST compatible dataset.
 
@@ -451,56 +506,43 @@ def preprocess_dataset(args: argparse.Namespace) -> None:
         FileNotFoundError: If configuration file, training paths file, or
             foreground bounding box file is not found.
     """
-    # Initialize console for rich text output.
-    console = rich.console.Console()
+    results_dir = Path(args.results)
 
     # Check if configuration file exists and read it.
-    if not os.path.exists(os.path.join(args.results, "config.json")):
+    config_path = results_dir / "config.json"
+    if not config_path.exists():
         raise FileNotFoundError(
             f"Configuration file not found in {args.results}."
         )
-    config = io.read_json_file(os.path.join(args.results, "config.json"))
+    config = io.read_json_file(config_path)
 
     # Check if training paths file exists and read it.
-    if not os.path.exists(os.path.join(args.results, "train_paths.csv")):
+    train_paths_file = results_dir / "train_paths.csv"
+    if not train_paths_file.exists():
         raise FileNotFoundError(
             f"Training paths file not found in {args.results}."
         )
-    df = pd.read_csv(os.path.join(args.results, "train_paths.csv"))
+    df = pd.read_csv(train_paths_file)
 
-    # Create output directories if they do not exist.
-    output_directories = {
-        "images": os.path.join(args.numpy, "images"),
-        "labels": os.path.join(args.numpy, "labels"),
-        "dtms": os.path.join(args.numpy, "dtms"),
+    # Create output directories for preprocessed images and labels.
+    output_dirs = {
+        "images": Path(args.numpy) / "images",
+        "labels": Path(args.numpy) / "labels",
+        "dtms": Path(args.numpy) / "dtms",
     }
-    os.makedirs(output_directories["images"], exist_ok=True)
-    os.makedirs(output_directories["labels"], exist_ok=True)
+    output_dirs["images"].mkdir(parents=True, exist_ok=True)
+    output_dirs["labels"].mkdir(parents=True, exist_ok=True)
 
-    # If the user specified to compute DTMs, we will create the directory
-    # for them and update the configuration file to reflect that we are
-    # using DTMs.
+    # Apply CLI overrides to config and write back once, so downstream stages
+    # (training, inference) see the correct flags regardless of which
+    # combination of --compute-dtms / --no-preprocess the user passed.
     if args.compute_dtms:
-        # If we are using DTMs, create the directory for them.
-        os.makedirs(output_directories["dtms"], exist_ok=True)
-
-        # Update the configuration file to reflect that we are using DTMs.
+        output_dirs["dtms"].mkdir(parents=True, exist_ok=True)
         config["preprocessing"]["compute_dtms"] = True
-
-        # Write the updated configuration file back to disk.
-        config_json = os.path.join(args.results, "config.json")
-        io.write_json_file(config_json, config)
-
-    # If the user specified to not preprocess, we will only reorient and
-    # (optionally) crop the images and masks for their foreground bounding
-    # boxes. We will also convert the images to numpy arrays.
     if args.no_preprocess:
-        # Update the configuration file to reflect no preprocessing.
         config["preprocessing"]["skip"] = True
-
-        # Write the updated configuration file back to disk.
-        config_json = os.path.join(args.results, "config.json")
-        io.write_json_file(config_json, config)
+    if args.compute_dtms or args.no_preprocess:
+        io.write_json_file(config_path, config)
 
     # Print preprocessing message and get progress bar.
     text = rich.text.Text("\nPreprocessing dataset\n") # type: ignore
@@ -513,60 +555,53 @@ def preprocess_dataset(args: argparse.Namespace) -> None:
         progress = progress_bar.get_progress_bar("Preprocessing")
 
     # Check if foreground bounding box file exists and read it.
-    if not os.path.exists(os.path.join(args.results, "fg_bboxes.csv")):
+    fg_bboxes_file = results_dir / "fg_bboxes.csv"
+    if not fg_bboxes_file.exists():
         raise FileNotFoundError(
             "Foreground bounding box (fg_bboxes.csv) file not found in "
             f"{args.results}."
         )
-    fg_bboxes = pd.read_csv(os.path.join(args.results, "fg_bboxes.csv"))
+    fg_bboxes = pd.read_csv(fg_bboxes_file)
 
-    # Get image column names from the configuration file.
+    # Pre-build a per-patient fg_bbox lookup for O(1) access in workers.
+    fg_bboxes_by_id = {
+        row["id"]: {k: v for k, v in row.items() if k != "id"}
+        for row in fg_bboxes.to_dict(orient="records")
+    }
+
     image_columns = config["dataset_info"]["images"]
+    crop = config["preprocessing"]["crop_to_foreground"]
+    patients = df.to_dict(orient="records")
+    max_workers = getattr(args, "num_workers_preprocess", None)
 
-    with progress as pb:
-        for i in pb.track(range(len(df))):
-            # Get paths to images for single patient.
-            patient = df.iloc[i].to_dict()
+    error_messages = []
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=max_workers
+    ) as executor:
+        future_to_patient = {
+            executor.submit(
+                _preprocess_single_patient,
+                config,
+                patient,
+                image_columns,
+                fg_bboxes_by_id.get(patient["id"]) if crop else None,
+                output_dirs,
+                args.compute_dtms,
+            ): patient
+            for patient in patients
+        }
+        with progress as pb:
+            for future in pb.track(
+                concurrent.futures.as_completed(future_to_patient),
+                total=len(patients),
+            ):
+                err = future.result()
+                if err:
+                    error_messages.append(err)
 
-            # Get list of image paths and segmentation mask
-            image_list = [patient[col] for col in image_columns]
-            mask = patient["mask"]
-
-            # Get foreground bounding box if necessary. These are already
-            # computed and saved in a separate CSV file during the analysis
-            # portion of the MIST pipeline.
-            if config["preprocessing"]["crop_to_foreground"]:
-                fg_bbox = fg_bboxes.loc[
-                    fg_bboxes["id"] == patient["id"]
-                ].iloc[0].to_dict()
-
-                # Remove the ID key from the dictionary. We do not need it here.
-                fg_bbox.pop("id")
-            else:
-                # Otherwise, set fg_bbox to None and the foreground bounding
-                # box will be computed on the fly.
-                fg_bbox = None
-
-            # Preprocess the example.
-            current_preprocessed_example = preprocess_example(
-                config=config,
-                image_paths_list=image_list,
-                mask_path=mask,
-                fg_bbox=fg_bbox,
-            )
-
-            # Save images, masks, and (optionally) DTMs as numpy arrays.
-            patient_npy = f"{patient['id']}.npy"
-            np.save(
-                os.path.join(output_directories["images"], patient_npy),
-                current_preprocessed_example["image"]
-            )
-            np.save(
-                os.path.join(output_directories["labels"], patient_npy),
-                current_preprocessed_example["mask"]
-            )
-            if args.compute_dtms:
-                np.save(
-                    os.path.join(output_directories["dtms"], patient_npy),
-                    current_preprocessed_example["dtm"]
-                )
+    if error_messages:
+        console.print(rich.text.Text("\n".join(error_messages)))  # type: ignore
+        console.print(rich.text.Text(  # type: ignore
+            f"{len(error_messages)} of {len(patients)} patient(s) had errors "
+            "and were skipped."
+        ))
