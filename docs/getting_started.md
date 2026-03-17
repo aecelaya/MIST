@@ -48,8 +48,9 @@ data/
     the names of the images/masks be consistent within each patient directory
     and that they are identifiable by a list of identifier strings.
 
-MIST offers support for MSD and CSV formatted datasets. For more details, please
-see [MSD and CSV Formatted Data](usage.md).
+MIST offers support for MSD and CSV formatted datasets via `mist_convert_msd`
+and `mist_convert_csv`. For more details, please see
+[Converting CSV and MSD Data](usage.md#converting-csv-and-msd-data).
 
 Once your dataset is in the correct format, the final step is to prepare a small
 JSON  file containing the details of the dataset. We specifically ask for the
@@ -92,8 +93,8 @@ The same dataset JSON using relative paths:
 {
     "task": "brats2023",
     "modality": "mr",
-    "train-data": "relative/train",
-    "test-data": "relative/validation",
+    "train-data": "relative/to/dataset/json/train",
+    "test-data": "relative/to/dataset/json/validation",
     "mask": ["seg.nii.gz"],
     "images": {"t1": ["t1n.nii.gz"],
                "t2": ["t2w.nii.gz"],

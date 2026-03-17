@@ -487,46 +487,51 @@ mist_evaluate --config /path/to/config.json \
 Several popular formats exist for different datasets, like the Medical
 Segmentation Decathlon (MSD) or simple CSV files with file paths to images and
 masks. To bridge the usability gap between these kinds of datasets and MIST, we
-provide a conversion tool called `mist_convert_dataset` to take MSD or CSV
-formatted data and convert it to MIST-compatible data.
+provide two dedicated conversion commands.
 
-The `mist_convert_dataset` uses the following arguments:
+Both commands copy data into a MIST-compatible directory structure and generate
+a `dataset.json` file. Paths inside the generated `dataset.json` are written
+as relative paths, making the converted dataset portable across machines and
+cloud environments.
 
-- `--format`: (**required**) The format of the given dataset, which can be
-either `msd` or `csv`.
-- ```--output```: (**required**) Path to the new MIST formatted dataset,
-- At least one of the following are required depending on the chosen format:
-  - `--msd-source`: Path to the MSD dataset, if that is what you are converting.
-  - `--train-csv`: Path to the CSV file containing training data, if that is
-  what you are using
-  - `--test-csv`: Path to CSV file containing test data.
+### `mist_convert_msd`
 
-The format for CSV data should be as follows:
+Converts a Medical Segmentation Decathlon dataset.
 
-| id         | mask                       | images             |
-|------------|----------------------------|--------------------|
-| Patient ID | Path to ground truth mask  | Path to images     |
+| Argument | Required | Description |
+|---|---|---|
+| `--source` | Yes | Path to the MSD dataset directory (must contain `dataset.json`). |
+| `--output` | Yes | Directory to save the converted MIST-format dataset. |
+| `--num-workers` | No | Number of parallel threads for file copying. |
+
+```console
+mist_convert_msd --source /path/to/msd/dataset \
+                 --output /path/to/mist/dataset
+```
+
+The MSD `dataset.json` is used to automatically populate the task name,
+modality, labels, and class definitions in the generated MIST `dataset.json`.
+
+### `mist_convert_csv`
+
+Converts a CSV-format dataset.
+
+| Argument | Required | Description |
+|---|---|---|
+| `--train-csv` | Yes | Path to training CSV with columns: `id`, `mask`, `image1` [, `image2`, ...]. |
+| `--output` | Yes | Directory to save the converted MIST-format dataset. |
+| `--test-csv` | No | Path to optional test CSV with columns: `id`, `image1` [, `image2`, ...]. |
+| `--num-workers` | No | Number of parallel threads for file copying. |
+
+```console
+mist_convert_csv --train-csv /path/to/train.csv \
+                 --output /path/to/mist/dataset \
+                 --test-csv /path/to/test.csv
+```
 
 !!! note
-	If converting a CSV file, this command will reformat the CSV dataset to a
-  MIST-compatible one, but will require the user to fill in details in its
-  corresponding dataset JSON file.
-
-### Example
-
-Convert a MSD dataset into a MIST-compatible dataset.
-
-```console
-mist_convert_dataset --format msd \
-                     --output /path/to/mist/dataset \
-                     --msd-source /path/to/msd/top_level/directory \
-```
-
-Convert a CSV dataset into a MIST-compatible dataset.
-
-```console
-mist_convert_dataset --format csv \
-                     --output /path/to/mist/dataset \
-                     --train-csv /path/to/training/data.csv \
-                     --test-csv /path/to/test/data.csv
-```
+    CSV conversion copies the data into MIST format but cannot infer task
+    name, modality, labels, or class definitions automatically. After
+    conversion, open the generated `dataset.json` and fill in the `task`,
+    `modality`, `labels`, and `final_classes` fields before running
+    `mist_analyze`.
