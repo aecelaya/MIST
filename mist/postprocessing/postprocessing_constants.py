@@ -1,7 +1,6 @@
-"""Dataclass for postprocessing constants."""
-import dataclasses
+"""Constants for postprocessing."""
 
-@dataclasses.dataclass(frozen=True)
+
 class PostprocessingConstants:
     """Dataclass for postprocessing constants."""
     # Default threshold for removing small objects in the mask for the

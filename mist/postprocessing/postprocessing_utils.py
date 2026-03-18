@@ -10,7 +10,7 @@ class StrategyStep(TypedDict):
     """TypedDict for a single step in the postprocessing strategy."""
     transform: str
     apply_to_labels: list[int]
-    apply_sequentially: bool
+    per_label: bool
     kwargs: Dict[str, Any]
 
 
@@ -43,7 +43,7 @@ def group_labels_in_mask(
         mask = mask_npy > 0
 
     grouped_labels = mask_npy * mask
-    return grouped_labels.astype("uint8")
+    return grouped_labels.astype(np.uint8)
 
 
 def remove_small_objects_binary(
@@ -105,6 +105,10 @@ def get_top_k_connected_components_binary(
     if binary_mask.max() == 0:
         return binary_mask.astype(bool)
 
+    # Save original before any morphological operations so we can fall back to
+    # it when there are too few components to select from.
+    original_mask = binary_mask
+
     # Optionally apply binary erosion to clean up small connections before
     # labeling.
     if morph_cleanup:
@@ -126,9 +130,9 @@ def get_top_k_connected_components_binary(
     component_sizes = np.bincount(labeled.flat)[1:]
 
     # If no components exist or there are fewer than top_k components, return
-    # the original mask.
+    # the original (pre-erosion) mask.
     if labeled.max() == 0 or len(component_sizes) < top_k:
-        return binary_mask.astype(bool)
+        return original_mask.astype(bool)
 
     # Get the labels of the top K largest components based on size.
     # We add 1 to the indices because labels start at 1.
@@ -170,7 +174,7 @@ def replace_small_objects_binary(
     # Check if the binary mask is empty. If so, return it unchanged as a uint8
     # array.
     if binary_mask.max() == 0:
-        return binary_mask.astype("uint8")
+        return binary_mask.astype(np.uint8)
 
     # Convert binary mask to labeled connected components.
     # Explicitly cast to ndarray because skimage.measure.label has multiple
@@ -186,7 +190,7 @@ def replace_small_objects_binary(
 
     # Initialize the output mask where retained components remain as
     # original_label.
-    output_mask = np.zeros_like(binary_mask, dtype="uint8")
+    output_mask = np.zeros_like(binary_mask, dtype=np.uint8)
 
     for region in regions:
         coords = tuple(region.coords.T) # Convert (N, D) to tuple for indexing.
@@ -197,4 +201,4 @@ def replace_small_objects_binary(
             # Keep large enough components as original label.
             output_mask[coords] = original_label
 
-    return output_mask.astype("uint8")
+    return output_mask.astype(np.uint8)

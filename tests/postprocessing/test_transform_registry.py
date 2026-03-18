@@ -6,6 +6,98 @@ import numpy as np
 from mist.postprocessing import transform_registry as registry
 
 
+# ---------------------------------------------------------------------------
+# describe_transforms
+# ---------------------------------------------------------------------------
+
+EXPECTED_TRANSFORMS = {
+    "remove_small_objects",
+    "get_top_k_connected_components",
+    "fill_holes_with_label",
+    "replace_small_objects_with_label",
+}
+
+
+def test_describe_transforms_returns_all_registered():
+    """describe_transforms returns one entry per registered transform."""
+    descriptions = registry.describe_transforms()
+    names = {d["name"] for d in descriptions}
+    assert names == EXPECTED_TRANSFORMS
+
+
+def test_describe_transforms_required_keys():
+    """Every entry has the required top-level keys."""
+    for entry in registry.describe_transforms():
+        assert "name" in entry, f"Missing 'name' in {entry}"
+        assert "description" in entry, f"Missing 'description' in {entry}"
+        assert "per_label" in entry, (
+            f"Missing 'per_label' in {entry}"
+        )
+        assert "kwargs" in entry, f"Missing 'kwargs' in {entry}"
+
+
+def test_describe_transforms_per_label_values():
+    """per_label field contains only expected values."""
+    valid = {"both", "per_label_only"}
+    for entry in registry.describe_transforms():
+        assert entry["per_label"] in valid, (
+            f"Unexpected per_label value in {entry['name']}: "
+            f"{entry['per_label']}"
+        )
+
+
+def test_describe_transforms_per_label_only_for_replace():
+    """replace_small_objects_with_label must be per_label_only."""
+    descriptions = {d["name"]: d for d in registry.describe_transforms()}
+    assert (
+        descriptions["replace_small_objects_with_label"]["per_label"]
+        == "per_label_only"
+    )
+
+
+def test_describe_transforms_kwargs_have_required_keys():
+    """Each kwarg entry has at minimum type, description, and default."""
+    for entry in registry.describe_transforms():
+        for kwarg_name, kwarg_meta in entry["kwargs"].items():
+            assert "type" in kwarg_meta, (
+                f"Missing 'type' for kwarg '{kwarg_name}' in {entry['name']}"
+            )
+            assert "description" in kwarg_meta, (
+                f"Missing 'description' for kwarg '{kwarg_name}' "
+                f"in {entry['name']}"
+            )
+            assert "default" in kwarg_meta, (
+                f"Missing 'default' for kwarg '{kwarg_name}' in {entry['name']}"
+            )
+
+
+def test_describe_transforms_defaults_match_constants():
+    """Kwarg defaults match the values in PostprocessingConstants."""
+    from mist.postprocessing.postprocessing_constants import (
+        PostprocessingConstants as pc
+    )
+    descriptions = {d["name"]: d for d in registry.describe_transforms()}
+
+    rso = descriptions["remove_small_objects"]["kwargs"]
+    assert rso["small_object_threshold"]["default"] == pc.SMALL_OBJECT_THRESHOLD
+
+    topk = descriptions["get_top_k_connected_components"]["kwargs"]
+    assert topk["top_k_connected_components"]["default"] == pc.TOP_K_CONNECTED_COMPONENTS
+    assert topk["apply_morphological_cleaning"]["default"] == pc.APPLY_MORPHOLOGICAL_CLEANING
+    assert topk["morphological_cleaning_iterations"]["default"] == pc.MORPHOLOGICAL_CLEANING_ITERATIONS
+
+    fh = descriptions["fill_holes_with_label"]["kwargs"]
+    assert fh["fill_holes_label"]["default"] == pc.FILL_HOLES_LABEL
+
+    rswl = descriptions["replace_small_objects_with_label"]["kwargs"]
+    assert rswl["small_object_threshold"]["default"] == pc.SMALL_OBJECT_THRESHOLD
+    assert rswl["replacement_label"]["default"] == pc.REPLACE_SMALL_OBJECTS_LABEL
+
+
+# ---------------------------------------------------------------------------
+# Registry tests (existing)
+# ---------------------------------------------------------------------------
+
 # Test that the transform registry contains all expected transforms.
 def test_transform_registry_contains_all_expected():
     """Ensure all expected transforms are registered."""
@@ -50,17 +142,17 @@ def test_remove_small_objects_returns_unchanged_if_empty():
     """Should return original mask if all entries are zero."""
     mask = np.zeros((10, 10), dtype=np.uint8)
     result = registry.remove_small_objects(
-        mask, labels_list=[1], apply_sequentially=False
+        mask, labels_list=[1], per_label=False
     )
     np.testing.assert_array_equal(result, mask)
 
 
 @pytest.mark.parametrize(
-    "apply_sequentially",
+    "per_label",
     [False, True],
     ids=["grouped", "sequential"],
 )
-def test_remove_small_objects_removes_small_components(apply_sequentially):
+def test_remove_small_objects_removes_small_components(per_label):
     """Should remove small components from specified labels."""
     mask = np.array(
         [
@@ -74,7 +166,7 @@ def test_remove_small_objects_removes_small_components(apply_sequentially):
     result = registry.remove_small_objects(
         mask,
         labels_list=[1, 2, 3],
-        apply_sequentially=apply_sequentially,
+        per_label=per_label,
         small_object_threshold=5,
     )
 
@@ -96,7 +188,7 @@ def test_remove_small_objects_preserves_large_regions(threshold, label_size):
 
     result = registry.remove_small_objects(
         mask, labels_list=[4],
-        apply_sequentially=True,
+        per_label=True,
         small_object_threshold=threshold,
     )
     np.testing.assert_array_equal(result, mask)
@@ -123,7 +215,7 @@ def test_top_k_connected_components_keeps_largest(sequential):
     result = registry.get_top_k_connected_components(
         mask=mask,
         labels_list=[1],
-        apply_sequentially=sequential,
+        per_label=sequential,
         top_k_connected_components=1,
         apply_morphological_cleaning=False,
         morphological_cleaning_iterations=1
@@ -140,7 +232,7 @@ def test_top_k_connected_components_empty_input():
     result = registry.get_top_k_connected_components(
         mask=mask,
         labels_list=[1],
-        apply_sequentially=False,
+        per_label=False,
         top_k_connected_components=1
     )
     np.testing.assert_array_equal(result, mask)
@@ -156,7 +248,7 @@ def test_top_k_connected_components_with_morph_cleanup(sequential):
     result = registry.get_top_k_connected_components(
         mask=mask,
         labels_list=[2],
-        apply_sequentially=sequential,
+        per_label=sequential,
         top_k_connected_components=1,
         apply_morphological_cleaning=True,
         morphological_cleaning_iterations=1,
@@ -176,7 +268,7 @@ def test_top_k_connected_components_multiple_labels_grouped():
     result = registry.get_top_k_connected_components(
         mask=mask,
         labels_list=[1, 2],
-        apply_sequentially=False,
+        per_label=False,
         top_k_connected_components=1,
     )
 
@@ -193,7 +285,7 @@ def test_top_k_connected_components_multiple_labels_sequential():
     result = registry.get_top_k_connected_components(
         mask=mask,
         labels_list=[1, 2],
-        apply_sequentially=True,
+        per_label=True,
         top_k_connected_components=1,
     )
 
@@ -211,21 +303,21 @@ def create_mask_with_hole(label=1):
 
 
 @pytest.mark.parametrize(
-    "apply_sequentially, expected_value",
+    "per_label, expected_value",
     [
         (False, 9),  # Grouped mode.
         (True, 9),   # Sequential mode.
     ]
 )
 def test_fill_holes_with_label_fills_expected_voxels(
-    apply_sequentially, expected_value
+    per_label, expected_value
 ):
     """Test function fills interior holes with the specified label."""
     mask = create_mask_with_hole(label=1)
     result = registry.fill_holes_with_label(
         mask=mask,
         labels_list=[1],
-        apply_sequentially=apply_sequentially,
+        per_label=per_label,
         fill_holes_label=expected_value,
     )
     assert result[3, 3] == expected_value
@@ -238,7 +330,7 @@ def test_fill_holes_with_label_returns_original_if_empty():
     result = registry.fill_holes_with_label(
         mask=empty_mask,
         labels_list=[1],
-        apply_sequentially=True,
+        per_label=True,
         fill_holes_label=5,
     )
     np.testing.assert_array_equal(result, empty_mask.astype("uint8"))
@@ -262,6 +354,17 @@ def test_replace_small_objects_one_large_one_small_component():
     expected[4:6, 4:6] = 2
     expected[1, 1] = 7  # Small component replaced.
     np.testing.assert_array_equal(result, expected)
+
+
+def test_replace_small_objects_with_label_grouped_raises():
+    """per_label=False must raise ValueError."""
+    mask = np.ones((5, 5), dtype=np.uint8)
+    with pytest.raises(ValueError, match="per_label=True"):
+        registry.replace_small_objects_with_label(
+            mask=mask,
+            labels_list=[1],
+            per_label=False,
+        )
 
 
 def test_replace_small_objects_with_label_empty_input():
