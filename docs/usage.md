@@ -200,6 +200,8 @@ the following arguments:
 **Hardware:**
 
 - `--gpus`: IDs of GPUs to use; use `-1` for all GPUs. *(default: `-1`)*
+- `--num-workers-evaluate`: Number of parallel workers for the post-training
+  evaluation step. *(default: `1`)*
 
 **Model:**
 
@@ -461,24 +463,24 @@ mist_postprocess --base-predictions /path/to/predictions \
 ## Evaluation
 
 MIST provides a flexible command-line tool to evaluate prediction masks against
-ground truth using various metrics. The evaluation script supports several
-metrics and outputs a detailed summary of the evaluation in CSV format.
+ground truth using various metrics. Metrics and their parameters are defined
+entirely in a config JSON, giving you full per-class control without any
+additional CLI flags.
 
-To run the stand-alone evaluation pipeline, use the `mist_evaluate` with the
+To run the stand-alone evaluation pipeline, use `mist_evaluate` with the
 following arguments:
 
-- `--config` (**required**): Path to the `./results/config.json` file. The
-configuration file defines the evaluation classes in the `evaluation` entry.
+- `--config` (**required**): Path to an evaluation config JSON. Accepts either a
+full MIST `config.json` (the `evaluation` key is extracted automatically) or a
+standalone evaluation config with the nested per-class structure shown below.
 - `--paths-csv` (**required**): Path to CSV file containing patient IDs and
 paths to ground truth and predicted masks.
 - `--output-csv` (**required**): Path to output CSV containing the computed
 metrics for each patient.
-- `--metrics`: Metrics to compute for each ground truth/prediction pair. Choices
-are Dice (`dice`), 95th percentile Hausdorff distance (`haus95`),
-average surface distance (`avg_surf`), and surface Dice (`surf_dice`).
-*(default: `dice haus95`)*
-- `--surf-dice-tol`: Tolerance (mm) for the surface Dice metric.
-*(default: `1.0`)*
+- `--num-workers-evaluate` *(optional)*: Number of parallel workers. *(default: 1)*
+- `--validate` *(optional)*: Validate each mask pair before evaluation. Checks
+that images are 3D, have an integer or boolean dtype, and contain only labels
+defined in the config. Recommended for external data.
 
 The paths CSV for the evaluation tool should have the following format:
 
@@ -486,16 +488,126 @@ The paths CSV for the evaluation tool should have the following format:
 |------------|----------------------------|--------------------|
 | Patient ID | Path to ground truth mask  | Path to prediction |
 
+### Evaluation config format
+
+The `evaluation` entry in `config.json` (or a standalone config file) defines
+one or more classes to evaluate. Each class specifies which label values to
+include and which metrics to compute, along with any metric-specific parameters:
+
+```json
+{
+  "class_name": {
+    "labels": [1, 2, 3],
+    "metrics": {
+      "metric_name": {"param": value}
+    }
+  }
+}
+```
+
+### Available metrics
+
+| Metric key             | Description                                   | Parameters |
+|------------------------|-----------------------------------------------|------------|
+| `dice`                 | Volumetric Sørensen–Dice coefficient          | — |
+| `haus95`               | 95th-percentile Hausdorff distance (mm)       | — |
+| `avg_surf`             | Average symmetric surface distance (mm)       | — |
+| `surf_dice`            | Surface Dice at a configurable tolerance      | `tolerance` (mm, default `1.0`) |
+| `lesion_wise_dice`     | BraTS-style lesion-wise Dice                  | see below |
+| `lesion_wise_haus95`   | BraTS-style lesion-wise HD95 (mm)             | see below |
+| `lesion_wise_surf_dice`| BraTS-style lesion-wise surface Dice          | see below |
+
+#### Lesion-wise metric parameters
+
+Lesion-wise metrics evaluate each GT lesion individually, track false positives,
+and aggregate using `sum(scores) / (num_gt_above_thresh + num_fp)` — the same
+formula used by the BraTS challenge.
+
+| Parameter                 | Default | Description |
+|---------------------------|---------|-------------|
+| `min_lesion_volume`       | `10.0`  | Minimum GT lesion volume in mm³. Lesions smaller than this are excluded. |
+| `dilation_iters`          | `3`     | Dilation iterations used to match predicted components to a GT lesion. |
+| `gt_consolidation_iters`  | `0`     | Dilation iterations for merging nearby GT lesions before analysis. Set equal to `dilation_iters` to replicate BraTS-style consolidation. `0` disables consolidation. |
+| `tolerance`               | `1.0`   | Surface Dice tolerance in mm (`lesion_wise_surf_dice` only). |
+
+> **Penalization rules:** An undetected GT lesion (false negative) contributes
+> `0` to the Dice / surface Dice numerator, or the image diagonal to the HD95
+> numerator, and `1` to the denominator. Each spurious predicted lesion (false
+> positive) is penalized identically.
+
 ### Example
 
-Run the evaluation pipeline with the surface Dice using a 1.5 mm tolerance.
+Run the evaluation pipeline with Dice and HD95:
 
 ```console
 mist_evaluate --config /path/to/config.json \
               --paths-csv /path/to/evaluation/paths.csv \
-              --output-csv /path/to/output.csv \
-              --metrics dice haus95 surf_dice \
-              --surf-dice-tol 1.5
+              --output-csv /path/to/output.csv
+```
+
+### BraTS-style lesion-wise evaluation example
+
+The following standalone evaluation config replicates the BraTS glioma (GLI)
+lesion-wise evaluation protocol for Whole Tumor (WT), Tumor Core (TC), and
+Enhancing Tumor (ET). BraTS glioma label conventions: `1` = necrotic core,
+`2` = peritumoral edema, `3` = enhancing tumor.
+
+```json
+{
+  "whole_tumor": {
+    "labels": [1, 2, 3],
+    "metrics": {
+      "lesion_wise_dice": {
+        "min_lesion_volume": 50.0,
+        "dilation_iters": 3,
+        "gt_consolidation_iters": 3
+      },
+      "lesion_wise_haus95": {
+        "min_lesion_volume": 50.0,
+        "dilation_iters": 3,
+        "gt_consolidation_iters": 3
+      }
+    }
+  },
+  "tumor_core": {
+    "labels": [1, 3],
+    "metrics": {
+      "lesion_wise_dice": {
+        "min_lesion_volume": 50.0,
+        "dilation_iters": 3,
+        "gt_consolidation_iters": 3
+      },
+      "lesion_wise_haus95": {
+        "min_lesion_volume": 50.0,
+        "dilation_iters": 3,
+        "gt_consolidation_iters": 3
+      }
+    }
+  },
+  "enhancing_tumor": {
+    "labels": [3],
+    "metrics": {
+      "lesion_wise_dice": {
+        "min_lesion_volume": 50.0,
+        "dilation_iters": 3,
+        "gt_consolidation_iters": 3
+      },
+      "lesion_wise_haus95": {
+        "min_lesion_volume": 50.0,
+        "dilation_iters": 3,
+        "gt_consolidation_iters": 3
+      }
+    }
+  }
+}
+```
+
+Save this as `brats_eval_config.json` and run:
+
+```console
+mist_evaluate --config brats_eval_config.json \
+              --paths-csv /path/to/evaluation/paths.csv \
+              --output-csv /path/to/brats_results.csv
 ```
 
 ## Converting CSV and MSD Data
@@ -518,7 +630,7 @@ Converts a Medical Segmentation Decathlon dataset.
 |---|---|---|
 | `--source` | Yes | Path to the MSD dataset directory (must contain `dataset.json`). |
 | `--output` | Yes | Directory to save the converted MIST-format dataset. |
-| `--num-workers` | No | Number of parallel threads for file copying. |
+| `--num-workers` | No | Number of parallel threads for file copying. *(default: 1)* |
 
 ```console
 mist_convert_msd --source /path/to/msd/dataset \
@@ -537,7 +649,7 @@ Converts a CSV-format dataset.
 | `--train-csv` | Yes | Path to training CSV with columns: `id`, `mask`, `image1` [, `image2`, ...]. |
 | `--output` | Yes | Directory to save the converted MIST-format dataset. |
 | `--test-csv` | No | Path to optional test CSV with columns: `id`, `image1` [, `image2`, ...]. |
-| `--num-workers` | No | Number of parallel threads for file copying. |
+| `--num-workers` | No | Number of parallel threads for file copying. *(default: 1)* |
 
 ```console
 mist_convert_csv --train-csv /path/to/train.csv \
