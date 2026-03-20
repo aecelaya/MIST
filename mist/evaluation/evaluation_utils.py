@@ -117,7 +117,7 @@ def build_evaluation_dataframe(
         error_messages.append(
             f"No train_paths.csv at {train_paths_csv}"
         )
-        return pd.DataFrame(), error_messages[0]
+        return pd.DataFrame(), "\n".join(error_messages)
 
     # Otherwise, read the CSV file and extract the patient IDs and file paths.
     train_paths_df = pd.read_csv(train_paths_csv)
