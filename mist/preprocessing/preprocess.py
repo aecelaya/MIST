@@ -572,7 +572,7 @@ def preprocess_dataset(args: argparse.Namespace) -> None:
     image_columns = config["dataset_info"]["images"]
     crop = config["preprocessing"]["crop_to_foreground"]
     patients = df.to_dict(orient="records")
-    max_workers = getattr(args, "num_workers_preprocess", None)
+    max_workers = getattr(args, "num_workers_preprocess", 1)
 
     error_messages = []
     with concurrent.futures.ProcessPoolExecutor(

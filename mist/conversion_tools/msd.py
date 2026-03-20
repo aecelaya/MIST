@@ -94,7 +94,7 @@ def copy_msd_data(
     modalities: Dict[int, str],
     mode: str,
     progress_bar_message: str,
-    max_workers: Optional[int] = None,
+    max_workers: int = 1,
 ) -> None:
     """Copy MSD data to destination in MIST format.
 
@@ -105,7 +105,7 @@ def copy_msd_data(
         modalities: Mapping of modality index to modality name.
         mode: Mode of the data — "training" or "test".
         progress_bar_message: Message displayed on left side of progress bar.
-        max_workers: Maximum number of parallel threads. Defaults to None.
+        max_workers: Maximum number of parallel threads. Defaults to 1.
 
     Returns:
         None. The data is copied to the destination directory.
@@ -149,7 +149,7 @@ def copy_msd_data(
 def convert_msd(
     source: Union[str, Path],
     dest: Union[str, Path],
-    max_workers: Optional[int] = None,
+    max_workers: int = 1,
 ) -> None:
     """Converts medical segmentation decathlon dataset to MIST dataset.
 

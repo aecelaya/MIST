@@ -31,14 +31,14 @@ class TestParseEvalArgs:
         assert ns.paths_csv == str(csv)
         assert ns.output_csv == str(out)
 
-    def test_num_workers_defaults_to_none(self, tmp_path):
+    def test_num_workers_defaults_to_one(self, tmp_path):
         """--num-workers is optional and defaults to None."""
         ns = entry._parse_eval_args([
             "--config", str(tmp_path / "c.json"),
             "--paths-csv", str(tmp_path / "p.csv"),
             "--output-csv", str(tmp_path / "o.csv"),
         ])
-        assert ns.num_workers is None
+        assert ns.num_workers_evaluate == 1
 
     def test_num_workers_is_parsed(self, tmp_path):
         """--num-workers is captured as an integer."""
@@ -46,9 +46,9 @@ class TestParseEvalArgs:
             "--config", str(tmp_path / "c.json"),
             "--paths-csv", str(tmp_path / "p.csv"),
             "--output-csv", str(tmp_path / "o.csv"),
-            "--num-workers", "4",
+            "--num-workers-evaluate", "4",
         ])
-        assert ns.num_workers == 4
+        assert ns.num_workers_evaluate == 4
 
     def test_validate_defaults_to_false(self, tmp_path):
         """--validate is optional and defaults to False."""
@@ -106,13 +106,13 @@ class TestEnsureOutputDir:
 class TestRunEvaluation:
     """Tests for evaluation_entrypoint.run_evaluation."""
 
-    def _make_ns(self, tmp_path, num_workers=None, validate=False):
+    def _make_ns(self, tmp_path, num_workers_evaluate=None, validate=False):
         """Return a minimal Namespace for run_evaluation."""
         return argparse.Namespace(
             config=str(tmp_path / "cfg.json"),
             paths_csv=str(tmp_path / "paths.csv"),
             output_csv=str(tmp_path / "out" / "metrics.csv"),
-            num_workers=num_workers,
+            num_workers_evaluate=num_workers_evaluate,
             validate=validate,
         )
 
@@ -175,7 +175,7 @@ class TestRunEvaluation:
 
         monkeypatch.setattr(entry, "Evaluator", _EvalStub, raising=True)
 
-        entry.run_evaluation(self._make_ns(tmp_path, num_workers=8))
+        entry.run_evaluation(self._make_ns(tmp_path, num_workers_evaluate=8))
 
         assert captured["max_workers"] == 8
 
@@ -279,7 +279,7 @@ class TestEvaluationEntry:
             config="/cfg.json",
             paths_csv="/paths.csv",
             output_csv="/out/metrics.csv",
-            num_workers=None,
+            num_workers_evaluate=None,
         )
         called = {"parsed": False, "ran": False}
 

@@ -39,6 +39,7 @@ def _patch_minimal_cli(monkeypatch) -> None:
         parser.add_argument("--results", type=str, default=None)
         parser.add_argument("--numpy", type=str, default=None)
         parser.add_argument("--gpus", nargs="+", type=int, default=[-1])
+        parser.add_argument("--num-workers-evaluate", type=int, default=1)
         parser.add_argument("--overwrite", action="store_true")
 
     monkeypatch.setattr(entry.argmod, "ArgParser", _mk_parser, raising=True)

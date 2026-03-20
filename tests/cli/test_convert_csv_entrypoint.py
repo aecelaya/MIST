@@ -41,13 +41,13 @@ class TestParseConvertCsvArgs:
         ])
         assert ns.test_csv == str(tmp_path / "test.csv")
 
-    def test_num_workers_defaults_to_none(self, tmp_path):
+    def test_num_workers_defaults_to_one(self, tmp_path):
         """--num-workers is optional and defaults to None."""
         ns = entry._parse_convert_csv_args([
             "--train-csv", str(tmp_path / "train.csv"),
             "--output", str(tmp_path / "out"),
         ])
-        assert ns.num_workers is None
+        assert ns.num_workers == 1
 
     def test_num_workers_is_parsed(self, tmp_path):
         """--num-workers is captured as an integer."""

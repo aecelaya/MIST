@@ -175,7 +175,7 @@ def train_entry(argv: Optional[List[str]] = None) -> None:
             output_csv_path=results_csv,
         )
         evaluator.run(
-            max_workers=config["training"]["hardware"]["num_cpu_workers"]
+            max_workers=ns.num_workers_evaluate
         )
 
     # Optional test inference

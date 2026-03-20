@@ -400,13 +400,13 @@ class Evaluator:
 
         return result, patient_errors
 
-    def run(self, max_workers: Optional[int] = None) -> None:
+    def run(self, max_workers: int = 1) -> None:
         """Run evaluation over all patients and write results to CSV.
 
         Args:
-            max_workers: The maximum number of parallel processes to use. 
-                If None, defaults to the number of processors on the machine.
-                Reduce this if you encounter Out-Of-Memory (OOM) errors.
+            max_workers: The maximum number of parallel processes to use.
+                Defaults to 1. Increase for faster evaluation on machines
+                with many CPUs, but reduce if you encounter OOM errors.
         """
         # Create a local console object for printing to avoid pickling errors.
         console = rich.console.Console()

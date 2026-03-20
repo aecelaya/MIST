@@ -80,7 +80,7 @@ def run_all_entry(argv: Optional[List[str]] = None) -> None:
         "loss", "use_dtms", "composite_loss_weighting",
         "epochs", "batch_size_per_gpu", "learning_rate",
         "lr_scheduler", "optimizer", "l2_penalty",
-        "folds", "overwrite",
+        "folds", "num_workers_evaluate", "overwrite",
     ]
 
     # Run each stage with the appropriate subset of args.

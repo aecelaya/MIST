@@ -33,11 +33,8 @@ def _parse_convert_csv_args(
         ),
     )
     parser.arg(
-        "--num-workers", type=int, required=False,
-        help=(
-            "Number of parallel threads for file copying. Defaults to the "
-            "ThreadPoolExecutor default. Reduce if you encounter I/O errors."
-        ),
+        "--num-workers", type=int, default=1,
+        help="Number of parallel threads for file copying. *(default: 1)*",
     )
     return parser.parse_args(argv)
 

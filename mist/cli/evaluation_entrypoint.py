@@ -40,11 +40,8 @@ def _parse_eval_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Path where the evaluation results CSV will be written."
     )
     parser.arg(
-        "--num-workers", type=int, required=False,
-        help=(
-            "Number of parallel workers for evaluation. Defaults to the number "
-            "of CPU cores. Reduce if you encounter out-of-memory errors."
-        ),
+        "--num-workers-evaluate", type=int, default=1,
+        help="Number of parallel workers for evaluation. *(default: 1)*",
     )
     parser.arg(
         "--validate", action="store_true", default=False,
@@ -88,7 +85,7 @@ def run_evaluation(ns: argparse.Namespace) -> None:
         output_csv_path=output_csv,
         validate_masks=ns.validate,
     )
-    evaluator.run(max_workers=ns.num_workers)
+    evaluator.run(max_workers=ns.num_workers_evaluate)
 
 
 def evaluation_entry(argv: Optional[List[str]] = None) -> None:

@@ -104,7 +104,7 @@ def copy_csv_data(
     dest: Union[str, Path],
     mode: str,
     progress_bar_message: str,
-    max_workers: Optional[int] = None,
+    max_workers: int = 1,
 ) -> None:
     """Copy data from csv file to a MIST-compatible directory structure.
 
@@ -113,8 +113,7 @@ def copy_csv_data(
         dest: Destination directory to save the data.
         mode: "training" or "test". If "training", the mask will be copied.
         progress_bar_message: Message displayed on left side of progress bar.
-        max_workers: Maximum number of parallel threads. Defaults to None
-            (uses the ThreadPoolExecutor default).
+        max_workers: Maximum number of parallel threads. Defaults to 1.
 
     Returns:
         None. The data is copied to the destination directory.
@@ -149,7 +148,7 @@ def convert_csv(
     train_csv: Union[str, Path],
     dest: Union[str, Path],
     test_csv: Optional[Union[str, Path]] = None,
-    max_workers: Optional[int] = None,
+    max_workers: int = 1,
 ) -> None:
     """Converts train and test data from csv files to MIST format.
 
