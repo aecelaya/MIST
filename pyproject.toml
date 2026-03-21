@@ -63,6 +63,7 @@ mist_evaluate = "mist.cli.evaluation_entrypoint:evaluation_entry"
 mist_postprocess = "mist.cli.postprocess_entrypoint:postprocess_entry"
 mist_convert_msd = "mist.cli.convert_msd_entrypoint:convert_msd_entry"
 mist_convert_csv = "mist.cli.convert_csv_entrypoint:convert_csv_entry"
+mist_average_weights = "mist.cli.average_weights_entrypoint:average_weights_entry"
 
 [tool.codespell]
 skip = ".git"

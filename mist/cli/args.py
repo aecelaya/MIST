@@ -155,5 +155,30 @@ def add_train_args(parser: ArgParser) -> None:
         help="Number of parallel workers for post-training evaluation. *(default: 1)*",
     )
 
+    # Transfer learning.
+    g.add_argument(
+        "--pretrained-weights",
+        type=str,
+        default=None,
+        help="Path to pretrained checkpoint to initialize the encoder from. "
+             "Accepts a single fold checkpoint or the output of mist_average_weights.",
+    )
+    g.add_argument(
+        "--pretrained-config",
+        type=str,
+        default=None,
+        help="Path to the source model's config.json for encoder compatibility "
+             "validation. Required when --pretrained-weights is set.",
+    )
+    g.add_argument(
+        "--input-channel-strategy",
+        type=str,
+        default="average",
+        choices=["average", "first", "skip"],
+        help="How to handle in_channels mismatch between source and target "
+             "encoder. 'average': mean over source channels. 'first': use "
+             "first source channel only. 'skip': keep random init. (default: average)",
+    )
+
     # Overwrite.
     parser.boolean_flag("--overwrite", default=False, help="Overwrite previous configuration/results.")

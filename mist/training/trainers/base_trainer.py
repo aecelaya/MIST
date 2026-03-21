@@ -19,7 +19,11 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 
 from mist.utils import io, progress_bar
-from mist.models.model_loader import get_model
+from mist.models.model_loader import (
+    get_model,
+    load_pretrained_encoder,
+    validate_encoder_compatibility,
+)
 from mist.loss_functions.loss_registry import get_loss
 from mist.loss_functions.deep_supervision_wrapper import DeepSupervisionLoss
 from mist.loss_functions.losses.dice import DiceLoss
@@ -65,6 +69,11 @@ class BaseTrainer(ABC):
 
         # Set up validation loss.
         self.validation_loss = DiceLoss(exclude_background=True)
+
+        # Validate pretrained encoder config if provided. This runs once in
+        # the main process before any spawned training processes start, so
+        # incompatible configs fail fast.
+        self._validate_pretrained_config()
 
         # Set up console for rich text output.
         self.console = rich.console.Console()
@@ -257,6 +266,31 @@ class BaseTrainer(ABC):
         self.config["training"]["hardware"]["num_gpus"] = num_gpus
         io.write_json_file(self.config_json, self.config)
 
+    def _validate_pretrained_config(self) -> None:
+        """Validate pretrained encoder compatibility if --pretrained-weights set.
+
+        Runs once in the main process before training starts so that config
+        mismatches fail fast rather than inside a spawned worker.
+        """
+        pretrained_weights = getattr(self.mist_args, "pretrained_weights", None)
+        pretrained_config_path = getattr(
+            self.mist_args, "pretrained_config", None
+        )
+
+        if not pretrained_weights:
+            return
+
+        if not pretrained_config_path:
+            import warnings
+            warnings.warn(
+                "--pretrained-weights is set but --pretrained-config was not "
+                "provided. Skipping encoder compatibility validation."
+            )
+            return
+
+        source_config = io.read_json_file(pretrained_config_path)
+        validate_encoder_compatibility(source_config, self.config)
+
     def _use_dtms(self) -> bool:
         """Check if distance transform maps are used in the training."""
         # Check if the loss function uses distance transform maps.
@@ -366,6 +400,25 @@ class BaseTrainer(ABC):
             self.config["model"]["architecture"],
             **self.config["model"]["params"]
         )
+
+        # Load pretrained encoder weights if requested. This runs on every rank
+        # so each process starts from the same initialization.
+        pretrained_weights = getattr(self.mist_args, "pretrained_weights", None)
+        if pretrained_weights:
+            strategy = getattr(
+                self.mist_args, "input_channel_strategy", "average"
+            )
+            model, transfer_summary = load_pretrained_encoder(
+                model, pretrained_weights, strategy
+            )
+            if rank == 0:
+                self.console.print(
+                    f"[bold]Pretrained encoder loaded from {pretrained_weights}[/bold]\n"
+                    f"  Loaded:                   {len(transfer_summary['loaded'])} params\n"
+                    f"  Channel strategy applied: "
+                    f"{len(transfer_summary['channel_strategy_applied'])} params\n"
+                    f"  Skipped:                  {len(transfer_summary['skipped'])} params\n"
+                )
 
         use_ddp = world_size > 1
         # Make batch normalization compatible with DDP. This only matters if
