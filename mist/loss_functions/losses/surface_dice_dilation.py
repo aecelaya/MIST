@@ -18,6 +18,7 @@ Implementation Note:
 
 from typing import Sequence, Tuple, Union
 import math
+import warnings
 
 import torch
 from torch import nn
@@ -100,10 +101,12 @@ class SurfaceDilationLogic(nn.Module):
             self.tau_mm = float(tau_mm)
             max_spacing = max(self.spacing_xyz)
             if self.tau_mm < max_spacing:
-                print(
-                    f"[SDDL] Warning: tau_mm ({self.tau_mm:.2f}) < "
+                warnings.warn(
+                    f"[SDDL] tau_mm ({self.tau_mm:.2f}) < "
                     f"max spacing ({max_spacing:.2f}). Dilation may be "
-                    "suboptimal (clamped to 1 voxel in coarse axis)."
+                    "suboptimal (clamped to 1 voxel in coarse axis).",
+                    UserWarning,
+                    stacklevel=2,
                 )
 
         # Pre-calculate kernels immediately.
@@ -185,7 +188,10 @@ class SurfaceDilationLogic(nn.Module):
         Returns:
             Scalar loss: 1.0 - mean(SurfaceDice).
         """
-        # Strip background channel if required.
+        # Strip background if preprocess() hasn't already removed it.
+        # When exclude_background=False, preprocess() kept all channels, so
+        # we remove channel 0 here. When exclude_background=True, preprocess()
+        # already stripped it, so no further slicing is needed.
         if not exclude_background:
             y_true = y_true[:, 1:, :, :, :]
             y_pred = y_pred[:, 1:, :, :, :]

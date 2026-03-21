@@ -355,14 +355,29 @@ However, the following loss functions are available in MIST:
 | Vessel surface Dice dilation *(experimental)*     | `vessel_sddl`     |
 
 !!! warning "Experimental loss functions"
-    `volumetric_sddl` and `vessel_sddl` are experimental loss functions that
-    are still under active development. They are available for testing but
-    results may vary and the API is subject to change.
+    `volumetric_sddl` and `vessel_sddl` are experimental. They have not been
+    validated against a published benchmark and the API is subject to change.
+    Use `dice_ce` as a baseline before trying these.
 
-    `volumetric_sddl` combines Dice+CE with a Surface Dice Dilation term and
-    is intended for general volumetric segmentation tasks. `vessel_sddl`
-    combines clDice with a Surface Dice Dilation term and is designed for
-    thin, branching structures such as vessels or airways.
+    **What they do.** Both losses measure overlap between *dilated* predicted
+    and ground-truth boundaries rather than exact voxel boundaries, tolerating
+    clinically insignificant spatial errors up to a physical tolerance `tau_mm`.
+    Dilation kernels are computed anisotropically from the voxel spacing so
+    that the tolerance is consistent in physical millimetres across all axes.
+
+    - `volumetric_sddl` — Dice+CE + Surface Dice Dilation. Intended for solid
+      organs and tumours.
+    - `vessel_sddl` — clDice + Surface Dice Dilation. Intended for thin,
+      branching structures such as vessels or airways.
+
+    **Required parameter.** Both variants require `sddl_spacing_xyz: [sx, sy, sz]`
+    (voxel spacing in mm, Width/Height/Depth order) under
+    `training.loss.params` in `config.json`. The surface tolerance defaults to
+    `tau_mm: "auto"`, which sets it to `max(spacing) * 1.25`.
+
+    **DTMs.** Neither SDDL variant uses precomputed DTMs — boundaries are
+    computed directly from model predictions during training. The
+    `--compute-dtms` and `--use-dtms` flags are not required.
 
 The loss function can be specified with the `--loss` flag in the `mist_run_all`
 or `mist_train` commands or set in the `config.json` file under the
