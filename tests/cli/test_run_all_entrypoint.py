@@ -37,7 +37,6 @@ def _patch_minimal_cli(monkeypatch) -> None:
         parser.add_argument("--numpy", type=str)
         parser.add_argument("--gpus", nargs="+", type=int)
         parser.add_argument("--model", type=str)
-        parser.add_argument("--pocket", action="store_true")
         parser.add_argument("--patch-size", nargs=3, type=int)
         parser.add_argument("--loss", type=str)
         parser.add_argument("--use-dtms", action="store_true")
@@ -75,11 +74,10 @@ def test_ns_to_argv_includes_scalars_bools_lists_and_converts_dashes():
         overwrite=True,             # Boolean True included.
         gpus=[0, 1],                # List flattened.
         patch_size=(32, 32, 32),    # Tuple flattened.
-        pocket=False,               # Boolean False omitted.
         model="mednext",
     )
     keys = [
-        "data", "nfolds", "overwrite", "gpus", "patch_size", "pocket", "model"
+        "data", "nfolds", "overwrite", "gpus", "patch_size", "model"
     ]
     out = entry._ns_to_argv(ns, keys)
     assert out == [
@@ -138,7 +136,6 @@ def test_parse_run_all_args_explicit_values(monkeypatch, tmp_path):
             "--nfolds", "3",
             "--overwrite",
             "--gpus", "0", "1",
-            "--pocket",
             "--use-dtms",
             "--epochs", "10",
             "--batch-size-per-gpu", "2",
@@ -150,7 +147,6 @@ def test_parse_run_all_args_explicit_values(monkeypatch, tmp_path):
     assert ns.nfolds == 3
     assert ns.overwrite is True
     assert ns.gpus == [0, 1]
-    assert ns.pocket is True
     assert ns.use_dtms is True
     assert ns.epochs == 10
     assert ns.batch_size_per_gpu == 2
@@ -216,7 +212,7 @@ def test_run_all_entry_forwards_subsets_correctly(monkeypatch, tmp_path):
     train_keys = [
         "results", "numpy",
         "gpus",
-        "model", "pocket", "patch_size",
+        "model", "patch_size",
         "loss", "use_dtms", "composite_loss_weighting",
         "epochs", "batch_size_per_gpu", "learning_rate",
         "lr_scheduler", "optimizer", "l2_penalty",
@@ -272,7 +268,6 @@ def test_run_all_entry_handles_false_flags_and_empty_lists(monkeypatch):
     ns = entry._parse_run_all_args(
         argv=["--data", "d.json", "--results", "r", "--numpy", "n"]
     )
-    ns.pocket = False
     ns.use_dtms = False
     ns.folds = []  # Empty -> should not appear.
 
@@ -284,7 +279,7 @@ def test_run_all_entry_handles_false_flags_and_empty_lists(monkeypatch):
     train_keys = [
         "results", "numpy",
         "gpus",
-        "model", "pocket", "patch_size",
+        "model", "patch_size",
         "loss", "use_dtms", "composite_loss_weighting",
         "epochs", "batch_size_per_gpu", "learning_rate",
         "lr_scheduler", "optimizer", "l2_penalty",

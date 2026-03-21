@@ -301,7 +301,6 @@ def test_add_train_args_defaults_and_basic_parse(patched_registries):
     assert ns.numpy is None
     assert ns.gpus == [-1]
     assert ns.model is None
-    assert ns.pocket is False
     assert ns.patch_size is None
     assert ns.loss is None
     assert ns.use_dtms is False
@@ -326,7 +325,6 @@ def test_add_train_args_full_parse_success(patched_registries):
         "--numpy", "npdir",
         "--gpus", "0", "1",
         "--model", "mednext",
-        "--pocket",
         "--patch-size", "32", "64", "48",
         "--loss", "dice",
         "--use-dtms",
@@ -346,7 +344,6 @@ def test_add_train_args_full_parse_success(patched_registries):
     assert ns.numpy == "npdir"
     assert ns.gpus == [0, 1]
     assert ns.model == "mednext"
-    assert ns.pocket is True
     assert ns.patch_size == [32, 64, 48]
     assert ns.loss == "dice"
     assert ns.use_dtms is True
@@ -429,7 +426,6 @@ def test_add_train_args_boolean_flags_explicit_false(patched_registries):
     parser = _mk_parser()
     args_mod.add_train_args(parser)
 
-    # pocket and use-dtms are boolean_flags; ensure explicit false works.
-    ns = parser.parse_args(["--pocket", "false", "--use-dtms", "false"])
-    assert ns.pocket is False
+    # use-dtms is a boolean_flag; ensure explicit false works.
+    ns = parser.parse_args(["--use-dtms", "false"])
     assert ns.use_dtms is False

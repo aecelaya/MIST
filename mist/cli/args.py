@@ -129,7 +129,6 @@ def add_train_args(parser: ArgParser) -> None:
 
     # Model.
     g.add_argument("--model", type=str, choices=list_registered_models(), help="Network architecture.")
-    parser.boolean_flag("--pocket", default=False, help="Use pocket version of model (if available).")
     g.add_argument("--patch-size", nargs=3, type=positive_int, metavar=("X", "Y", "Z"), help="Patch size as three ints: X Y Z.")
 
     # Loss function.
