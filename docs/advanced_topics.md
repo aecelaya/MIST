@@ -36,9 +36,13 @@ Below is an example of a valid `config.json` file.
     "labels": [0, 1, 2, 4]
   },
 
+  "spatial_config": {
+    "patch_size": [128, 128, 128],
+    "target_spacing": [1.0, 1.0, 1.0]
+  },
+
   "preprocessing": {
     "skip": false,
-    "target_spacing": [1.0, 1.0, 1.0],
     "crop_to_foreground": true,
     "median_resampled_image_size": [135, 174, 139],
     "normalize_with_nonzero_mask": true,
@@ -56,9 +60,7 @@ Below is an example of a valid `config.json` file.
     "architecture": "nnunet",
     "params": {
       "in_channels": 4,
-      "out_channels": 4,
-      "patch_size": [128, 128, 128],
-      "target_spacing": [1.0, 1.0, 1.0]
+      "out_channels": 4
     }
   },
 
@@ -111,7 +113,6 @@ Below is an example of a valid `config.json` file.
     "inferer": {
       "name": "sliding_window",
       "params": {
-        "patch_size": [128, 128, 128],
         "patch_blend_mode": "gaussian",
         "patch_overlap": 0.5
       }
@@ -158,8 +159,9 @@ a different part of the MIST pipeline:
 |------------------|------------------------------------------------------------------------------------------------------|
 | `mist_version`   | Tracks the version of MIST used to generate the configuration.                                       |
 | `dataset_info`   | Metadata about the dataset, including task name, modality, image inputs, and label values.           |
+| `spatial_config` | Single source of truth for `patch_size` and `target_spacing`, shared across preprocessing, model construction, and inference. |
 | `preprocessing`  | Defines how raw images are resampled, cropped, and normalized before training.                       |
-| `model`          | Specifies the model architecture and its hyperparameters.                                            |
+| `model`          | Specifies the model architecture and its hyperparameters (`in_channels`, `out_channels`, and any architecture-specific params such as `kernel_size` for MedNeXt). |
 | `training`       | Controls training loop, cross-validation folds, loss function, optimizer, and augmentations.         |
 | `inference`      | Settings for inference, including sliding-window parameters, ensembling, and test-time augmentation. `patch_overlap` must be in `[0, 1)` — a value of `1.0` is invalid. |
 | `evaluation`     | Metrics and class definitions for model evaluation.                                                  |
@@ -227,13 +229,15 @@ not exposed as a CLI flag. For example, to use a kernel size of 5 with
 MedNeXt base:
 
 ```json
+"spatial_config": {
+  "patch_size": [128, 128, 128],
+  "target_spacing": [1.0, 1.0, 1.0]
+},
 "model": {
   "architecture": "mednext-base",
   "params": {
     "in_channels": 1,
     "out_channels": 2,
-    "patch_size": [128, 128, 128],
-    "target_spacing": [1.0, 1.0, 1.0],
     "kernel_size": 5
   }
 }
