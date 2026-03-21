@@ -139,18 +139,11 @@ def load_test_time_models(
     """Load one or more models for test-time inference.
 
     This function loads all models matching the pattern `fold_*.pt` in the
-    specified directory, along with the shared model config JSON. For versions
-    of MIST prior to 1.0.0b0, the model directory should contain the fold
-    weights (i.e., `fold_0.pt`, `fold_1.pt`, etc.) and a model_config.json
-    file. For MIST 1.0.0b0 and later, the model directory should contain only
-    the model weights (i.e., `fold_0.pt`, `fold_1.pt`, etc.). The model
-    configuration for these newer versions is stored in the MIST configuration
-    file under the "model" key.
+    specified directory. The model configuration is read from the MIST
+    configuration file under the "model" key.
 
-    The function will validate the existence of the model directory and the
-    MIST configuration file. It will also ensure that at least one model
-    checkpoint file is found. If `load_first_model_only` is set to True, only
-    the first model (i.e., `fold_0.pt`) will be loaded.
+    The function will validate the existence of the model directory and ensure
+    that at least one model checkpoint file is found.
 
     Args:
         models_dir: Path to directory with `fold_*.pt` model weights.
@@ -182,12 +175,6 @@ def load_test_time_models(
         raise ValueError(
             f"No model checkpoints found in {models_path}, (expected fold_*.pt)"
         )
-
-    # Check if a legacy model config file exists.
-    config_path = models_path / "model_config.json"
-    if config_path.is_file():
-        legacy_config = io.read_json_file(str(config_path))
-        mist_config = model_loader.convert_legacy_model_config(legacy_config)
 
     models = []
     for model_path in pt_files:

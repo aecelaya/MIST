@@ -168,30 +168,6 @@ class TestEvaluatorInit:
         with pytest.raises(ValueError, match=match_msg):
             Evaluator(filepaths_df, bad_config, tmp_path / "out.csv")
 
-    # --- legacy format ---
-
-    def test_legacy_format_is_converted(self, filepaths_df, tmp_path):
-        """Legacy config with 'metrics' list and 'final_classes' is accepted."""
-        legacy = {
-            "metrics": ["dice", "haus95"],
-            "final_classes": {"tumor": [1], "edema": [2]},
-            "params": {},
-        }
-        ev = Evaluator(filepaths_df, legacy, tmp_path / "out.csv")
-        assert "tumor" in ev.evaluation_config
-        assert "edema" in ev.evaluation_config
-        assert ev.evaluation_config["tumor"]["labels"] == [1]
-        assert "dice" in ev.evaluation_config["tumor"]["metrics"]
-        assert "haus95" in ev.evaluation_config["tumor"]["metrics"]
-
-    def test_legacy_format_missing_final_classes_raises(
-        self, filepaths_df, tmp_path
-    ):
-        """Legacy config without 'final_classes' raises ValueError."""
-        legacy = {"metrics": ["dice"], "final_classes": None}
-        with pytest.raises(ValueError, match="final_classes"):
-            Evaluator(filepaths_df, legacy, tmp_path / "out.csv")
-
     def test_results_dataframe_initialized_with_correct_columns(
         self, evaluator
     ):

@@ -45,8 +45,8 @@ class Evaluator:
         Args:
             filepaths_dataframe: DataFrame containing columns 'id', 'mask', and
                 'prediction'.
-            evaluation_config: Dictionary mapping class names to their labels 
-                and metrics configurations, OR a legacy evaluation dictionary.
+            evaluation_config: Dictionary mapping class names to their labels
+                and metrics configurations.
             output_csv_path: Path where the CSV results will be saved.
             validate_masks: Opt-in flag to validate ground truth and prediction
                 masks before evaluation. This will perform basic checks like
@@ -65,8 +65,7 @@ class Evaluator:
 
         self.filepaths_dataframe = df.set_index("id")
 
-        # 3. Validate and store the evaluation configuration (converts legacy if
-        # needed).
+        # 3. Validate and store the evaluation configuration.
         self.evaluation_config = self._validate_evaluation_config(
             evaluation_config
         )
@@ -104,41 +103,16 @@ class Evaluator:
 
         Args:
             evaluation_config: Nested config mapping class names to labels and
-                metrics, or a legacy config with 'metrics', 'final_classes', and
-                'params'.
+                metrics.
 
         Returns:
-            The validated (and potentially converted) dictionary in the new
-                format.
+            The validated configuration dictionary.
 
         Raises:
-            ValueError: If structure is incorrect, or class labels are empty 
+            ValueError: If structure is incorrect, or class labels are empty
                 or non-positive.
         """
-        # 1. Detect and convert legacy format
-        if (
-            "metrics" in evaluation_config
-            and isinstance(evaluation_config["metrics"], list)
-        ):
-            legacy_classes = evaluation_config.get("final_classes")
-            legacy_metrics = evaluation_config.get("metrics", [])
-            legacy_params = evaluation_config.get("params") or {}
-
-            if not legacy_classes:
-                raise ValueError(
-                    "Legacy config requires 'final_classes' to be defined and "
-                    "not None."
-                )
-
-            converted_config = {}
-            for class_name, labels in legacy_classes.items():
-                converted_config[class_name] = {
-                    "labels": labels,
-                    "metrics": {m: legacy_params for m in legacy_metrics}
-                }
-            evaluation_config = converted_config
-
-        # 2. Proceed with standard validation for the new format.
+        # Validate the new format.
         for class_name, class_info in evaluation_config.items():
             if "labels" not in class_info or "metrics" not in class_info:
                 raise ValueError(

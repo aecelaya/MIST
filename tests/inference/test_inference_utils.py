@@ -2,7 +2,6 @@
 from typing import Tuple, Dict
 from unittest.mock import patch, MagicMock
 from pathlib import Path
-import json
 import ants
 import numpy as np
 import pandas as pd
@@ -19,28 +18,26 @@ def mock_mist_config():
         "dataset_info": {
             "modality": "ct",
         },
+        "spatial_config": {
+            "patch_size": [64, 64, 64],
+            "target_spacing": [1.0, 1.0, 1.0],
+        },
         "preprocessing": {
             "skip": False,
-            "target_spacing": [1.0, 1.0, 1.0],
             "crop_to_foreground": False,
             "normalize_with_nonzero_mask": False,
             "ct_normalization": {
-            "window_min": -100.0,
-            "window_max": 100.0,
-            "z_score_mean": 0.0,
-            "z_score_std": 1.0,
+                "window_min": -100.0,
+                "window_max": 100.0,
+                "z_score_mean": 0.0,
+                "z_score_std": 1.0,
             },
         },
         "model": {
             "architecture": "nnunet",
             "params": {
-            "in_channels": 1,
-            "out_channels": 2,
-            "patch_size": [64, 64, 64],
-            "target_spacing": [1.0, 1.0, 1.0],
-            "use_deep_supervision": False,
-            "use_residual_blocks": False,
-            "use_pocket_model": False,
+                "in_channels": 1,
+                "out_channels": 2,
             }
         },
         "training": {
@@ -54,7 +51,6 @@ def mock_mist_config():
             "inferer": {
                 "name": "sliding_window",
                 "params": {
-                    "patch_size": [64, 64, 64],
                     "patch_blend_mode": "gaussian",
                     "patch_overlap": 0.5
                 }
@@ -241,56 +237,6 @@ def test_load_test_time_models_uses_provided_device(
         mock_mist_config,
     )
 
-
-@patch("mist.models.model_loader.load_model_from_config")
-@patch("mist.models.model_loader.convert_legacy_model_config")
-@patch("mist.utils.io.read_json_file")
-def test_load_test_time_models_converts_legacy_model_config(
-    mock_read_json,
-    mock_convert_legacy,
-    mock_load_model,
-    tmp_path: Path,
-    mock_mist_config,
-):
-    """Run with legacy model config, convert it, and load models."""
-    models_dir = tmp_path / "models"
-    models_dir.mkdir(parents=True, exist_ok=True)
-    (models_dir / "fold_0.pt").write_bytes(b"")
-
-    legacy_path = models_dir / "model_config.json"
-    legacy_payload = {"model": "legacy_arch", "n_channels": 1, "n_classes": 2}
-    legacy_path.write_text(json.dumps(legacy_payload))
-
-    dummy = _DummyModel()
-    converted = {
-        "model": {
-            "architecture": "converted_arch",
-            "params": {
-                "in_channels": 1,
-                "out_channels": 2,
-                "patch_size": [64, 64, 64],
-                "target_spacing": [1.0, 1.0, 1.0],
-                "use_deep_supervision": False,
-                "use_residual_blocks": False,
-                "use_pocket_model": False,
-            },
-        }
-    }
-
-    mock_read_json.return_value = legacy_payload
-    mock_convert_legacy.return_value = converted
-    mock_load_model.return_value = dummy
-
-    _ = iu.load_test_time_models(
-        str(models_dir),
-        mist_config=mock_mist_config,
-        device="cpu",
-    )
-
-    mock_read_json.assert_called_once_with(str(legacy_path))
-    mock_convert_legacy.assert_called_once_with(legacy_payload)
-    assert mock_load_model.call_args[0][0] == str(models_dir / "fold_0.pt")
-    assert mock_load_model.call_args[0][1] == converted
 
 
 @pytest.mark.parametrize("input_mask,original_labels,expected_output", [
