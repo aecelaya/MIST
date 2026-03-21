@@ -36,13 +36,16 @@ def create_mednext(variant: str, **kwargs) -> MedNeXt:
         "spatial_dims": 3,
         "in_channels": kwargs["in_channels"],
         "out_channels": kwargs["out_channels"],
-        "kernel_size": 3,
-        "deep_supervision": kwargs["use_deep_supervision"],
-        "use_residual_connection": kwargs["use_residual_blocks"],
+        # Larger depthwise kernels (5, 7) are MedNeXt's distinguishing feature
+        # over nnUNet. Defaults to 3 for memory efficiency; set to 5 or 7 for
+        # higher-capacity configurations on well-resourced hardware.
+        "kernel_size": kwargs.get("kernel_size", 3),
+        "use_deep_supervision": kwargs["use_deep_supervision"],
+        "use_residual_blocks": kwargs["use_residual_blocks"],
         "norm_type": "group",
         "global_resp_norm": False,
         "init_filters": 32,
-        "pocket": kwargs["use_pocket_model"],
+        "use_pocket_model": kwargs["use_pocket_model"],
     }
 
     variant = variant.upper()

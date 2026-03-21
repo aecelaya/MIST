@@ -96,11 +96,16 @@ def test_mednext_out_block_forward(dim, shape, n_classes):
 
 
 @pytest.mark.parametrize("dim,shape", [
-    ("2d", (1, 4, 7, 7)),
-    ("3d", (1, 4, 7, 7, 7)),
+    ("2d", (1, 4, 64, 64)),
+    ("3d", (1, 4, 32, 64, 64)),
 ])
 def test_mednext_block_layer_norm(dim, shape):
-    """Test MedNeXtBlock with layer norm and expected input shape."""
+    """Test MedNeXtBlock with layer norm works for arbitrary spatial sizes.
+
+    Previously used spatial_size==kernel_size which masked a bug where
+    nn.LayerNorm was constructed with a fixed spatial shape. Now uses
+    GroupNorm(1, C) which is equivalent and spatial-size agnostic.
+    """
     x = torch.randn(shape)
     block = MedNeXtBlock(
         in_channels=4,

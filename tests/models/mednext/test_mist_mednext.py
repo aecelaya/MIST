@@ -16,7 +16,7 @@ def test_mednext_forward_eval_mode(spatial_dims, input_shape):
         spatial_dims=spatial_dims,
         in_channels=1,
         out_channels=3,
-        deep_supervision=False,
+        use_deep_supervision=False,
     )
     model.eval()
     x = torch.randn(input_shape)
@@ -36,7 +36,7 @@ def test_mednext_forward_train_mode(spatial_dims, input_shape):
         spatial_dims=spatial_dims,
         in_channels=1,
         out_channels=3,
-        deep_supervision=False,
+        use_deep_supervision=False,
     )
     model.train()
     x = torch.randn(input_shape)
@@ -58,7 +58,7 @@ def test_mednext_forward_with_deep_supervision(spatial_dims, input_shape):
         spatial_dims=spatial_dims,
         in_channels=1,
         out_channels=3,
-        deep_supervision=True,
+        use_deep_supervision=True,
         blocks_up=(1, 1),  # reduce supervision branches for test speed
         blocks_down=(1, 1),
         blocks_bottleneck=1,
@@ -78,8 +78,6 @@ def test_mednext_forward_with_deep_supervision(spatial_dims, input_shape):
 
 
 def test_invalid_spatial_dims():
-    """Test that an invalid spatial_dims argument raises an assertion error."""
-    with pytest.raises(
-        AssertionError, match="`spatial_dims` can only be 2 or 3"
-    ):
+    """Test that an invalid spatial_dims argument raises a ValueError."""
+    with pytest.raises(ValueError, match="`spatial_dims` can only be 2 or 3"):
         MedNeXt(spatial_dims=4)

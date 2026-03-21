@@ -1,10 +1,12 @@
 """MIST-compatible base implementation of MedNeXt."""
+from collections import OrderedDict
 from typing import Union, Dict
 from collections.abc import Sequence
 import torch
 import torch.nn as nn
 
 # MIST imports.
+from mist.models.base_model import MISTModel
 from mist.models.mednext.mednext_blocks import (
     MedNeXtBlock,
     MedNeXtDownBlock,
@@ -13,7 +15,7 @@ from mist.models.mednext.mednext_blocks import (
 )
 
 
-class MedNeXt(nn.Module):
+class MedNeXt(MISTModel):
     """Base MedNeXt architecture."""
     def __init__(
         self,
@@ -25,14 +27,14 @@ class MedNeXt(nn.Module):
         decoder_expansion_ratio: Union[Sequence[int], int]=2,
         bottleneck_expansion_ratio: int=2,
         kernel_size: int=7,
-        deep_supervision: bool=False,
-        use_residual_connection: bool=False,
+        use_deep_supervision: bool=False,
+        use_residual_blocks: bool=False,
         blocks_down: Sequence[int]=(2, 2, 2, 2),
         blocks_bottleneck: int=2,
         blocks_up: Sequence[int]=(2, 2, 2, 2),
         norm_type: str="group",
         global_resp_norm: bool=False,
-        pocket: bool=False,
+        use_pocket_model: bool=False,
     ):
         """Initialize the MedNeXt model.
 
@@ -45,22 +47,23 @@ class MedNeXt(nn.Module):
             decoder_expansion_ratio: Expansion ratio for decoder blocks.
             bottleneck_expansion_ratio: Expansion ratio for bottleneck blocks.
             kernel_size: Kernel size for convolutional layers.
-            deep_supervision: Whether to use deep supervision.
-            use_residual_connection: Whether to use residual connections.
+            use_deep_supervision: Whether to use deep supervision.
+            use_residual_blocks: Whether to use residual connections.
             blocks_down: Number of blocks in each encoder stage.
             blocks_bottleneck: Number of blocks in the bottleneck stage.
             blocks_up: Number of blocks in each decoder stage.
             norm_type: Normalization type (e.g., "group", "batch").
             global_resp_norm: Whether to use global response normalization.
-            pocket: Whether to use the pocket version of MedNeXT.
+            use_pocket_model: Whether to use the pocket version of MedNeXT.
         """
         super().__init__()
         # Set up basic parameters.
-        self.do_ds = deep_supervision
-        assert spatial_dims in [2, 3], "`spatial_dims` can only be 2 or 3."
+        self.use_deep_supervision = use_deep_supervision
+        if spatial_dims not in [2, 3]:
+            raise ValueError("`spatial_dims` can only be 2 or 3.")
         spatial_dims_str = f"{spatial_dims}d"
         enc_kernel_size = dec_kernel_size = kernel_size
-        filters_multiplier = 1 if pocket else 2
+        filters_multiplier = 1 if use_pocket_model else 2
 
         if isinstance(encoder_expansion_ratio, int):
             encoder_expansion_ratio = (
@@ -83,7 +86,7 @@ class MedNeXt(nn.Module):
                         out_channels=init_filters * (filters_multiplier ** i),
                         expansion_ratio=encoder_expansion_ratio[i],
                         kernel_size=enc_kernel_size,
-                        use_residual_connection=use_residual_connection,
+                        use_residual_connection=use_residual_blocks,
                         norm_type=norm_type,
                         dim=spatial_dims_str,
                         global_resp_norm=global_resp_norm,
@@ -97,7 +100,7 @@ class MedNeXt(nn.Module):
                     out_channels=init_filters * (filters_multiplier ** (i + 1)),
                     expansion_ratio=encoder_expansion_ratio[i],
                     kernel_size=enc_kernel_size,
-                    use_residual_connection=use_residual_connection,
+                    use_residual_connection=use_residual_blocks,
                     norm_type=norm_type,
                     dim=spatial_dims_str,
                 )
@@ -116,7 +119,7 @@ class MedNeXt(nn.Module):
                 ),
                 expansion_ratio=bottleneck_expansion_ratio,
                 kernel_size=dec_kernel_size,
-                use_residual_connection=use_residual_connection,
+                use_residual_connection=use_residual_blocks,
                 norm_type=norm_type,
                 dim=spatial_dims_str,
                 global_resp_norm=global_resp_norm,
@@ -140,7 +143,7 @@ class MedNeXt(nn.Module):
                     ),
                     expansion_ratio=decoder_expansion_ratio[i],
                     kernel_size=dec_kernel_size,
-                    use_residual_connection=use_residual_connection,
+                    use_residual_connection=use_residual_blocks,
                     norm_type=norm_type,
                     dim=spatial_dims_str,
                     global_resp_norm=global_resp_norm,
@@ -159,7 +162,7 @@ class MedNeXt(nn.Module):
                         ),
                         expansion_ratio=decoder_expansion_ratio[i],
                         kernel_size=dec_kernel_size,
-                        use_residual_connection=use_residual_connection,
+                        use_residual_connection=use_residual_blocks,
                         norm_type=norm_type,
                         dim=spatial_dims_str,
                         global_resp_norm=global_resp_norm,
@@ -178,7 +181,7 @@ class MedNeXt(nn.Module):
         )
 
         # Deep supervision output blocks.
-        if deep_supervision:
+        if use_deep_supervision:
             out_blocks = [
                 MedNeXtOutBlock(
                     in_channels=init_filters * (filters_multiplier ** i),
@@ -189,6 +192,19 @@ class MedNeXt(nn.Module):
             ]
             out_blocks.reverse()
             self.out_blocks = nn.ModuleList(out_blocks)
+
+    def get_encoder_state_dict(self) -> OrderedDict:
+        """Return encoder weights: stem, encoder stages, down blocks, bottleneck."""
+        encoder_prefixes = (
+            "stem.",
+            "enc_stages.",
+            "down_blocks.",
+            "bottleneck.",
+        )
+        return OrderedDict(
+            {k: v for k, v in self.state_dict().items()
+             if k.startswith(encoder_prefixes)}
+        )
 
     def forward(self, x: torch.Tensor) -> Union[torch.Tensor, Dict]:
         """Forward pass of the MedNeXt model.
@@ -213,13 +229,13 @@ class MedNeXt(nn.Module):
         x = self.bottleneck(x)
 
         # Start decoding and deep supervision.
-        if self.do_ds:
+        if self.use_deep_supervision:
             ds_outputs = []
 
         for i, (up_block, dec_stage) in enumerate(
             zip(self.up_blocks, self.dec_stages)
         ):
-            if self.do_ds and i < len(self.out_blocks):
+            if self.use_deep_supervision and i < len(self.out_blocks):
                 ds_outputs.append(self.out_blocks[i](x)) # pylint: disable=used-before-assignment
 
             x = up_block(x)
@@ -234,7 +250,7 @@ class MedNeXt(nn.Module):
             output = {}
             output["prediction"] = x
 
-            if self.do_ds:
+            if self.use_deep_supervision:
                 output["deep_supervision"] = []
 
                 # Reverse the order of deep supervision outputs to go in order

@@ -77,10 +77,10 @@ class MedNeXtBlock(nn.Module):
                 num_groups=in_channels, num_channels=in_channels
             )
         elif norm_type == "layer":
-            normalized_shape = (
-                [in_channels] + [kernel_size] * (2 if dim == "2d" else 3)
-            )
-            self.norm = nn.LayerNorm(normalized_shape=normalized_shape)
+            # GroupNorm(1, C) is equivalent to LayerNorm over the channel
+            # dimension for conv feature maps and works for any spatial size,
+            # unlike nn.LayerNorm which requires a fixed spatial shape.
+            self.norm = nn.GroupNorm(num_groups=1, num_channels=in_channels)
 
         # Second convolution (expansion) layer with Conv3D 1x1x1.
         self.conv2 = conv(
@@ -280,7 +280,8 @@ class MedNeXtUpBlock(MedNeXtBlock):
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=1,
-                stride=2
+                stride=2,
+                output_padding=1,
             )
 
         self.conv1 = conv(
@@ -289,6 +290,7 @@ class MedNeXtUpBlock(MedNeXtBlock):
             kernel_size=kernel_size,
             stride=2,
             padding=kernel_size // 2,
+            output_padding=1,
             groups=in_channels,
         )
 
@@ -306,19 +308,8 @@ class MedNeXtUpBlock(MedNeXtBlock):
         """
         x1 = super().forward(x)
 
-        # Asymmetric padding for upsampling to match the output size.
-        if self.dim == "2d":
-            x1 = torch.nn.functional.pad(x1, (1, 0, 1, 0))
-        else:
-            x1 = torch.nn.functional.pad(x1, (1, 0, 1, 0, 1, 0))
-
         if self.resample_do_res:
-            res = self.res_conv(x)
-            if self.dim == "2d":
-                res = torch.nn.functional.pad(res, (1, 0, 1, 0))
-            else:
-                res = torch.nn.functional.pad(res, (1, 0, 1, 0, 1, 0))
-            x1 = x1 + res
+            x1 = x1 + self.res_conv(x)
 
         return x1
 
@@ -343,7 +334,7 @@ class MedNeXtOutBlock(nn.Module):
         # pointwise convolution layer that maps the current number of
         # channels to the number of classes.
         conv = get_conv_layer(
-            spatial_dim=2 if dim == "2d" else 3, transpose=True
+            spatial_dim=2 if dim == "2d" else 3, transpose=False
         )
         self.conv_out = conv(in_channels, n_classes, kernel_size=1)
 
