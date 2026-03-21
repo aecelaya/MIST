@@ -14,8 +14,8 @@ def base_kwargs():
         "spatial_dims": 3,
         "in_channels": 1,
         "out_channels": 2,
-        "roi_size": [32, 32, 32],
-        "image_spacing": [1.0, 1.0, 1.0],
+        "patch_size": [32, 32, 32],
+        "target_spacing": [1.0, 1.0, 1.0],
         "use_residual_blocks": True,
         "use_deep_supervision": False,
         "use_pocket_model": False,
@@ -37,8 +37,8 @@ def test_nnunet_initialization_pocket_model(base_kwargs):
 
 
 def test_nnunet_mismatched_dimensions_raises(base_kwargs):
-    """Covers the case where ROI size and spacing do not match spatial dims."""
-    base_kwargs["roi_size"] = [32, 32]
+    """Covers the case where patch size and spacing do not match spatial dims."""
+    base_kwargs["patch_size"] = [32, 32]
     with pytest.raises(
         ValueError, match="must have the same number of dimensions"
     ):
@@ -49,8 +49,8 @@ def test_nnunet_initialization_2d_filters_branch(base_kwargs):
     """Covers the 2D filters configuration path in model initialization."""
     base_kwargs.update({
         "spatial_dims": 2,
-        "roi_size": [32, 32],
-        "image_spacing": [1.0, 1.0],
+        "patch_size": [32, 32],
+        "target_spacing": [1.0, 1.0],
         "use_pocket_model": False,
     })
     model = NNUNet(**base_kwargs)

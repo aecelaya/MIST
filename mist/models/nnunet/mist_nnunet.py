@@ -1,16 +1,18 @@
 """MIST implementation of nnUNet."""
+from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Union, Dict
 import torch
 from torch import nn
 
 # MIST imports.
+from mist.models.base_model import MISTModel
 from mist.models.nnunet import dynamic_unet
 from mist.models.nnunet import nnunet_utils
 from mist.models.nnunet.nnunet_constants import NNUnetConstants as constants
 
 
-class NNUNet(nn.Module):
+class NNUNet(MISTModel):
     """MIST implementation of nnUNet.
 
     This is essentially a wrapper around the DynamicUNet class that we implement
@@ -26,27 +28,27 @@ class NNUNet(nn.Module):
         spatial_dims: int,
         in_channels: int,
         out_channels: int,
-        roi_size: Sequence[int],
-        image_spacing: Sequence[float],
+        patch_size: Sequence[int],
+        target_spacing: Sequence[float],
         use_residual_blocks: bool,
         use_deep_supervision: bool,
         use_pocket_model: bool,
     ):
         super().__init__()
-        # Make sure that the ROI size matches the spatial dimensions.
-        if not len(roi_size) == len(image_spacing) == spatial_dims:
+        # Make sure that the patch size matches the spatial dimensions.
+        if not len(patch_size) == len(target_spacing) == spatial_dims:
             raise ValueError(
-                "ROI size and image spacing must have the same number of "
+                "Patch size and target spacing must have the same number of "
                 "dimensions as the spatial dimensions, but got "
-                f"{len(roi_size)} dimensions for ROI size and "
-                f"{len(image_spacing)} dimensions for image spacing."
+                f"{len(patch_size)} dimensions for patch size and "
+                f"{len(target_spacing)} dimensions for target spacing."
             )
 
         # Get parameters for UNet. This includes kernel sizes, strides, and the
         # final encoded dimensions from the bottleneck layer. The latter is used
         # to determine the latent dimension for VAE regularization.
         kernel_sizes, strides, _ = (
-            nnunet_utils.get_unet_params(roi_size, image_spacing)
+            nnunet_utils.get_unet_params(patch_size, target_spacing)
         )
 
         # Determine the number of filters at each resolution level. If we use
@@ -88,6 +90,18 @@ class NNUNet(nn.Module):
             use_residual_blocks=use_residual_blocks,
             use_deep_supervision=use_deep_supervision,
             trans_bias=True,
+        )
+
+    def get_encoder_state_dict(self) -> OrderedDict:
+        """Return encoder weights: input block, encoder layers, bottleneck."""
+        encoder_prefixes = (
+            "unet.input_block.",
+            "unet.encoder_layers.",
+            "unet.bottleneck.",
+        )
+        return OrderedDict(
+            {k: v for k, v in self.state_dict().items()
+             if k.startswith(encoder_prefixes)}
         )
 
     def forward(self, x: torch.Tensor) -> Union[torch.Tensor, Dict]:

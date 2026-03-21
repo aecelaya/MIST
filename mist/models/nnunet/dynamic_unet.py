@@ -366,7 +366,20 @@ class DynamicUNet(nn.Module):
         return nn.ModuleList(list_of_layers)
 
     def get_deep_supervision_heads(self):
-        """Get the deep supervision heads for the UNet."""
+        """Get the deep supervision heads for the UNet.
+
+        Each head is a 1x1 output conv from the feature maps at a decoder
+        level to out_channels. The heads are stored in order from shallowest
+        to deepest (i.e. head 0 is closest to the output). They are applied
+        in reverse during the forward pass (after
+        deep_supervision_head_inputs.reverse()), so head i is paired with
+        decoder output at deep_supervision_head_ids[-(i+1)].
+
+        The filter count for head i is filters[i+1], which matches the
+        decoder output channels at that depth because the decoder out_filters
+        list is filters[:-1][::-1] — meaning the deepest selected decoder
+        outputs correspond to filters[1], filters[2], etc.
+        """
         return nn.ModuleList(
             [
                 self.get_output_block(i + 1) for

@@ -41,8 +41,8 @@ def create_nnunet(**kwargs) -> NNUNet:
     common_args = {
         "in_channels": kwargs["in_channels"],
         "out_channels": kwargs["out_channels"],
-        "roi_size": kwargs["patch_size"],
-        "image_spacing": kwargs["target_spacing"],
+        "patch_size": kwargs["patch_size"],
+        "target_spacing": kwargs["target_spacing"],
         "use_residual_blocks": kwargs["use_residual_blocks"],
         "use_deep_supervision": kwargs["use_deep_supervision"],
         "use_pocket_model": kwargs["use_pocket_model"],
