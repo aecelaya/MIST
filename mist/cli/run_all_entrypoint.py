@@ -77,7 +77,7 @@ def run_all_entry(argv: Optional[List[str]] = None) -> None:
         "results", "numpy",
         "gpus",
         "model", "patch_size",
-        "loss", "use_dtms", "composite_loss_weighting",
+        "loss", "composite_loss_weighting",
         "epochs", "batch_size_per_gpu", "learning_rate",
         "lr_scheduler", "optimizer", "l2_penalty",
         "folds", "num_workers_evaluate", "overwrite",

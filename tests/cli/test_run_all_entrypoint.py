@@ -39,7 +39,6 @@ def _patch_minimal_cli(monkeypatch) -> None:
         parser.add_argument("--model", type=str)
         parser.add_argument("--patch-size", nargs=3, type=int)
         parser.add_argument("--loss", type=str)
-        parser.add_argument("--use-dtms", action="store_true")
         parser.add_argument("--composite-loss-weighting", type=str)
         parser.add_argument("--epochs", type=int)
         parser.add_argument("--batch-size-per-gpu", type=int)
@@ -136,7 +135,6 @@ def test_parse_run_all_args_explicit_values(monkeypatch, tmp_path):
             "--nfolds", "3",
             "--overwrite",
             "--gpus", "0", "1",
-            "--use-dtms",
             "--epochs", "10",
             "--batch-size-per-gpu", "2",
         ]
@@ -147,7 +145,6 @@ def test_parse_run_all_args_explicit_values(monkeypatch, tmp_path):
     assert ns.nfolds == 3
     assert ns.overwrite is True
     assert ns.gpus == [0, 1]
-    assert ns.use_dtms is True
     assert ns.epochs == 10
     assert ns.batch_size_per_gpu == 2
 
@@ -191,7 +188,6 @@ def test_run_all_entry_forwards_subsets_correctly(monkeypatch, tmp_path):
         "--model", "mednext",
         "--patch-size", "48", "64", "32",
         "--loss", "dice",
-        "--use-dtms",       # True -> include.
         "--epochs", "20",
         "--batch-size-per-gpu", "2",
         "--learning-rate", "0.001",
@@ -213,7 +209,7 @@ def test_run_all_entry_forwards_subsets_correctly(monkeypatch, tmp_path):
         "results", "numpy",
         "gpus",
         "model", "patch_size",
-        "loss", "use_dtms", "composite_loss_weighting",
+        "loss", "composite_loss_weighting",
         "epochs", "batch_size_per_gpu", "learning_rate",
         "lr_scheduler", "optimizer", "l2_penalty",
         "folds", "overwrite",
@@ -268,7 +264,6 @@ def test_run_all_entry_handles_false_flags_and_empty_lists(monkeypatch):
     ns = entry._parse_run_all_args(
         argv=["--data", "d.json", "--results", "r", "--numpy", "n"]
     )
-    ns.use_dtms = False
     ns.folds = []  # Empty -> should not appear.
 
     analyze_keys = ["data", "results", "nfolds", "num_workers_analyze", "overwrite"]
@@ -280,7 +275,7 @@ def test_run_all_entry_handles_false_flags_and_empty_lists(monkeypatch):
         "results", "numpy",
         "gpus",
         "model", "patch_size",
-        "loss", "use_dtms", "composite_loss_weighting",
+        "loss", "composite_loss_weighting",
         "epochs", "batch_size_per_gpu", "learning_rate",
         "lr_scheduler", "optimizer", "l2_penalty",
         "folds", "overwrite",

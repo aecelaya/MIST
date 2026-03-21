@@ -223,10 +223,7 @@ def tmp_pipeline(tmp_path: Path) -> Tuple[Path, Path]:
             "seed": 0,
             "loss": {
                 "name": "dummy_loss",
-                "params": {
-                    "use_dtms": False,
-                    "composite_loss_weighting": None,
-                },
+                "composite_loss_weighting": None,
             },
             "optimizer": "sgd",
             "l2_penalty": 0.0,
@@ -268,7 +265,6 @@ def mist_args(tmp_pipeline):
         epochs=None,
         batch_size_per_gpu=None,
         loss=None,
-        use_dtms=False,
         composite_loss_weighting=None,
         optimizer=None,
         l2_penalty=None,
@@ -493,7 +489,7 @@ def test_setup_folds_with_dtms_and_valsplit(
     """Test setup_folds with DTM data and validation split."""
     results, _ = tmp_pipeline
     cfg = json.loads((Path(results) / "config.json").read_text())
-    cfg["training"]["loss"]["params"]["use_dtms"] = True
+    cfg["training"]["loss"]["name"] = "gsl"
     cfg["training"]["val_percent"] = 0.5
     (Path(results) / "config.json").write_text(json.dumps(cfg))
 
@@ -577,7 +573,6 @@ def test_overwrite_config_from_args(tmp_pipeline, mist_args, monkeypatch):
     mist_args.epochs = 3
     mist_args.batch_size_per_gpu = 2
     mist_args.loss = "my_loss"
-    mist_args.use_dtms = True
     mist_args.composite_loss_weighting = "linear"
     mist_args.optimizer = "adamw"
     mist_args.l2_penalty = 0.01
@@ -594,11 +589,11 @@ def test_overwrite_config_from_args(tmp_pipeline, mist_args, monkeypatch):
     assert cfg["training"]["epochs"] == 3
     assert cfg["training"]["batch_size_per_gpu"] == 2
     assert cfg["training"]["loss"]["name"] == "my_loss"
-    assert cfg["training"]["loss"]["params"]["use_dtms"] is True
-    assert (
-        cfg["training"]["loss"]["params"]["composite_loss_weighting"] ==
-        "linear"
-    )
+    clw = cfg["training"]["loss"]["composite_loss_weighting"]
+    assert clw["name"] == "linear"
+    assert "init_pause" in clw["params"]
+    assert "start_val" in clw["params"]
+    assert "end_val" in clw["params"]
     assert cfg["training"]["optimizer"] == "adamw"
     assert cfg["training"]["l2_penalty"] == pytest.approx(0.01)
     assert cfg["training"]["learning_rate"] == pytest.approx(0.005)
@@ -887,23 +882,30 @@ def test_run_cross_validation_nonzero_rank_no_print_but_calls_folds(
     assert calls == [(0, 1, 2), (1, 1, 2)]
 
 
-@pytest.mark.parametrize("schedule_cfg", [None, "linear"])
+@pytest.mark.parametrize("clw_cfg", [
+    None,
+    {"name": "linear", "params": {"init_pause": 5}},
+])
 def test_build_components_composite_loss_scheduler(
-    tmp_pipeline, mist_args, monkeypatch, schedule_cfg
+    tmp_pipeline, mist_args, monkeypatch, clw_cfg
 ):
-    """Test that build_components sets composite_loss_weighting correctly."""
+    """Test that build_components sets composite_loss_weighting correctly.
+
+    Uses a composite loss name so the COMPOSITE_LOSSES guard is satisfied.
+    """
     results, _ = tmp_pipeline
     cfg_path = Path(results) / "config.json"
     cfg = json.loads(cfg_path.read_text())
-    cfg["training"]["loss"]["params"]["composite_loss_weighting"] = schedule_cfg
+    # Use a composite loss so the scheduler guard fires.
+    cfg["training"]["loss"]["name"] = "bl"
+    cfg["training"]["loss"]["composite_loss_weighting"] = clw_cfg
     cfg_path.write_text(json.dumps(cfg))
 
     calls = {"args": []}
     sentinel = object()
 
-    def spy_get_alpha_scheduler(schedule, **kwargs):
-        # record both the schedule and any named kwargs (e.g., num_epochs)
-        calls["args"].append({"schedule": schedule, **kwargs})
+    def spy_get_alpha_scheduler(name, num_epochs, **params):
+        calls["args"].append({"name": name, "num_epochs": num_epochs, **params})
         return sentinel
 
     monkeypatch.setattr(bt, "get_alpha_scheduler", spy_get_alpha_scheduler)
@@ -911,15 +913,16 @@ def test_build_components_composite_loss_scheduler(
     trainer = DummyTrainer(mist_args)
     state = trainer.build_components(rank=0, world_size=1)
 
-    if schedule_cfg is None:
+    if clw_cfg is None:
         assert state["composite_loss_weighting"] is None
         assert not calls["args"]
     else:
         assert state["composite_loss_weighting"] is sentinel
-        assert calls["args"][0]["schedule"] == schedule_cfg
-        # Optional sanity checks (keep or drop as you like):
-        assert "num_epochs" in calls["args"][0]
+        assert calls["args"][0]["name"] == clw_cfg["name"]
         assert isinstance(calls["args"][0]["num_epochs"], int)
+        # Params from the config are unpacked and forwarded.
+        for k, v in clw_cfg["params"].items():
+            assert calls["args"][0][k] == v
 
 
 def test_set_seed_swallows_dist_errors(tmp_pipeline, mist_args, monkeypatch):

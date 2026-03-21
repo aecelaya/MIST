@@ -133,7 +133,6 @@ def add_train_args(parser: ArgParser) -> None:
 
     # Loss function.
     g.add_argument("--loss", type=str, choices=list_registered_losses(), help="Loss function for training.")
-    parser.boolean_flag("--use-dtms", default=False, help="Use DTMs during training.")
     g.add_argument("--composite-loss-weighting", type=str, choices=list_alpha_schedulers(), help="Weighting schedule for composite losses.")
 
     # Training loop.

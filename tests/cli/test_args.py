@@ -303,7 +303,6 @@ def test_add_train_args_defaults_and_basic_parse(patched_registries):
     assert ns.model is None
     assert ns.patch_size is None
     assert ns.loss is None
-    assert ns.use_dtms is False
     assert ns.composite_loss_weighting is None
     assert ns.epochs is None
     assert ns.batch_size_per_gpu is None
@@ -327,7 +326,6 @@ def test_add_train_args_full_parse_success(patched_registries):
         "--model", "mednext",
         "--patch-size", "32", "64", "48",
         "--loss", "dice",
-        "--use-dtms",
         "--composite-loss-weighting", "linear",
         "--epochs", "10",
         "--batch-size-per-gpu", "2",
@@ -346,7 +344,6 @@ def test_add_train_args_full_parse_success(patched_registries):
     assert ns.model == "mednext"
     assert ns.patch_size == [32, 64, 48]
     assert ns.loss == "dice"
-    assert ns.use_dtms is True
     assert ns.composite_loss_weighting == "linear"
     assert ns.epochs == 10
     assert ns.batch_size_per_gpu == 2
@@ -426,6 +423,6 @@ def test_add_train_args_boolean_flags_explicit_false(patched_registries):
     parser = _mk_parser()
     args_mod.add_train_args(parser)
 
-    # use-dtms is a boolean_flag; ensure explicit false works.
-    ns = parser.parse_args(["--use-dtms", "false"])
-    assert ns.use_dtms is False
+    # --overwrite is a boolean_flag; ensure explicit false works.
+    ns = parser.parse_args(["--overwrite", "false"])
+    assert ns.overwrite is False

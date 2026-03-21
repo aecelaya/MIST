@@ -333,10 +333,7 @@ def build_base_config() -> dict[str, Any]:
             "dali_foreground_prob": 0.6,
             "loss": {
                 "name": "dice_ce",
-                "params": {
-                    "use_dtms": False,
-                    "composite_loss_weighting": None,
-                },
+                "composite_loss_weighting": None,
             },
             "optimizer": "adam",
             "learning_rate": 0.001,

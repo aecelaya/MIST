@@ -27,7 +27,10 @@ from mist.models.model_loader import (
 from mist.loss_functions.loss_registry import get_loss
 from mist.loss_functions.deep_supervision_wrapper import DeepSupervisionLoss
 from mist.loss_functions.losses.dice import DiceLoss
-from mist.loss_functions.alpha_schedulers import get_alpha_scheduler
+from mist.loss_functions.alpha_schedulers import (
+    get_alpha_scheduler,
+    get_default_scheduler_config,
+)
 from mist.training.lr_schedulers.lr_scheduler_registry import get_lr_scheduler
 from mist.training.optimizers.optimizer_registry import get_optimizer
 from mist.training import training_utils
@@ -193,14 +196,11 @@ class BaseTrainer(ABC):
         if self.mist_args.loss is not None:
             self.config["training"]["loss"]["name"] = self.mist_args.loss
 
-        # Overwrite the loss function parameters. These are the use of DTMs
-        # and the composite loss weighting.
-        if self.mist_args.use_dtms:
-            self.config["training"]["loss"]["params"]["use_dtms"] = True
-
+        # Overwrite the composite loss weighting if specified. Populate with
+        # scheduler defaults so users can see and tune all available params.
         if self.mist_args.composite_loss_weighting is not None:
-            self.config["training"]["loss"]["params"]["composite_loss_weighting"] = (
-                self.mist_args.composite_loss_weighting
+            self.config["training"]["loss"]["composite_loss_weighting"] = (
+                get_default_scheduler_config(self.mist_args.composite_loss_weighting)
             )
 
         # Overwrite the optimizer and its parameters if specified in command
@@ -283,9 +283,11 @@ class BaseTrainer(ABC):
         validate_encoder_compatibility(source_config, self.config)
 
     def _use_dtms(self) -> bool:
-        """Check if distance transform maps are used in the training."""
-        # Check if the loss function uses distance transform maps.
-        return self.config["training"]["loss"]["params"]["use_dtms"]
+        """Return True when the selected loss requires distance transform maps."""
+        return (
+            self.config["training"]["loss"]["name"]
+            in TrainerConstants.DTM_AWARE_LOSSES
+        )
 
     def _setup_folds(self) -> None:
         """Setup data paths and parameters for a specific fold.
@@ -434,25 +436,24 @@ class BaseTrainer(ABC):
         # Get loss function. First get the loss function from the registry.
         # We then wrap it in a DeepSupervisionLoss, which will handle
         # deep supervision if the model supports it.
-        loss_cls = get_loss(training["loss"]["name"])
-        loss_params = {
-            "sddl_spacing_xyz": self.config["spatial_config"]["target_spacing"],
-        }
+        loss_name = training["loss"]["name"]
+        loss_cls = get_loss(loss_name)
+        loss_params = {}
+        if loss_name in TrainerConstants.SPACING_AWARE_LOSSES:
+            loss_params["sddl_spacing_xyz"] = (
+                self.config["spatial_config"]["target_spacing"]
+            )
         loss_function = loss_cls(**loss_params)
         loss_function = DeepSupervisionLoss(loss_function)
 
-        # Some composite loss functions require a scheduler for the
-        # composite loss weight. Get the scheduler if it is specified in the
-        # configuration file.
-        if training["loss"]["params"]["composite_loss_weighting"] is not None:
-            # Get the alpha scheduler for the composite loss weight.
-            # This is used to adjust the weight of the composite loss during
-            # training.
-            composite_loss_weighting = (
-                get_alpha_scheduler(
-                    training["loss"]["params"]["composite_loss_weighting"],
-                    num_epochs=training["epochs"],
-                )
+        # Build the alpha scheduler for composite losses. Only applies when the
+        # selected loss blends two terms via alpha (e.g. bl, gsl, cldice).
+        clw_cfg = training["loss"]["composite_loss_weighting"]
+        if loss_name in TrainerConstants.COMPOSITE_LOSSES and clw_cfg is not None:
+            composite_loss_weighting = get_alpha_scheduler(
+                clw_cfg["name"],
+                num_epochs=training["epochs"],
+                **clw_cfg.get("params", {}),
             )
         else:
             composite_loss_weighting = None
