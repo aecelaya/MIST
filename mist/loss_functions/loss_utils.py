@@ -19,8 +19,7 @@ def get_one_hot(y_true: torch.Tensor, n_classes: int) -> torch.Tensor:
     y_true = F.one_hot(y_true, num_classes=n_classes)
     y_true = torch.transpose(y_true, dim0=5, dim1=1)
     y_true = torch.squeeze(y_true, dim=5)
-    y_true = y_true.to(torch.int8)
-    return y_true
+    return y_true.float()
 
 
 class SoftSkeletonize(nn.Module):
@@ -29,7 +28,7 @@ class SoftSkeletonize(nn.Module):
     Iteratively erodes and opens the image to isolate the centerline.
     """
     def __init__(self, num_iter=40):
-        super(SoftSkeletonize, self).__init__()
+        super().__init__()
         self.num_iter = num_iter
 
     def soft_erode(self, img: torch.Tensor) -> torch.Tensor:
@@ -93,6 +92,12 @@ def check_loss_inputs(y_true: torch.Tensor, y_pred: torch.Tensor) -> None:
     Raises:
         ValueError: If any of the checks fail.
     """
+    if len(y_true.shape) != 5 or len(y_pred.shape) != 5:
+        raise ValueError(
+            f"For 3D data, the input tensors must be 5D. "
+            f"Got shapes {y_true.shape} and {y_pred.shape}."
+        )
+
     if y_pred.shape[1] < 2:
         raise ValueError(
             f"The number of classes in the prediction must be at least 2. "
@@ -103,12 +108,6 @@ def check_loss_inputs(y_true: torch.Tensor, y_pred: torch.Tensor) -> None:
         raise ValueError(
             f"The number of channels in the ground truth mask must be 1. "
             f"Got {y_true.shape[1]}."
-        )
-
-    if len(y_true.shape) != 5 or len(y_pred.shape) != 5:
-        raise ValueError(
-            f"For 3D data, the input tensors must be 5D. "
-            f"Got shapes {y_true.shape} and {y_pred.shape}."
         )
 
     if y_true.shape[0] != y_pred.shape[0]:

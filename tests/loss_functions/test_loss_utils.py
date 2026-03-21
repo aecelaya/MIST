@@ -20,7 +20,7 @@ class TestGetOneHot:
         one_hot = loss_utils.get_one_hot(y_true, n_classes=3)
 
         assert one_hot.shape == (1, 3, 1, 2, 2)
-        assert one_hot.dtype == torch.int8
+        assert one_hot.dtype == torch.float32
 
         # Check mapping correctness.
         # Channel 0 should mark where y_true == 0.
@@ -77,6 +77,13 @@ class TestCheckLossInputs:
         y_true = torch.zeros(y_true_shape)
         y_pred = torch.zeros(y_pred_shape)
         with pytest.raises(ValueError, match=error_match):
+            loss_utils.check_loss_inputs(y_true, y_pred)
+
+    def test_5d_check_fires_before_channel_check(self):
+        """4D input with 1 prediction channel raises 5D error, not channel error."""
+        y_true = torch.zeros((2, 1, 32, 32))
+        y_pred = torch.zeros((2, 1, 32, 32))
+        with pytest.raises(ValueError, match="must be 5D"):
             loss_utils.check_loss_inputs(y_true, y_pred)
 
 

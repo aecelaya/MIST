@@ -76,7 +76,7 @@ class SegmentationLoss(nn.Module, ABC):
             y_true = y_true[:, 1:]
             y_pred = y_pred[:, 1:]
 
-        return y_true.to(torch.float32), y_pred
+        return y_true, y_pred
 
     @abstractmethod
     def forward(
