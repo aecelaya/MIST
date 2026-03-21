@@ -91,16 +91,17 @@ def noise_fn(img: TensorGPU) -> TensorGPU:
     Returns:
         The image data with random noise applied with a probability of 0.15.
     """
-    # Generate random noise with a standard deviation between 0.0 and 0.33.
-    img_noised = (
-        img +
-        fn.random.normal(img, stddev=fn.random.uniform(
+    # Generate random noise with a standard deviation between 0.0 and 0.33,
+    # then clamp to the original image range to avoid out-of-range values.
+    img_noised = math.clamp(
+        img + fn.random.normal(img, stddev=fn.random.uniform(
             range=(
                 constants.NOISE_FN_RANGE_MIN,
-                constants.NOISE_FN_RANGE_MAX
+                constants.NOISE_FN_RANGE_MAX,
             )
-        )
-        )
+        )),
+        fn.reductions.min(img),
+        fn.reductions.max(img),
     )
 
     # Return the augmented image data with a probability of 0.15.
@@ -123,14 +124,19 @@ def blur_fn(img: TensorGPU) -> TensorGPU:
         The image data with random Gaussian blur applied with a probability
         of 0.15.
     """
-    # Apply random Gaussian blur with a sigma between 0.5 and 1.5.
-    img_blurred = fn.gaussian_blur(
-        img, sigma=fn.random.uniform(
-            range=(
-                constants.BLUR_FN_RANGE_MIN,
-                constants.BLUR_FN_RANGE_MAX,
+    # Apply random Gaussian blur with a sigma between 0.5 and 1.5,
+    # then clamp to the original image range to avoid out-of-range values.
+    img_blurred = math.clamp(
+        fn.gaussian_blur(
+            img, sigma=fn.random.uniform(
+                range=(
+                    constants.BLUR_FN_RANGE_MIN,
+                    constants.BLUR_FN_RANGE_MAX,
+                )
             )
-        )
+        ),
+        fn.reductions.min(img),
+        fn.reductions.max(img),
     )
 
     # Return the augmented image data with a probability of 0.15.
