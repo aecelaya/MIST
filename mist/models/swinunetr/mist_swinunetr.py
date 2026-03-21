@@ -73,9 +73,10 @@ class MistSwinUNETR(MISTModel):
         Returns:
             In eval mode: segmentation tensor of shape (B, out_channels, D, H, W).
             In training mode: dict with 'prediction' key containing the
-                segmentation tensor.
+                segmentation tensor and 'deep_supervision' key set to None
+                (SwinUNETR does not support deep supervision).
         """
         output = self.model(x)
         if self.training:
-            return {"prediction": output}
+            return {"prediction": output, "deep_supervision": None}
         return output

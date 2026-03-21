@@ -86,7 +86,8 @@ class TestMistSwinUNETRForward:
             output = model(small_input)
         assert isinstance(output, dict)
         assert "prediction" in output
-        assert "deep_supervision" not in output
+        assert "deep_supervision" in output
+        assert output["deep_supervision"] is None
 
     def test_train_prediction_shape(self, small_input):
         model = MistSwinUNETR(in_channels=1, out_channels=2)

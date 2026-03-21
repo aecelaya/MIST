@@ -488,21 +488,23 @@ class MGNet(MISTModel):
                 decoder_features_for_deep_supervision.append(current_features)
 
         # --- OUTPUT ---
-        if self.training and self.use_deep_supervision:
-            decoder_features_for_deep_supervision.reverse()
+        prediction = self.final_output_conv(current_features)
 
-            final_deep_supervision_outputs = []
-            for head_idx, features in enumerate(
-                decoder_features_for_deep_supervision
-            ):
-                aux_output = self.deep_supervision_heads[head_idx](features)
-                final_deep_supervision_outputs.append(
-                    F.interpolate(aux_output, x.shape[2:])
-                )
-
+        if self.training:
+            deep_supervision_outputs = None
+            if self.use_deep_supervision:
+                decoder_features_for_deep_supervision.reverse()
+                deep_supervision_outputs = []
+                for head_idx, features in enumerate(
+                    decoder_features_for_deep_supervision
+                ):
+                    aux_output = self.deep_supervision_heads[head_idx](features)
+                    deep_supervision_outputs.append(
+                        F.interpolate(aux_output, x.shape[2:])
+                    )
             return {
-                "prediction": self.final_output_conv(current_features),
-                "deep_supervision": final_deep_supervision_outputs
+                "prediction": prediction,
+                "deep_supervision": deep_supervision_outputs,
             }
 
-        return self.final_output_conv(current_features)
+        return prediction

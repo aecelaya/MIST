@@ -340,16 +340,18 @@ class TestMGNetForward:
         for ds in output["deep_supervision"]:
             assert ds.shape == output["prediction"].shape
 
-    def test_train_without_deep_supervision_returns_tensor(
+    def test_train_without_deep_supervision_returns_dict_with_none(
         self, base_kwargs, small_input
     ):
-        """Training mode without deep supervision returns a plain tensor."""
+        """Training without deep supervision returns dict with deep_supervision=None."""
         base_kwargs["use_deep_supervision"] = False
         model = MGNet(mg_net="fmgnet", **base_kwargs)
         model.train()
         with torch.no_grad():
             output = model(small_input)
-        assert isinstance(output, torch.Tensor)
+        assert isinstance(output, dict)
+        assert "prediction" in output
+        assert output["deep_supervision"] is None
 
 
     def test_multi_channel_input(self, base_kwargs):

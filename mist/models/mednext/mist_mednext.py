@@ -49,7 +49,7 @@ class MedNeXt(MISTModel):
             blocks_down: Number of blocks in each encoder stage.
             blocks_bottleneck: Number of blocks in the bottleneck stage.
             blocks_up: Number of blocks in each decoder stage.
-            norm_type: Normalization type (e.g., "group", "batch").
+            norm_type: Normalization type. One of "group" or "layer".
             global_resp_norm: Whether to use global response normalization.
         """
         super().__init__()

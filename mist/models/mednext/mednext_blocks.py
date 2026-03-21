@@ -57,6 +57,10 @@ class MedNeXtBlock(nn.Module):
             )
         elif norm_type == "layer":
             self.norm = nn.GroupNorm(num_groups=1, num_channels=in_channels)
+        else:
+            raise ValueError(
+                f"norm_type must be 'group' or 'layer', got '{norm_type}'."
+            )
 
         self.conv2 = nn.Conv3d(
             in_channels=in_channels,
