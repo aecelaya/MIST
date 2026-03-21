@@ -160,6 +160,8 @@ To run the preprocessing portion of the MIST pipeline only, use the
 
 - `--results`: Path to the output of the analysis step. *(default: `./results`)*
 - `--numpy`: Path to save the preprocessed NumPy files. *(default: `./numpy`)*
+- `--num-workers-preprocess`: Number of parallel workers for preprocessing.
+  *(default: 1)*
 - `--compute-dtms`: Compute per-class distance transform maps (DTMs) from ground
 truth masks.
 - `--no-preprocess`: Skip preprocessing steps and only convert raw NIfTI files
@@ -205,8 +207,7 @@ the following arguments:
 
 **Model:**
 
-- `--model`: Network architecture. *(default: `nnunet`)*  
-- `--pocket`: Flag to enable the pocket version of the model (if available).
+- `--model`: Network architecture. *(default: `nnunet`)*
 - `--patch-size`: Patch size as three integers: `X Y Z`. This will overwrite the
 the choice of patch size determined by the analysis pipeline.
 

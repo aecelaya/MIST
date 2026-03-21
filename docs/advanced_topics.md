@@ -58,10 +58,7 @@ Below is an example of a valid `config.json` file.
       "in_channels": 4,
       "out_channels": 4,
       "patch_size": [128, 128, 128],
-      "target_spacing": [1.0, 1.0, 1.0],
-      "use_deep_supervision": true,
-      "use_residual_blocks": true,
-      "use_pocket_model": true
+      "target_spacing": [1.0, 1.0, 1.0]
     }
   },
 
@@ -164,43 +161,178 @@ a different part of the MIST pipeline:
 | `preprocessing`  | Defines how raw images are resampled, cropped, and normalized before training.                       |
 | `model`          | Specifies the model architecture and its hyperparameters.                                            |
 | `training`       | Controls training loop, cross-validation folds, loss function, optimizer, and augmentations.         |
-| `inference`      | Settings for inference, including sliding-window parameters, ensembling, and test-time augmentation. |
+| `inference`      | Settings for inference, including sliding-window parameters, ensembling, and test-time augmentation. `patch_overlap` must be in `[0, 1)` — a value of `1.0` is invalid. |
 | `evaluation`     | Metrics and class definitions for model evaluation.                                                  |
 
 ## Network architectures
+
+All MIST models are **3D-only**. For highly anisotropic data (e.g., thick-slice
+CT), use a thin patch along the anisotropic axis (e.g., `256 256 5`) rather
+than a 2D patch — the analysis step will choose this automatically.
 
 MIST's default network architecture is the 3D nnUNet with a residual encoder and
 two deep supervision heads. However the following architectures are also
 available:
 
-| Architecture      | `model.architecture`    |
-|-------------------|-------------------------|
-| nnUNet (default)  | `nnunet`                |
-| MedNeXt (small)   | `mednext-small`         |
-| MedNeXt (base)    | `mednext-base`          |
-| MedNeXt (medium)  | `mednext-medium`        |
-| MedNeXt (large)   | `mednext-large`         |
-| FMG-Net           | `fmgnet`                |
-| W-Net             | `wnet`                  |
+| Architecture          | `model.architecture`    |
+|-----------------------|-------------------------|
+| nnUNet (default)      | `nnunet`                |
+| nnUNet (pocket)       | `nnunet-pocket`         |
+| MedNeXt (small)       | `mednext-small`         |
+| MedNeXt (base)        | `mednext-base`          |
+| MedNeXt (medium)      | `mednext-medium`        |
+| MedNeXt (large)       | `mednext-large`         |
+| FMG-Net               | `fmgnet`                |
+| W-Net                 | `wnet`                  |
+| SwinUNETR-V2 (small)  | `swinunetr-small`       |
+| SwinUNETR-V2 (base)   | `swinunetr-base`        |
+| SwinUNETR-V2 (large)  | `swinunetr-large`       |
 
 The architecture can be specified with the `--model` flag in the `mist_run_all`
 or `mist_train` commands or directly edited in the `config.json` file. 
 
-Pocket versions of the nnUNet and MedNeXt models are available. To make this
-modification to these architectures, use the `--pocket` flag with the
-`mist_run_all` or `mist_train` commands or set the
-`model.params.use_pocket_model` attribute to `true`.
+A pocket version of nnUNet is available as a dedicated architecture. Rather than
+doubling the filter count at each depth level, `nnunet-pocket` uses a constant
+32 filters throughout the network. This reduces parameter count significantly
+and can be a good choice. We used this model in the BraTS 2024 and 2025 adult
+glioma competition and won 3rd place both years with a pocket model that had
+~700K parameters.
 
 ### Example
 
-Run the MIST training pipeline with a pocket MedNeXt base model.
+Run the MIST training pipeline with the pocket nnUNet.
 
 ```console
 mist_train --numpy /path/to/preprocessed/npy/files \
            --results /path/to/results/folder \
-           --model mednext-base \
-           --pocket
+           --model nnunet-pocket
 ```
+
+### MedNeXt kernel size
+
+MedNeXt's depthwise convolutions support kernel sizes of `3`, `5`, and `7`.
+Larger kernels capture longer-range spatial context and are the primary
+differentiator of MedNeXt over nnUNet, at the cost of higher memory usage.
+The default is `3`, which matches nnUNet's receptive field and is the safest
+choice for memory-constrained hardware.
+
+| `kernel_size` | Receptive field | Memory cost |
+|---------------|-----------------|-------------|
+| `3`           | Standard        | Low         |
+| `5`           | Extended        | Moderate    |
+| `7`           | Large           | High        |
+
+`kernel_size` is set via the `model.params` section of `config.json` — it is
+not exposed as a CLI flag. For example, to use a kernel size of 5 with
+MedNeXt base:
+
+```json
+"model": {
+  "architecture": "mednext-base",
+  "params": {
+    "in_channels": 1,
+    "out_channels": 2,
+    "patch_size": [128, 128, 128],
+    "target_spacing": [1.0, 1.0, 1.0],
+    "kernel_size": 5
+  }
+}
+```
+
+### SwinUNETR-V2 input constraints
+
+SwinUNETR-V2 requires that all three spatial dimensions of the input patch are
+**divisible by 32** (a consequence of the `patch_size=2` window plus four
+downsampling stages). If the patch size chosen by the analysis step doesn't
+satisfy this constraint, the model will raise an error at the first forward
+pass. Adjust `patch_size` in `config.json` to the nearest multiples of 32
+before training.
+
+### FMG-Net and W-Net design
+
+FMG-Net and W-Net are **multigrid architectures** where representational
+capacity comes from the network topology rather than channel widening. Both
+always use the **pocket paradigm** (constant 32 filters at every depth level)
+and always have residual blocks and deep supervision enabled.
+
+The two variants differ in their traversal schedule:
+
+- **FMG-Net** (`fmgnet`): progressive schedule — one full V-cycle at each
+  intermediate resolution before diving to the next, producing a staircase of
+  increasing spike heights `[1, 2, 3, …, max]`.
+- **W-Net** (`wnet`): sparse W-pattern schedule — alternates shallow and deep
+  V-cycles across the full depth, producing a symmetric pattern like
+  `[1, 2, 1, 3, 1, 2, 1]`.
+
+Both variants adapt their depth and stride schedule to the input `patch_size`
+and `target_spacing`, the same way nnUNet does.
+
+### Adding a custom model
+
+MIST uses a registry pattern to discover model architectures. Adding a new
+model requires three steps: implement the model class, register a factory
+function, and add an import to `mist/models/__init__.py`.
+
+**Step 1 — Implement the model class.**
+
+Create a file `mist/models/mymodel/mist_mymodel.py`. The class must be a
+`torch.nn.Module`. In training mode, `forward` should return a dict with a
+`"prediction"` key (and optionally a `"deep_supervision"` list). In eval mode,
+return the logit tensor directly.
+
+```python
+# mist/models/mymodel/mist_mymodel.py
+import torch
+import torch.nn as nn
+
+
+class MyModel(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, **kwargs):
+        super().__init__()
+        self.net = nn.Conv3d(in_channels, out_channels, kernel_size=1)
+
+    def forward(self, x: torch.Tensor):
+        output = self.net(x)
+        if self.training:
+            return {"prediction": output}
+        return output
+```
+
+**Step 2 — Register a factory function.**
+
+Create `mist/models/mymodel/mymodel_registry.py`. Use the `@register_model`
+decorator to make the architecture selectable by name.
+
+```python
+# mist/models/mymodel/mymodel_registry.py
+from mist.models.mymodel.mist_mymodel import MyModel
+from mist.models.model_registry import register_model
+
+
+@register_model("mymodel")
+def create_mymodel(**kwargs) -> MyModel:
+    required_keys = ["in_channels", "out_channels"]
+    for key in required_keys:
+        if key not in kwargs:
+            raise ValueError(f"Missing required key '{key}' in model configuration.")
+    return MyModel(
+        in_channels=kwargs["in_channels"],
+        out_channels=kwargs["out_channels"],
+    )
+```
+
+**Step 3 — Trigger registration at import time.**
+
+Add an import to `mist/models/__init__.py`. Registration happens when the
+module is imported, so the factory must be imported before any registry lookup.
+
+```python
+# mist/models/__init__.py  (add this line)
+from mist.models.mymodel.mymodel_registry import create_mymodel
+```
+
+After these three steps, `--model mymodel` will work with `mist_train` and
+`mist_run_all`.
 
 ## Loss functions
 
