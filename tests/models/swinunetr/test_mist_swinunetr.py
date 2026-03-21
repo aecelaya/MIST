@@ -48,6 +48,16 @@ class TestMistSwinUNETRInit:
         )
         assert isinstance(model, torch.nn.Module)
 
+    def test_patch_size_not_divisible_by_32_raises(self):
+        """patch_size dimensions not divisible by 32 raise at construction."""
+        with pytest.raises(ValueError, match="divisible by 32"):
+            MistSwinUNETR(in_channels=1, out_channels=2, patch_size=[64, 64, 48])
+
+    def test_patch_size_divisible_by_32_passes(self):
+        """patch_size with all dimensions divisible by 32 constructs cleanly."""
+        model = MistSwinUNETR(in_channels=1, out_channels=2, patch_size=[96, 64, 32])
+        assert isinstance(model, torch.nn.Module)
+
     @pytest.mark.parametrize("feature_size", [24, 48, 96])
     def test_feature_sizes_construct(self, feature_size):
         """All three standard feature sizes construct without error."""

@@ -1,6 +1,6 @@
 """MIST-compatible base implementation of MedNeXt."""
 from collections import OrderedDict
-from typing import Union, Dict
+from typing import Any, Union, Dict
 from collections.abc import Sequence
 import torch
 import torch.nn as nn
@@ -22,6 +22,7 @@ class MedNeXt(MISTModel):
         init_filters: int=32,
         in_channels: int=1,
         out_channels: int=2,
+        patch_size: Any=None,
         encoder_expansion_ratio: Union[Sequence[int], int]=2,
         decoder_expansion_ratio: Union[Sequence[int], int]=2,
         bottleneck_expansion_ratio: int=2,
@@ -33,6 +34,7 @@ class MedNeXt(MISTModel):
         blocks_up: Sequence[int]=(2, 2, 2, 2),
         norm_type: str="group",
         global_resp_norm: bool=False,
+        **kwargs: Any,
     ):
         """Initialize the MedNeXt model.
 
@@ -40,6 +42,10 @@ class MedNeXt(MISTModel):
             init_filters: Number of initial filters.
             in_channels: Number of input channels.
             out_channels: Number of output channels.
+            patch_size: Expected input spatial dimensions. All values must be
+                divisible by 2 ** len(blocks_down) (default: 16 for a
+                4-stage architecture). Ignored at forward time — used only
+                for validation.
             encoder_expansion_ratio: Expansion ratio for encoder blocks.
             decoder_expansion_ratio: Expansion ratio for decoder blocks.
             bottleneck_expansion_ratio: Expansion ratio for bottleneck blocks.
@@ -51,8 +57,26 @@ class MedNeXt(MISTModel):
             blocks_up: Number of blocks in each decoder stage.
             norm_type: Normalization type. One of "group" or "layer".
             global_resp_norm: Whether to use global response normalization.
+            **kwargs: Additional keyword arguments forwarded from the MIST
+                interface (e.g. target_spacing). Unused.
+
+        Raises:
+            ValueError: If any dimension of patch_size is not divisible by
+                2 ** len(blocks_down).
         """
         super().__init__()
+
+        if patch_size is not None:
+            min_divisor = 2 ** len(blocks_down)
+            bad_dims = [d for d in patch_size if d % min_divisor != 0]
+            if bad_dims:
+                raise ValueError(
+                    f"MedNeXt requires all patch_size dimensions to be "
+                    f"divisible by 2 ** len(blocks_down) = {min_divisor} "
+                    f"(one factor-of-2 per downsampling stage). "
+                    f"Got patch_size={list(patch_size)}, "
+                    f"offending dimensions: {bad_dims}."
+                )
         self.use_deep_supervision = use_deep_supervision
         enc_kernel_size = dec_kernel_size = kernel_size
         filters_multiplier = 2
