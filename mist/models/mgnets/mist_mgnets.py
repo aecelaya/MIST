@@ -1,5 +1,6 @@
 """Implement adaptive Multi-Grid Network (MGNet) architectures."""
 
+from collections import OrderedDict
 from typing import List, Sequence, Dict, Optional, Union, Any
 
 import torch
@@ -7,11 +8,13 @@ from torch import nn
 from torch.nn import functional as F
 from monai.networks.blocks.dynunet_block import UnetBasicBlock, UnetResBlock
 
+from mist.models.base_model import MISTModel
 from mist.models.nnunet import nnunet_utils
 from mist.models.nnunet.nnunet_constants import NNUnetConstants as constants
+from mist.models.mgnets.mgnets_constants import MGNetConstants as mgnet_constants
 
 
-class MGNet(nn.Module):
+class MGNet(MISTModel):
     """
     Adaptive Multi-Grid Network (FMG-Net / W-Net).
 
@@ -55,30 +58,32 @@ class MGNet(nn.Module):
         patch_size: Sequence[int],
         target_spacing: Sequence[float],
         mg_net: str = "fmgnet",
-        use_pocket_model: bool = False,
         use_residual_blocks: bool = False,
         use_deep_supervision: bool = True,
         num_deep_supervision_heads: Optional[int] = None,
         **kwargs: Any
     ):
         """
-        Initializes the MGNet architecture by simulating the grid traversal to 
+        Initializes the MGNet architecture by simulating the grid traversal to
         dynamically calculate channel dependencies.
+
+        MGNet always uses the pocket paradigm: filters are kept constant at
+        base_filters across all depths. Representational capacity comes from
+        the multigrid topology (number and pattern of V-cycles), not from
+        channel widening.
 
         Args:
             in_channels: Number of input image channels.
             out_channels: Number of output classes.
             patch_size: The spatial size of the input patch (e.g., 128x128x128).
             target_spacing: The voxel spacing (e.g., [1.0, 1.0, 1.0]).
-            mg_net: The topology type. Options: 'wnet', 'fmgnet', or 'unet'. 
-                Defaults to 'wnet'.
-            use_pocket_model: If True, limits filter count to base_filters at
-                all levels to reduce model size. Defaults to False.
-            use_residual_blocks: If True, uses ResBlocks; otherwise uses 
+            mg_net: The topology type. Options: 'wnet', 'fmgnet', or 'unet'.
+                Defaults to 'fmgnet'.
+            use_residual_blocks: If True, uses ResBlocks; otherwise uses
                 BasicBlocks. Defaults to False.
-            use_deep_supervision: If True, enables auxiliary loss heads at lower 
+            use_deep_supervision: If True, enables auxiliary loss heads at lower
                 resolutions. Defaults to True.
-            num_deep_supervision_heads: Explicit number of aux heads. If None, 
+            num_deep_supervision_heads: Explicit number of aux heads. If None,
                 defaults to (num_layers - 2). Defaults to None.
             **kwargs: Additional keyword arguments (ignored).
         """
@@ -106,16 +111,12 @@ class MGNet(nn.Module):
             self.num_aux_heads = 0
 
         # --- 3. FILTER & BLOCK CONFIGURATION ---
+        # MGNet always uses the pocket paradigm: constant filters at all depths.
+        # Representational capacity comes from the multigrid topology, not width.
         base_filters = constants.INITIAL_FILTERS
-        if use_pocket_model:
-            self.filters_per_layer = [
-                base_filters for _ in range(self.num_layers)]
-        else:
-            # Filters double every layer, capped at MAX_FILTERS_3D.
-            self.filters_per_layer = [
-                min((2 ** i) * base_filters, constants.MAX_FILTERS_3D)
-                for i in range(self.num_layers)
-            ]
+        self.filters_per_layer = [
+            base_filters for _ in range(self.num_layers)
+        ]
 
         self.block_class = (
             UnetResBlock if use_residual_blocks else UnetBasicBlock
@@ -257,6 +258,17 @@ class MGNet(nn.Module):
     # HELPER METHODS
     # =========================================================================
 
+    def get_encoder_state_dict(self) -> OrderedDict:
+        """Return encoder weights: main encoder path only.
+
+        Spike V-cycles are excluded — they are topology-specific to the
+        multigrid structure and do not transfer cleanly across architectures.
+        """
+        return OrderedDict(
+            {k: v for k, v in self.state_dict().items()
+             if k.startswith("main_encoder.")}
+        )
+
     def _generate_sparse_w_sequence(self, max_height: int) -> List[int]:
         """
         Generates the recursive V-cycle pattern for W-Net topology.
@@ -306,19 +318,16 @@ class MGNet(nn.Module):
             The constructed convolutional block (or Sequence containing
             projection).
         """
-        if (
-            in_channels > constants.REDUCTION_THRESHOLD
-            and in_channels != out_channels
-        ):
+        if in_channels > mgnet_constants.REDUCTION_THRESHOLD:
             projection = nn.Conv3d(
                 in_channels,
-                constants.REDUCTION_THRESHOLD,
+                mgnet_constants.REDUCTION_THRESHOLD,
                 kernel_size=1,
                 bias=False
             )
             block = self.block_class(
                 spatial_dims=3,
-                in_channels=512,
+                in_channels=mgnet_constants.REDUCTION_THRESHOLD,
                 out_channels=out_channels,
                 kernel_size=kernel_size,
                 stride=stride,
@@ -341,20 +350,24 @@ class MGNet(nn.Module):
             self, in_channels: int, scale_factor: Sequence[int]
         ) -> nn.Module:
         """
-        Creates a trilinear upsampling layer.
+        Creates a learnable transposed convolution upsampling layer.
+
+        Uses kernel_size == stride, which is the standard approach for
+        artifact-free upsampling and handles anisotropic strides correctly.
 
         Args:
-            in_channels: Number of input channels (unused by Upsample, but kept 
-                for interface).
-            scale_factor: The scale factor for each spatial dimension.
+            in_channels: Number of input channels.
+            scale_factor: The stride (and kernel size) for each spatial
+                dimension, derived from the encoder stride at that depth.
 
         Returns:
-            The upsampling layer.
+            The transposed convolution upsampling layer.
         """
-        return nn.Upsample(
-            scale_factor=tuple(scale_factor),
-            mode="trilinear",
-            align_corners=False
+        return nn.ConvTranspose3d(
+            in_channels,
+            in_channels,
+            kernel_size=tuple(scale_factor),
+            stride=tuple(scale_factor),
         )
 
     def _init_weights(self, module: nn.Module):
