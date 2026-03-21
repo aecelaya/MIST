@@ -60,7 +60,6 @@ class MGNet(MISTModel):
         mg_net: str = "fmgnet",
         use_residual_blocks: bool = False,
         use_deep_supervision: bool = True,
-        num_deep_supervision_heads: Optional[int] = None,
         **kwargs: Any
     ):
         """
@@ -81,13 +80,19 @@ class MGNet(MISTModel):
                 Defaults to 'fmgnet'.
             use_residual_blocks: If True, uses ResBlocks; otherwise uses
                 BasicBlocks. Defaults to False.
-            use_deep_supervision: If True, enables auxiliary loss heads at lower
-                resolutions. Defaults to True.
-            num_deep_supervision_heads: Explicit number of aux heads. If None,
-                defaults to (num_layers - 2). Defaults to None.
+            use_deep_supervision: If True, enables 2 auxiliary loss heads at
+                lower resolutions, matching nnUNet's default. Defaults to True.
             **kwargs: Additional keyword arguments (ignored).
         """
         super().__init__()
+
+        if len(patch_size) != 3:
+            raise ValueError(
+                f"MGNet requires a 3D patch_size, but got {len(patch_size)} "
+                "dimensions. For anisotropic data use a thin Z slice "
+                "(e.g., 256×256×5) rather than a 2D patch."
+            )
+
         self.num_classes = out_channels
         self.use_deep_supervision = use_deep_supervision
 
@@ -99,16 +104,7 @@ class MGNet(MISTModel):
         self.bottleneck_layer_idx = self.num_layers - 1
 
         # --- 2. DEEP SUPERVISION CONFIGURATION ---
-        if use_deep_supervision:
-            if num_deep_supervision_heads:
-                total_heads = num_deep_supervision_heads
-            else:
-                # Default rule: supervise all levels except the two lowest
-                # resolutions.
-                total_heads = max(1, self.num_layers - 2)
-            self.num_aux_heads = total_heads - 1
-        else:
-            self.num_aux_heads = 0
+        self.num_aux_heads = 2 if use_deep_supervision else 0
 
         # --- 3. FILTER & BLOCK CONFIGURATION ---
         # MGNet always uses the pocket paradigm: constant filters at all depths.
@@ -182,7 +178,7 @@ class MGNet(MISTModel):
                     in_channels=expected_in_channels,
                     out_channels=self.filters_per_layer[depth_idx],
                     kernel_size=self.kernels[depth_idx + 1],
-                    stride=[1, 1, 1]
+                    stride=[1, 1, 1],
                 ))
                 up_samples.append(self._make_upsample(
                     in_channels=self.filters_per_layer[depth_idx + 1],
@@ -228,7 +224,7 @@ class MGNet(MISTModel):
                 in_channels=expected_in_channels,
                 out_channels=self.filters_per_layer[depth_idx],
                 kernel_size=self.kernels[depth_idx + 1],
-                stride=[1, 1, 1]
+                stride=[1, 1, 1],
             ))
             self.main_decoder_upsamples.append(self._make_upsample(
                 in_channels=self.filters_per_layer[depth_idx + 1],
@@ -248,7 +244,7 @@ class MGNet(MISTModel):
                     nn.Conv3d(
                         self.filters_per_layer[level_idx],
                         self.num_classes,
-                        kernel_size=1
+                        kernel_size=1,
                     )
                 )
 
@@ -323,7 +319,7 @@ class MGNet(MISTModel):
                 in_channels,
                 mgnet_constants.REDUCTION_THRESHOLD,
                 kernel_size=1,
-                bias=False
+                bias=False,
             )
             block = self.block_class(
                 spatial_dims=3,
@@ -332,7 +328,7 @@ class MGNet(MISTModel):
                 kernel_size=kernel_size,
                 stride=stride,
                 norm_name=constants.NORMALIZATION,
-                act_name=constants.ACTIVATION
+                act_name=constants.ACTIVATION,
             )
             return nn.Sequential(projection, block)
 
@@ -343,7 +339,7 @@ class MGNet(MISTModel):
             kernel_size=kernel_size,
             stride=stride,
             norm_name=constants.NORMALIZATION,
-            act_name=constants.ACTIVATION
+            act_name=constants.ACTIVATION,
         )
 
     def _make_upsample(

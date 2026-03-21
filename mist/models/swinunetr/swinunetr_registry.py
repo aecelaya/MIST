@@ -20,9 +20,6 @@ def create_swinunetr(variant: str, **kwargs) -> MistSwinUNETR:
         **kwargs: Additional keyword arguments including:
             - in_channels: Number of input channels.
             - out_channels: Number of output classes.
-            - use_deep_supervision: Accepted but not used (always None).
-            - use_residual_blocks: Accepted but not used (V2 built-in).
-            - use_pocket_model: Accepted but not used (use small variant).
             - patch_size, target_spacing: Accepted but not used.
 
     Returns:
@@ -47,7 +44,6 @@ def create_swinunetr(variant: str, **kwargs) -> MistSwinUNETR:
         in_channels=kwargs["in_channels"],
         out_channels=kwargs["out_channels"],
         feature_size=feature_size_map[variant],
-        use_deep_supervision=kwargs.get("use_deep_supervision", True),
     )
 
 

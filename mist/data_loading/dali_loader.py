@@ -141,8 +141,6 @@ class TrainPipeline(GenericPipeline):
             during augmentation.
         use_contrast: Whether to adjust contrast in the input data during
             augmentation.
-        dimension: Whether to return 2D or 3D data. If 2D, the pipeline returns
-            DHWC data. If 3D, the pipeline returns CDHW data.
     """
 
     def __init__(
@@ -161,7 +159,6 @@ class TrainPipeline(GenericPipeline):
         use_blur: bool = True,
         use_brightness: bool = True,
         use_contrast: bool = True,
-        dimension: int = 3,
         **kwargs,
     ):
         super().__init__(
@@ -219,11 +216,6 @@ class TrainPipeline(GenericPipeline):
             self.use_brightness = use_brightness
             self.use_contrast = use_contrast
 
-        # Define the dimension of the output data. If 2D, the pipeline returns
-        # DHWC data. If 3D, the pipeline returns CDHW data.
-        if dimension not in [2, 3]:
-            raise ValueError("Dimension must be either 2 or 3.")
-        self.dimension = dimension
 
     def load_data(self):
         """Load the image, label, and DTM data from the input readers."""

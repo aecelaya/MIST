@@ -19,7 +19,6 @@ class MedNeXt(MISTModel):
     """Base MedNeXt architecture."""
     def __init__(
         self,
-        spatial_dims: int=3,
         init_filters: int=32,
         in_channels: int=1,
         out_channels: int=2,
@@ -34,12 +33,10 @@ class MedNeXt(MISTModel):
         blocks_up: Sequence[int]=(2, 2, 2, 2),
         norm_type: str="group",
         global_resp_norm: bool=False,
-        use_pocket_model: bool=False,
     ):
         """Initialize the MedNeXt model.
 
         Args:
-            spatial_dims: Number of spatial dimensions (2 or 3).
             init_filters: Number of initial filters.
             in_channels: Number of input channels.
             out_channels: Number of output channels.
@@ -54,16 +51,11 @@ class MedNeXt(MISTModel):
             blocks_up: Number of blocks in each decoder stage.
             norm_type: Normalization type (e.g., "group", "batch").
             global_resp_norm: Whether to use global response normalization.
-            use_pocket_model: Whether to use the pocket version of MedNeXT.
         """
         super().__init__()
-        # Set up basic parameters.
         self.use_deep_supervision = use_deep_supervision
-        if spatial_dims not in [2, 3]:
-            raise ValueError("`spatial_dims` can only be 2 or 3.")
-        spatial_dims_str = f"{spatial_dims}d"
         enc_kernel_size = dec_kernel_size = kernel_size
-        filters_multiplier = 1 if use_pocket_model else 2
+        filters_multiplier = 2
 
         if isinstance(encoder_expansion_ratio, int):
             encoder_expansion_ratio = (
@@ -72,8 +64,7 @@ class MedNeXt(MISTModel):
         if isinstance(decoder_expansion_ratio, int):
             decoder_expansion_ratio = [decoder_expansion_ratio] * len(blocks_up)
 
-        conv = nn.Conv2d if spatial_dims_str == "2d" else nn.Conv3d
-        self.stem = conv(in_channels, init_filters, kernel_size=1)
+        self.stem = nn.Conv3d(in_channels, init_filters, kernel_size=1)
 
         # Encoder.
         enc_stages = []
@@ -88,7 +79,6 @@ class MedNeXt(MISTModel):
                         kernel_size=enc_kernel_size,
                         use_residual_connection=use_residual_blocks,
                         norm_type=norm_type,
-                        dim=spatial_dims_str,
                         global_resp_norm=global_resp_norm,
                     )
                     for _ in range(num_blocks)
@@ -102,7 +92,6 @@ class MedNeXt(MISTModel):
                     kernel_size=enc_kernel_size,
                     use_residual_connection=use_residual_blocks,
                     norm_type=norm_type,
-                    dim=spatial_dims_str,
                 )
             )
         self.enc_stages = nn.ModuleList(enc_stages)
@@ -121,7 +110,6 @@ class MedNeXt(MISTModel):
                 kernel_size=dec_kernel_size,
                 use_residual_connection=use_residual_blocks,
                 norm_type=norm_type,
-                dim=spatial_dims_str,
                 global_resp_norm=global_resp_norm,
             )
             for _ in range(blocks_bottleneck)
@@ -145,7 +133,6 @@ class MedNeXt(MISTModel):
                     kernel_size=dec_kernel_size,
                     use_residual_connection=use_residual_blocks,
                     norm_type=norm_type,
-                    dim=spatial_dims_str,
                     global_resp_norm=global_resp_norm,
                 )
             )
@@ -164,7 +151,6 @@ class MedNeXt(MISTModel):
                         kernel_size=dec_kernel_size,
                         use_residual_connection=use_residual_blocks,
                         norm_type=norm_type,
-                        dim=spatial_dims_str,
                         global_resp_norm=global_resp_norm,
                     )
                     for _ in range(num_blocks)
@@ -177,7 +163,6 @@ class MedNeXt(MISTModel):
         self.out_0 = MedNeXtOutBlock(
             in_channels=init_filters,
             n_classes=out_channels,
-            dim=spatial_dims_str
         )
 
         # Deep supervision output blocks.
@@ -186,7 +171,6 @@ class MedNeXt(MISTModel):
                 MedNeXtOutBlock(
                     in_channels=init_filters * (filters_multiplier ** i),
                     n_classes=out_channels,
-                    dim=spatial_dims_str
                 )
                 for i in range(1, len(blocks_up) + 1)
             ]

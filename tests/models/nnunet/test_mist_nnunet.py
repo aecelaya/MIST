@@ -11,7 +11,6 @@ from mist.models.nnunet.mist_nnunet import NNUNet
 def base_kwargs():
     """Base keyword arguments for constructing the NNUNet."""
     return {
-        "spatial_dims": 3,
         "in_channels": 1,
         "out_channels": 2,
         "patch_size": [32, 32, 32],
@@ -36,25 +35,21 @@ def test_nnunet_initialization_pocket_model(base_kwargs):
     assert isinstance(model.unet, torch.nn.Module)
 
 
-def test_nnunet_mismatched_dimensions_raises(base_kwargs):
-    """Covers the case where patch size and spacing do not match spatial dims."""
+def test_nnunet_non_3d_patch_size_raises(base_kwargs):
+    """2D patch_size raises a clear 3D-only error."""
     base_kwargs["patch_size"] = [32, 32]
+    base_kwargs["target_spacing"] = [1.0, 1.0]
+    with pytest.raises(ValueError, match="3D patch_size"):
+        NNUNet(**base_kwargs)
+
+
+def test_nnunet_mismatched_patch_spacing_raises(base_kwargs):
+    """Mismatched patch_size / target_spacing lengths raises ValueError."""
+    base_kwargs["target_spacing"] = [1.0, 1.0]
     with pytest.raises(
         ValueError, match="must have the same number of dimensions"
     ):
         NNUNet(**base_kwargs)
-
-
-def test_nnunet_initialization_2d_filters_branch(base_kwargs):
-    """Covers the 2D filters configuration path in model initialization."""
-    base_kwargs.update({
-        "spatial_dims": 2,
-        "patch_size": [32, 32],
-        "target_spacing": [1.0, 1.0],
-        "use_pocket_model": False,
-    })
-    model = NNUNet(**base_kwargs)
-    assert isinstance(model.unet, torch.nn.Module)
 
 
 # Forward pass tests.

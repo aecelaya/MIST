@@ -18,9 +18,6 @@ def base_config():
     return {
         "in_channels": 1,
         "out_channels": 3,
-        "use_residual_blocks": True,
-        "use_deep_supervision": False,
-        "use_pocket_model": False,
     }
 
 
@@ -37,13 +34,7 @@ def test_create_mednext_invalid_variant(base_config):
         create_mednext(variant="invalid", **base_config)
 
 
-@pytest.mark.parametrize("missing_key", [
-    "in_channels",
-    "out_channels",
-    "use_residual_blocks",
-    "use_deep_supervision",
-    "use_pocket_model",
-])
+@pytest.mark.parametrize("missing_key", ["in_channels", "out_channels"])
 def test_create_mednext_missing_keys(base_config, missing_key):
     """Test that missing required config keys raise ValueError."""
     config = base_config.copy()

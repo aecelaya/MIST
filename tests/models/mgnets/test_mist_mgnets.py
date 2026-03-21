@@ -99,6 +99,13 @@ class TestMGNetInit:
             MGNet(**base_kwargs, some_unknown_arg="ignored"), torch.nn.Module
         )
 
+    def test_non_3d_patch_size_raises(self, base_kwargs):
+        """2D patch_size raises a clear 3D-only error."""
+        base_kwargs["patch_size"] = [32, 32]
+        base_kwargs["target_spacing"] = [1.0, 1.0]
+        with pytest.raises(ValueError, match="3D patch_size"):
+            MGNet(**base_kwargs)
+
     # --- Pocket paradigm ---
 
     def test_filters_per_layer_are_constant(self, base_kwargs):
@@ -149,16 +156,10 @@ class TestMGNetInit:
         assert model.num_aux_heads == 0
         assert len(model.deep_supervision_heads) == 0
 
-    def test_deep_supervision_default_head_count(self, base_kwargs):
-        """Default: total_heads = max(1, num_layers - 2), num_aux = total - 1."""
+    def test_deep_supervision_uses_two_aux_heads(self, base_kwargs):
+        """Deep supervision always uses 2 auxiliary heads, matching nnUNet."""
         model = MGNet(**base_kwargs)
-        expected_aux = max(1, model.num_layers - 2) - 1
-        assert model.num_aux_heads == expected_aux
-
-    def test_explicit_num_deep_supervision_heads(self, base_kwargs):
-        base_kwargs["num_deep_supervision_heads"] = 2
-        model = MGNet(**base_kwargs)
-        assert model.num_aux_heads == 1  # total_heads=2 → num_aux=1
+        assert model.num_aux_heads == 2
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +195,7 @@ class TestMakeBlock:
         assert isinstance(projection, torch.nn.Conv3d)
         assert projection.in_channels == mgnet_constants.REDUCTION_THRESHOLD + 1
         assert projection.out_channels == mgnet_constants.REDUCTION_THRESHOLD
+
 
     def test_no_projection_at_exact_threshold(self):
         """in_channels == REDUCTION_THRESHOLD does not trigger projection."""
@@ -232,6 +234,7 @@ class TestMakeUpsample:
     def test_returns_conv_transpose_3d(self):
         up = self.model._make_upsample(in_channels=32, scale_factor=[2, 2, 2])
         assert isinstance(up, torch.nn.ConvTranspose3d)
+
 
     def test_kernel_size_equals_stride(self):
         """kernel_size == stride ensures artifact-free upsampling."""
@@ -348,17 +351,6 @@ class TestMGNetForward:
             output = model(small_input)
         assert isinstance(output, torch.Tensor)
 
-    def test_train_with_zero_aux_heads_returns_empty_ds_list(
-        self, base_kwargs, small_input
-    ):
-        """num_deep_supervision_heads=1 → num_aux_heads=0 → empty DS list."""
-        base_kwargs["num_deep_supervision_heads"] = 1
-        model = MGNet(mg_net="fmgnet", **base_kwargs)
-        model.train()
-        with torch.no_grad():
-            output = model(small_input)
-        assert isinstance(output, dict)
-        assert output["deep_supervision"] == []
 
     def test_multi_channel_input(self, base_kwargs):
         """Model handles multi-channel inputs correctly."""
@@ -379,3 +371,4 @@ class TestMGNetForward:
             output = model(torch.randn(1, 1, 64, 64, 32))
         assert output.shape[0] == 1
         assert output.shape[1] == base_kwargs["out_channels"]
+

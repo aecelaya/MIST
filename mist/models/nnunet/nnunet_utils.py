@@ -23,14 +23,14 @@ def get_padding(
         Padding for convolution layer as an integer or a sequence of integers.
 
     Raises:
-        AssertionError: If padding value is negative.
+        ValueError: If padding value is negative.
     """
     kernel_size_np = np.atleast_1d(kernel_size)
     stride_np = np.atleast_1d(stride)
 
     padding_np = (kernel_size_np - stride_np + 1) / 2
     if np.min(padding_np) < 0:
-        raise AssertionError(
+        raise ValueError(
             "Padding value should not be negative, please change the kernel "
             "size and/or stride."
         )
@@ -62,7 +62,7 @@ def get_output_padding(
             sequence of integers.
 
     Raises:
-        AssertionError: If out_padding value is negative.
+        ValueError: If out_padding value is negative.
     """
     kernel_size_np = np.atleast_1d(kernel_size)
     stride_np = np.atleast_1d(stride)
@@ -70,7 +70,7 @@ def get_output_padding(
 
     out_padding_np = 2 * padding_np + stride_np - kernel_size_np
     if np.min(out_padding_np) < 0:
-        raise AssertionError(
+        raise ValueError(
             "The value of out_padding should not be negative, please change "
             "the kernel size and/or stride."
         )

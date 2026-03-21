@@ -18,7 +18,7 @@ def test_get_padding_valid(kernel, stride, expected):
 def test_get_padding_negative_raises():
     """Covers the case where padding would be negative."""
     with pytest.raises(
-        AssertionError, match="Padding value should not be negative"
+        ValueError, match="Padding value should not be negative"
     ):
         nnunet_utils.get_padding(2, 4)  # Will cause negative padding
 
@@ -37,7 +37,7 @@ def test_get_output_padding_valid(kernel, stride, padding, expected):
 def test_get_output_padding_negative_raises():
     """Covers the case where output padding would be negative."""
     with pytest.raises(
-        AssertionError, match="out_padding should not be negative"
+        ValueError, match="out_padding should not be negative"
     ):
         nnunet_utils.get_output_padding(5, 1, 1)
 

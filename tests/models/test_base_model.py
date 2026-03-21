@@ -18,7 +18,6 @@ from mist.models.swinunetr.mist_swinunetr import MistSwinUNETR
 def nnunet_model():
     """Minimal pocket NNUNet for fast construction."""
     return NNUNet(
-        spatial_dims=3,
         in_channels=1,
         out_channels=2,
         patch_size=[32, 32, 32],
@@ -31,14 +30,12 @@ def nnunet_model():
 
 @pytest.fixture
 def mednext_model():
-    """Minimal pocket MedNeXt for fast construction."""
+    """Minimal MedNeXt for fast construction."""
     return MedNeXt(
-        spatial_dims=3,
         in_channels=1,
         out_channels=2,
         use_residual_blocks=False,
         use_deep_supervision=False,
-        use_pocket_model=True,
     )
 
 

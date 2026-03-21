@@ -13,7 +13,6 @@ class NNUnetConstants:
     MIN_SIZE_FOR_STRIDE = 8 # Minimum size for default stride to be applied.
     INITIAL_FILTERS = 32 # Initial number of filters for the network.
     MAX_FILTERS_3D = 320 # Maximum number of filters for 3D network.
-    MAX_FILTERS_2D = 512 # Maximum number of filters for 2D network.
 
     # Activation function for nnUNet.
     ACTIVATION = ("leakyrelu", {"inplace": True, "negative_slope": 0.01})

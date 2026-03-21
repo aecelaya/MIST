@@ -17,9 +17,6 @@ def base_kwargs():
     return {
         "in_channels": 1,
         "out_channels": 2,
-        "use_deep_supervision": True,
-        "use_residual_blocks": False,
-        "use_pocket_model": False,
         "patch_size": [64, 64, 64],
         "target_spacing": [1.0, 1.0, 1.0],
     }
@@ -42,19 +39,12 @@ class TestMistSwinUNETRInit:
         model = MistSwinUNETR(in_channels=1, out_channels=2)
         assert isinstance(model, torch.nn.Module)
 
-    def test_stores_use_deep_supervision(self):
-        model = MistSwinUNETR(in_channels=1, out_channels=2,
-                              use_deep_supervision=False)
-        assert model.use_deep_supervision is False
-
     def test_extra_kwargs_are_ignored(self):
         """Interface kwargs (patch_size, target_spacing, etc.) don't raise."""
         model = MistSwinUNETR(
             in_channels=1, out_channels=2,
             patch_size=[64, 64, 64],
             target_spacing=[1.0, 1.0, 1.0],
-            use_residual_blocks=False,
-            use_pocket_model=False,
         )
         assert isinstance(model, torch.nn.Module)
 
@@ -96,17 +86,7 @@ class TestMistSwinUNETRForward:
             output = model(small_input)
         assert isinstance(output, dict)
         assert "prediction" in output
-        assert "deep_supervision" in output
-
-    def test_train_deep_supervision_is_none(self, small_input):
-        """SwinUNETR does not support deep supervision; key is always None."""
-        model = MistSwinUNETR(
-            in_channels=1, out_channels=2, use_deep_supervision=True
-        )
-        model.train()
-        with torch.no_grad():
-            output = model(small_input)
-        assert output["deep_supervision"] is None
+        assert "deep_supervision" not in output
 
     def test_train_prediction_shape(self, small_input):
         model = MistSwinUNETR(in_channels=1, out_channels=2)

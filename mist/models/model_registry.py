@@ -28,7 +28,7 @@ def get_model_from_registry(model_name: str, **kwargs):
     Construct a model from the registry.
 
     Args:
-        name: Registered name of the model.
+        model_name: Registered name of the model.
         **kwargs: Keyword arguments passed to the model-building function.
 
     Returns:

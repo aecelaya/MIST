@@ -14,18 +14,12 @@ def create_mednext(variant: str, **kwargs) -> MedNeXt:
             including:
             - in_channels: Number of input channels.
             - out_channels: Number of output classes for segmentation.
-            - use_residual_blocks: Turn on residual connections in the model.
-            - use_deep_supervision: Turn on deep supervision in the model.
-            - use_pocket_model: Use pocket version of the model.
 
     Returns:
         An instance of the requested MedNeXt variant.
     """
     # Validate presence of required keys to avoid obscure KeyErrors.
-    required_keys = [
-        "in_channels", "out_channels", "use_residual_blocks",
-        "use_deep_supervision", "use_pocket_model"
-    ]
+    required_keys = ["in_channels", "out_channels"]
     for key in required_keys:
         if key not in kwargs:
             raise ValueError(
@@ -33,19 +27,17 @@ def create_mednext(variant: str, **kwargs) -> MedNeXt:
             )
 
     common_args = {
-        "spatial_dims": 3,
         "in_channels": kwargs["in_channels"],
         "out_channels": kwargs["out_channels"],
         # Larger depthwise kernels (5, 7) are MedNeXt's distinguishing feature
         # over nnUNet. Defaults to 3 for memory efficiency; set to 5 or 7 for
         # higher-capacity configurations on well-resourced hardware.
         "kernel_size": kwargs.get("kernel_size", 3),
-        "use_deep_supervision": kwargs["use_deep_supervision"],
-        "use_residual_blocks": kwargs["use_residual_blocks"],
+        "use_deep_supervision": True,
+        "use_residual_blocks": True,
         "norm_type": "group",
         "global_resp_norm": False,
         "init_filters": 32,
-        "use_pocket_model": kwargs["use_pocket_model"],
     }
 
     variant = variant.upper()

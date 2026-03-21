@@ -17,15 +17,18 @@ class NNUNet(MISTModel):
 
     This is essentially a wrapper around the DynamicUNet class that we implement
     in dynamic_unet.py. It is used to create a nnUNet model with the specified
-    parameters. These parameters include the spatial dimensions, number of input
-    channels, number of output channels, the image size (i.e., ROI size), the
-    image spacing, whether to use residual blocks, whether to use deep
-    supervision, the number of deep supervision heads, and whether to use the
-    pocket version of the model.
+    parameters. These parameters include the number of input channels, number of
+    output channels, the image size (i.e., ROI size), the image spacing, whether
+    to use residual blocks, whether to use deep supervision, and whether to use
+    the pocket version of the model.
+
+    All inputs are expected to be 3D volumes. For highly anisotropic datasets
+    a quasi-2D approach can be achieved by using a thin patch in one dimension
+    (e.g., 256×256×5); the adaptive topology will automatically use stride-1 in
+    the thin axis.
     """
     def __init__(
         self,
-        spatial_dims: int,
         in_channels: int,
         out_channels: int,
         patch_size: Sequence[int],
@@ -35,50 +38,32 @@ class NNUNet(MISTModel):
         use_pocket_model: bool,
     ):
         super().__init__()
-        # Make sure that the patch size matches the spatial dimensions.
-        if not len(patch_size) == len(target_spacing) == spatial_dims:
+        if len(patch_size) != 3:
             raise ValueError(
-                "Patch size and target spacing must have the same number of "
-                "dimensions as the spatial dimensions, but got "
-                f"{len(patch_size)} dimensions for patch size and "
-                f"{len(target_spacing)} dimensions for target spacing."
+                f"NNUNet requires a 3D patch_size, but got {len(patch_size)} "
+                "dimensions. For anisotropic data use a thin Z slice "
+                "(e.g., 256×256×5) rather than a 2D patch."
+            )
+        if len(patch_size) != len(target_spacing):
+            raise ValueError(
+                "patch_size and target_spacing must have the same number of "
+                f"dimensions, but got {len(patch_size)} and "
+                f"{len(target_spacing)}."
             )
 
-        # Get parameters for UNet. This includes kernel sizes, strides, and the
-        # final encoded dimensions from the bottleneck layer. The latter is used
-        # to determine the latent dimension for VAE regularization.
         kernel_sizes, strides, _ = (
             nnunet_utils.get_unet_params(patch_size, target_spacing)
         )
 
-        # Determine the number of filters at each resolution level. If we use
-        # the pocket model, we keep the number of filters constant across
-        # resolution levels. Otherwise, we double the number of filters at each
-        # resolution level up to a maximum of 320 filters in the 3D case and
-        # 512 filters in the 2D case.
         if use_pocket_model:
             filters = [constants.INITIAL_FILTERS] * len(strides)
         else:
-            if spatial_dims == 3:
-                filters = [
-                    min(
-                        2 ** i * constants.INITIAL_FILTERS,
-                        constants.MAX_FILTERS_3D
-                    )
-                    for i in range(len(strides))
-                ]
-            else:
-                filters = [
-                    min(
-                        2 ** i * constants.INITIAL_FILTERS,
-                        constants.MAX_FILTERS_2D
-                    )
-                    for i in range(len(strides))
-                ]
+            filters = [
+                min(2 ** i * constants.INITIAL_FILTERS, constants.MAX_FILTERS_3D)
+                for i in range(len(strides))
+            ]
 
-        # Build the dynamic UNet model based on parameters.
         self.unet = dynamic_unet.DynamicUNet(
-            spatial_dims=spatial_dims,
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=kernel_sizes,

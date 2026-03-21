@@ -34,7 +34,6 @@ class DynamicUNet(nn.Module):
     """
     def __init__(
         self,
-        spatial_dims: int,
         in_channels: int,
         out_channels: int,
         kernel_size: Sequence[Union[Sequence[int], int]],
@@ -51,7 +50,6 @@ class DynamicUNet(nn.Module):
     ):
 
         super().__init__()
-        self.spatial_dims = spatial_dims
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size
@@ -115,19 +113,17 @@ class DynamicUNet(nn.Module):
         for idx, k_i in enumerate(self.kernel_size):
             kernel, stride = k_i, self.strides[idx]
             if not isinstance(kernel, int):
-                error_message = (
-                    f"Length of kernel_size in block {idx} should be the same "
-                    "as spatial_dims."
-                )
-                if len(kernel) != self.spatial_dims:
-                    raise ValueError(error_message)
+                if len(kernel) != 3:
+                    raise ValueError(
+                        f"Length of kernel_size in block {idx} should be 3 "
+                        "(one per spatial dimension)."
+                    )
             if not isinstance(stride, int):
-                error_message = (
-                    f"Length of stride in block {idx} should be the same as "
-                    "spatial_dims."
-                )
-                if len(stride) != self.spatial_dims:
-                    raise ValueError(error_message)
+                if len(stride) != 3:
+                    raise ValueError(
+                        f"Length of stride in block {idx} should be 3 "
+                        "(one per spatial dimension)."
+                    )
 
     def check_deep_supervision_parameters(self):
         """Check that the deep supervision parameters are valid."""
@@ -227,7 +223,7 @@ class DynamicUNet(nn.Module):
     def get_input_block(self):
         """Return the input block for the UNet."""
         return self.conv_block(
-            self.spatial_dims,
+            3,
             self.in_channels,
             self.filters[0],
             self.kernel_size[0],
@@ -240,7 +236,7 @@ class DynamicUNet(nn.Module):
     def get_bottleneck(self):
         """Return the bottleneck layer for the UNet."""
         return self.conv_block(
-            self.spatial_dims,
+            3,
             self.filters[-2],
             self.filters[-1],
             self.kernel_size[-1],
@@ -261,7 +257,7 @@ class DynamicUNet(nn.Module):
             The output block for the UNet.
         """
         return dynamic_unet_blocks.UnetOutBlock(
-            self.spatial_dims,
+            3,
             self.filters[level],
             self.out_channels,
             dropout=self.dropout
@@ -331,7 +327,7 @@ class DynamicUNet(nn.Module):
                     upsample_kernel_size
             ):
                 params = {
-                    "spatial_dims": self.spatial_dims,
+                    "spatial_dims": 3,
                     "in_channels": in_c,
                     "out_channels": out_c,
                     "kernel_size": kernel,
@@ -352,7 +348,7 @@ class DynamicUNet(nn.Module):
                 strides
             ):
                 params = {
-                    "spatial_dims": self.spatial_dims,
+                    "spatial_dims": 3,
                     "in_channels": in_c,
                     "out_channels": out_c,
                     "kernel_size": kernel,
@@ -390,10 +386,7 @@ class DynamicUNet(nn.Module):
     @staticmethod
     def initialize_weights(module):
         """Initialize the weights of the UNet."""
-        if isinstance(
-            module,
-            (nn.Conv3d, nn.Conv2d, nn.ConvTranspose3d, nn.ConvTranspose2d)
-        ):
+        if isinstance(module, (nn.Conv3d, nn.ConvTranspose3d)):
             module.weight = nn.init.kaiming_normal_(
                 module.weight, a=constants.NEGATIVE_SLOPE
             )

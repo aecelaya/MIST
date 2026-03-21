@@ -31,7 +31,6 @@ def base_pipeline_args():
         "use_blur": True,
         "use_brightness": True,
         "use_contrast": True,
-        "dimension": 3,
         "batch_size": 1,
         "num_threads": 1,
         "device_id": 0,
@@ -51,7 +50,6 @@ class TestTrainPipelineInit:
         pipeline = dali_loader.TrainPipeline(**args)
         assert pipeline.extract_patches is True
         assert pipeline.use_augmentation is True
-        assert pipeline.dimension == 3
 
     def test_disables_all_augmentations_when_use_augmentation_false(
         self, base_pipeline_args
@@ -61,11 +59,6 @@ class TestTrainPipelineInit:
         for flag in ("use_flips", "use_zoom", "use_noise", "use_blur",
                      "use_brightness", "use_contrast"):
             assert not getattr(pipeline, flag)
-
-    def test_invalid_dimension_raises(self, base_pipeline_args):
-        """Raises ValueError when dimension is not 2 or 3."""
-        with pytest.raises(ValueError, match="Dimension must be either 2 or 3."):
-            dali_loader.TrainPipeline(**{**base_pipeline_args, "dimension": 4})
 
     @pytest.mark.parametrize("bad_arg,expected_message", [
         ("image", "Input images are not valid"),

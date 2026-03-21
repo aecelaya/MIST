@@ -2,7 +2,10 @@
 import pytest
 
 # MIST imports.
-from mist.models.nnunet.nnunet_registry import create_nnunet
+from mist.models.nnunet.nnunet_registry import (
+    create_nnunet,
+    create_nnunet_pocket,
+)
 from mist.models.nnunet.mist_nnunet import NNUNet
 
 
@@ -14,9 +17,6 @@ def valid_config():
         "out_channels": 3,
         "patch_size": (128, 128, 128),
         "target_spacing": (1.0, 1.0, 1.0),
-        "use_residual_blocks": True,
-        "use_deep_supervision": False,
-        "use_pocket_model": False,
     }
 
 
@@ -26,14 +26,17 @@ def test_create_nnunet_success(valid_config):
     assert isinstance(model, NNUNet)
 
 
+def test_create_nnunet_pocket_success(valid_config):
+    """Test that create_nnunet_pocket returns an NNUNet instance."""
+    model = create_nnunet_pocket(**valid_config)
+    assert isinstance(model, NNUNet)
+
+
 @pytest.mark.parametrize("missing_key", [
     "in_channels",
     "out_channels",
     "patch_size",
     "target_spacing",
-    "use_residual_blocks",
-    "use_deep_supervision",
-    "use_pocket_model",
 ])
 def test_create_nnunet_missing_keys(valid_config, missing_key):
     """Test create_nnunet raises ValueError if a required key is missing."""

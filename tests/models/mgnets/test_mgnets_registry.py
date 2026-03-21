@@ -14,8 +14,6 @@ def base_kwargs():
         "out_channels": 2,
         "patch_size": [32, 32, 32],
         "target_spacing": [1.0, 1.0, 1.0],
-        "use_residual_blocks": False,
-        "use_deep_supervision": True,
     }
 
 
@@ -46,18 +44,16 @@ class TestCreateMgnet:
 
     @pytest.mark.parametrize("missing_key", [
         "in_channels", "out_channels", "patch_size", "target_spacing",
-        "use_residual_blocks", "use_deep_supervision",
     ])
     def test_missing_required_key_raises(self, base_kwargs, missing_key):
         del base_kwargs[missing_key]
         with pytest.raises(ValueError, match=f"Missing required key '{missing_key}'"):
             create_mgnet("fmgnet", **base_kwargs)
 
-    def test_optional_num_deep_supervision_heads_forwarded(self, base_kwargs):
-        """num_deep_supervision_heads is optional and forwarded when provided."""
-        base_kwargs["num_deep_supervision_heads"] = 2
+    def test_deep_supervision_uses_two_aux_heads(self, base_kwargs):
+        """MGNet always uses 2 auxiliary deep supervision heads, matching nnUNet."""
         model = create_mgnet("fmgnet", **base_kwargs)
-        assert model.num_aux_heads == 1  # total_heads=2 → num_aux=1
+        assert model.num_aux_heads == 2
 
 
 class TestRegisteredModels:

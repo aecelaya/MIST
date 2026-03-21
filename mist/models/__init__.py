@@ -1,7 +1,7 @@
 """Initialize and register all MIST model variants."""
 
 # Trigger registration of all model variants.
-from mist.models.nnunet.nnunet_registry import create_nnunet
+from mist.models.nnunet.nnunet_registry import create_nnunet, create_nnunet_pocket
 from mist.models.mednext.mednext_registry import (
     create_mednext_small,
     create_mednext_base,
