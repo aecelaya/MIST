@@ -298,7 +298,15 @@ def patch_path_resolver(monkeypatch):
 @pytest.fixture(autouse=True)
 def patch_registries(monkeypatch):
     """Patch registries: model, loss, optimizer, and LR scheduler."""
-    monkeypatch.setattr(bt, "get_model_from_registry", lambda arch, **p: DummyModel())
+    def _fake_registry(arch, **p):
+        assert "patch_size" in p, (
+            "get_model_from_registry must receive patch_size from spatial_config"
+        )
+        assert "target_spacing" in p, (
+            "get_model_from_registry must receive target_spacing from spatial_config"
+        )
+        return DummyModel()
+    monkeypatch.setattr(bt, "get_model_from_registry", _fake_registry)
     monkeypatch.setattr(bt, "get_loss", lambda name: DummyLoss)
     monkeypatch.setattr(bt, "get_alpha_scheduler", lambda cfg: object())
 

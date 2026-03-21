@@ -325,6 +325,10 @@ class TestGetTrainingDataset:
         )
         mock_validate.assert_called_once_with(["image.npy"], ["label.npy"], dtm_paths)
         mock_train_pipeline.assert_called_once()
+        _, call_kwargs = mock_train_pipeline.call_args
+        assert "dimension" not in call_kwargs, (
+            "dimension was removed from TrainPipeline; must not be passed at call site"
+        )
         mock_dali_iter.assert_called_once_with(mock_train_pipeline.return_value, expected_keys)
         assert result == mock_dali_iter.return_value
 

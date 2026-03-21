@@ -652,7 +652,6 @@ def get_training_dataset(
         use_blur=use_blur if use_augmentation else False,
         use_brightness=use_brightness if use_augmentation else False,
         use_contrast=use_contrast if use_augmentation else False,
-        dimension=3,
         **pipe_kwargs
     )
 

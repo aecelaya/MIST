@@ -386,10 +386,15 @@ class BaseTrainer(ABC):
         training = self.config["training"]
 
         # Build the model based on the architecture and parameters specified in
-        # the configuration file.
+        # the configuration file. Merge spatial_config so adaptive architectures
+        # receive patch_size and target_spacing alongside model-specific params.
+        model_kwargs = {
+            **self.config["model"]["params"],
+            **self.config["spatial_config"],
+        }
         model = get_model_from_registry(
             self.config["model"]["architecture"],
-            **self.config["model"]["params"]
+            **model_kwargs
         )
 
         # Load pretrained encoder weights if requested. This runs on every rank
