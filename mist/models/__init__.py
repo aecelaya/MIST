@@ -12,3 +12,8 @@ from mist.models.mgnets.mgnets_registry import (
     create_fmgnet,
     create_wnet,
 )
+from mist.models.swinunetr.swinunetr_registry import (
+    create_swinunetr_small,
+    create_swinunetr_base,
+    create_swinunetr_large,
+)
