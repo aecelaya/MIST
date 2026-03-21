@@ -269,10 +269,13 @@ def base_config() -> Dict[str, Any]:
             "labels": [0, 1],
             "images": ["image"],
         },
+        "spatial_config": {
+            "target_spacing": (1.0, 1.0, 1.0),
+            "patch_size": [64, 64, 64],
+        },
         "preprocessing": {
             "skip": False,
             "crop_to_foreground": True,
-            "target_spacing": (1.0, 1.0, 1.0),
             "compute_dtms": False,
             "normalize_dtms": True,
             "normalize_with_nonzero_mask": False,
@@ -894,10 +897,13 @@ def test_preprocess_example_full_flow_no_skip_with_crop_and_dtm(monkeypatch):
     """Full flow: crop, resample, normalize, and compute DTM."""
     cfg = {
         "dataset_info": {"labels": [0, 1], "modality": "ct"},
+        "spatial_config": {
+            "target_spacing": (1.0, 1.0, 1.0),
+            "patch_size": [64, 64, 64],
+        },
         "preprocessing": {
             "skip": False,
             "crop_to_foreground": True,
-            "target_spacing": (1.0, 1.0, 1.0),
             "compute_dtms": True,
             "normalize_dtms": True,
             "normalize_with_nonzero_mask": False,
@@ -974,10 +980,13 @@ def test_preprocess_example_skip_true_no_resample_no_normalize(monkeypatch):
     """Skip path avoids resampling and normalization."""
     cfg = {
         "dataset_info": {"labels": [0, 1], "modality": "mri"},
+        "spatial_config": {
+            "target_spacing": (1.0, 1.0, 1.0),
+            "patch_size": [64, 64, 64],
+        },
         "preprocessing": {
             "skip": True,
             "crop_to_foreground": False,
-            "target_spacing": (1.0, 1.0, 1.0),
             "compute_dtms": False,
             "normalize_dtms": False,
             "normalize_with_nonzero_mask": False,
@@ -1016,10 +1025,13 @@ def test_preprocess_example_crop_requires_bbox_error(monkeypatch):
     """Cropping without bbox raises ValueError."""
     cfg = {
         "dataset_info": {"labels": [0, 1], "modality": "ct"},
+        "spatial_config": {
+            "target_spacing": (1, 1, 1),
+            "patch_size": [64, 64, 64],
+        },
         "preprocessing": {
             "skip": True,
             "crop_to_foreground": True,
-            "target_spacing": (1, 1, 1),
             "compute_dtms": False,
             "normalize_dtms": False,
             "normalize_with_nonzero_mask": False,
@@ -1073,10 +1085,13 @@ def test_preprocess_example_inference_mode_sets_mask_and_dtm_none(monkeypatch):
 
     config = {
         "dataset_info": {"labels": [0, 1], "modality": "ct"},
+        "spatial_config": {
+            "target_spacing": (1.0, 1.0, 1.0),
+            "patch_size": [64, 64, 64],
+        },
         "preprocessing": {
             "skip": True,
             "crop_to_foreground": False,
-            "target_spacing": (1.0, 1.0, 1.0),
             "compute_dtms": True,
             "normalize_dtms": True,
             "normalize_with_nonzero_mask": False,
@@ -1234,10 +1249,13 @@ def test_preprocess_dataset_sets_fg_bbox_none_when_crop_disabled(
 
     cfg = {
         "dataset_info": {"images": ["image"], "labels": [0, 1]},
+        "spatial_config": {
+            "target_spacing": [1.0, 1.0, 1.0],
+            "patch_size": [64, 64, 64],
+        },
         "preprocessing": {
             "skip": False,
             "crop_to_foreground": False,
-            "target_spacing": [1.0, 1.0, 1.0],
             "compute_dtms": False,
             "normalize_dtms": True,
             "normalize_with_nonzero_mask": False,

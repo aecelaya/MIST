@@ -56,7 +56,7 @@ class Patch3DTrainer(BaseTrainer):
             batch_size=training["batch_size_per_gpu"],
             oversampling=training["dali_foreground_prob"],
             labels=train_labels,
-            roi_size=self.config["model"]["params"]["patch_size"],
+            roi_size=self.config["spatial_config"]["patch_size"],
             seed=training["seed"],
             num_workers=training["hardware"]["num_cpu_workers"],
             use_augmentation=training["augmentation"]["enabled"],
@@ -184,7 +184,7 @@ class Patch3DTrainer(BaseTrainer):
 
         # Unpack the model from the state.
         model = state["model"]
-        patch_size = self.config["model"]["params"]["patch_size"]
+        patch_size = self.config["spatial_config"]["patch_size"]
 
         # Unpack overlap parameters from the configuration.
         overlap = self.config["inference"]["inferer"]["params"]["patch_overlap"]

@@ -10,44 +10,28 @@ from mist.models.model_loader import (
     validate_encoder_compatibility,
     load_pretrained_encoder,
     validate_mist_config_for_model_loading,
-    convert_legacy_model_config,
-    get_model,
     load_model_from_config
 )
+from mist.models.model_registry import get_model_from_registry
 from mist.models.nnunet.mist_nnunet import NNUNet
 
 @pytest.fixture
 def valid_mist_config():
     """Fixture for a valid MIST model configuration."""
     return {
+        "spatial_config": {
+            "patch_size": [64, 64, 64],
+            "target_spacing": [1.0, 1.0, 1.0],
+        },
         "model": {
             "architecture": "nnunet",
             "params": {
                 "in_channels": 1,
                 "out_channels": 2,
-                "target_spacing": [1.0, 1.0, 1.0],
-                "patch_size": [64, 64, 64],
-                "use_residual_blocks": False,
-                "use_deep_supervision": False,
-                "use_pocket_model": False,
             }
         }
     }
 
-
-@pytest.fixture
-def legacy_mist_config():
-    """Fixture for a legacy MIST model configuration."""
-    return {
-        "model_name": "nnunet",
-        "n_channels": 1,
-        "n_classes": 2,
-        "deep_supervision": False,
-        "pocket": False,
-        "patch_size": [64, 64, 64],
-        "target_spacing": [1.0, 1.0, 1.0],
-        "use_res_block": False,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -135,16 +119,15 @@ def test_average_fold_weights_mismatched_keys_raises(tmp_path):
 @pytest.fixture
 def nnunet_config():
     return {
+        "spatial_config": {
+            "patch_size": [32, 32, 32],
+            "target_spacing": [1.0, 1.0, 1.0],
+        },
         "model": {
             "architecture": "nnunet",
             "params": {
                 "in_channels": 1,
                 "out_channels": 2,
-                "patch_size": [32, 32, 32],
-                "target_spacing": [1.0, 1.0, 1.0],
-                "use_residual_blocks": False,
-                "use_deep_supervision": False,
-                "use_pocket_model": True,
             }
         }
     }
@@ -158,9 +141,6 @@ def mednext_config():
             "params": {
                 "in_channels": 1,
                 "out_channels": 2,
-                "use_residual_blocks": False,
-                "use_deep_supervision": False,
-                "use_pocket_model": False,
             }
         }
     }
@@ -174,6 +154,7 @@ def test_validate_encoder_compatibility_identical_configs_passes(nnunet_config):
 def test_validate_encoder_compatibility_allows_in_out_channel_diff(nnunet_config):
     """Differing in_channels and out_channels are allowed."""
     target = {
+        "spatial_config": {**nnunet_config["spatial_config"]},
         "model": {
             "architecture": "nnunet",
             "params": {
@@ -205,9 +186,13 @@ def test_validate_encoder_compatibility_arch_mismatch_force_warns(
 def test_validate_encoder_compatibility_patch_size_mismatch_raises(nnunet_config):
     """Differing patch_size raises for adaptive architectures."""
     target = {
+        "spatial_config": {
+            **nnunet_config["spatial_config"],
+            "patch_size": [64, 64, 64],
+        },
         "model": {
             "architecture": "nnunet",
-            "params": {**nnunet_config["model"]["params"], "patch_size": [64, 64, 64]},
+            "params": {**nnunet_config["model"]["params"]},
         }
     }
     with pytest.raises(ValueError, match="patch_size mismatch"):
@@ -217,12 +202,13 @@ def test_validate_encoder_compatibility_patch_size_mismatch_raises(nnunet_config
 def test_validate_encoder_compatibility_spacing_mismatch_raises(nnunet_config):
     """Differing target_spacing raises for adaptive architectures."""
     target = {
+        "spatial_config": {
+            **nnunet_config["spatial_config"],
+            "target_spacing": [0.5, 0.5, 0.5],
+        },
         "model": {
             "architecture": "nnunet",
-            "params": {
-                **nnunet_config["model"]["params"],
-                "target_spacing": [0.5, 0.5, 0.5],
-            },
+            "params": {**nnunet_config["model"]["params"]},
         }
     }
     with pytest.raises(ValueError, match="target_spacing mismatch"):
@@ -250,7 +236,7 @@ def test_validate_encoder_compatibility_non_adaptive_ignores_patch_size(
 def nnunet_source():
     """Minimal source NNUNet with in_channels=1."""
     return NNUNet(
-        spatial_dims=3,
+
         in_channels=1,
         out_channels=2,
         patch_size=[32, 32, 32],
@@ -274,7 +260,7 @@ def test_load_pretrained_encoder_same_channels_returns_summary(
 ):
     """Loading into same-channel model populates the summary."""
     target = NNUNet(
-        spatial_dims=3,
+
         in_channels=1,
         out_channels=3,  # Different out_channels — decoder should be fresh.
         patch_size=[32, 32, 32],
@@ -293,7 +279,7 @@ def test_load_pretrained_encoder_encoder_weights_transferred(
 ):
     """Encoder weights in target should match source after loading."""
     target = NNUNet(
-        spatial_dims=3,
+
         in_channels=1,
         out_channels=3,
         patch_size=[32, 32, 32],
@@ -315,7 +301,7 @@ def test_load_pretrained_encoder_decoder_unchanged(
 ):
     """Decoder weights must not be overwritten by encoder loading."""
     target = NNUNet(
-        spatial_dims=3,
+
         in_channels=1,
         out_channels=3,
         patch_size=[32, 32, 32],
@@ -342,7 +328,7 @@ def test_load_pretrained_encoder_in_channel_average_strategy(
 ):
     """'average' strategy produces a weight with the correct target shape."""
     target = NNUNet(
-        spatial_dims=3,
+
         in_channels=4,  # Different from source (1).
         out_channels=2,
         patch_size=[32, 32, 32],
@@ -366,7 +352,7 @@ def test_load_pretrained_encoder_in_channel_first_strategy(
 ):
     """'first' strategy applies without error and produces correct shape."""
     target = NNUNet(
-        spatial_dims=3,
+
         in_channels=2,
         out_channels=2,
         patch_size=[32, 32, 32],
@@ -389,7 +375,7 @@ def test_load_pretrained_encoder_in_channel_skip_strategy(
 ):
     """'skip' strategy skips the mismatched layer entirely."""
     target = NNUNet(
-        spatial_dims=3,
+
         in_channels=2,
         out_channels=2,
         patch_size=[32, 32, 32],
@@ -407,7 +393,7 @@ def test_load_pretrained_encoder_in_channel_skip_strategy(
 def test_load_pretrained_encoder_invalid_strategy_raises(source_checkpoint):
     """An invalid in_channel_strategy raises ValueError."""
     target = NNUNet(
-        spatial_dims=3,
+
         in_channels=1,
         out_channels=2,
         patch_size=[32, 32, 32],
@@ -429,7 +415,7 @@ def test_load_pretrained_encoder_strips_ddp_prefix(nnunet_source, tmp_path):
     torch.save(ddp_sd, path)
 
     target = NNUNet(
-        spatial_dims=3,
+
         in_channels=1,
         out_channels=2,
         patch_size=[32, 32, 32],
@@ -456,12 +442,16 @@ def test_load_pretrained_encoder_no_get_encoder_raises(source_checkpoint):
 # Model construction and loading tests
 # ---------------------------------------------------------------------------
 
-def test_get_model_success(valid_mist_config):
+def test_get_model_from_registry_success(valid_mist_config):
     """Test model construction from valid configuration."""
     validate_mist_config_for_model_loading(valid_mist_config)
-    model = get_model(
-        valid_mist_config["model"]["architecture"],
+    model_kwargs = {
         **valid_mist_config["model"]["params"],
+        **valid_mist_config["spatial_config"],
+    }
+    model = get_model_from_registry(
+        valid_mist_config["model"]["architecture"],
+        **model_kwargs,
     )
     assert isinstance(model, NNUNet)
 
@@ -503,7 +493,7 @@ def test_load_model_from_config_strips_ddp_prefix(
     dummy_model = MagicMock(spec=NNUNet)
 
     # Return a dummy model instance from registry constructor.
-    with patch("mist.models.model_loader.get_model", return_value=dummy_model):
+    with patch("mist.models.model_loader.get_model_from_registry", return_value=dummy_model):
         # Fake DDP-wrapped weights.
         mock_torch_load.return_value = {
             "module.encoder.weight": torch.randn(4, 1, 3, 3, 3),
@@ -529,7 +519,7 @@ def test_load_model_from_config_keeps_non_ddp_keys(
     """Non-DDP checkpoints are loaded without key modification."""
     dummy_model = MagicMock(spec=NNUNet)
 
-    with patch("mist.models.model_loader.get_model", return_value=dummy_model):
+    with patch("mist.models.model_loader.get_model_from_registry", return_value=dummy_model):
         # Raw (non-DDP) state dict.
         mock_torch_load.return_value = {
             "encoder.weight": torch.randn(4, 1, 3, 3, 3),
@@ -549,23 +539,3 @@ def test_load_model_from_config_keeps_non_ddp_keys(
         assert model is dummy_model
 
 
-def test_convert_legacy_model_config_success(legacy_mist_config):
-    """Test conversion of legacy model config to new format."""
-    new_config = convert_legacy_model_config(legacy_mist_config)
-    assert new_config["model"]["architecture"] == "nnunet"
-    assert new_config["model"]["params"]["in_channels"] == 1
-    assert new_config["model"]["params"]["out_channels"] == 2
-    assert new_config["model"]["params"]["patch_size"] == [64, 64, 64]
-    assert new_config["model"]["params"]["target_spacing"] == [1.0, 1.0, 1.0]
-    assert not new_config["model"]["params"]["use_residual_blocks"]
-    assert not new_config["model"]["params"]["use_deep_supervision"]
-    assert not new_config["model"]["params"]["use_pocket_model"]
-
-
-def test_convert_legacy_model_config_missing_keys(legacy_mist_config):
-    """Test conversion raises ValueError for missing keys."""
-    legacy_mist_config.pop("model_name")
-    with pytest.raises(
-        ValueError, match="Missing required key 'model_name' in legacy model"
-    ):
-        convert_legacy_model_config(legacy_mist_config)

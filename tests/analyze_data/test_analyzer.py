@@ -796,11 +796,8 @@ class TestAnalyzerAnalyzeDataset:
         assert cfg["preprocessing"]["median_resampled_image_size"] == [
             10, 10, 10
         ]
-        assert cfg["model"]["params"]["patch_size"] == [24, 24, 24]
-        assert (
-            cfg["inference"]["inferer"]["params"]["patch_size"]
-            == [24, 24, 24]
-        )
+        assert cfg["spatial_config"]["patch_size"] == [24, 24, 24]
+        assert cfg["spatial_config"]["target_spacing"] is not None
         assert cfg["evaluation"] == {
             "background": {
                 "labels": [0],

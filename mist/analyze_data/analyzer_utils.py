@@ -297,9 +297,12 @@ def build_base_config() -> dict[str, Any]:
             "images": None,
             "labels": None,
         },
+        "spatial_config": {
+            "patch_size": None,
+            "target_spacing": None,
+        },
         "preprocessing": {
             "skip": False,
-            "target_spacing": None,
             "crop_to_foreground": None,
             "median_resampled_image_size": None,
             "normalize_with_nonzero_mask": None,
@@ -317,11 +320,6 @@ def build_base_config() -> dict[str, Any]:
             "params": {
                 "in_channels": None,
                 "out_channels": None,
-                "patch_size": None,
-                "target_spacing": None,
-                "use_deep_supervision": True,
-                "use_residual_blocks": True,
-                "use_pocket_model": False,
             },
         },
         "training": {
@@ -368,7 +366,6 @@ def build_base_config() -> dict[str, Any]:
             "inferer": {
                 "name": "sliding_window",
                 "params": {
-                    "patch_size": None,
                     "patch_blend_mode": "gaussian",
                     "patch_overlap": 0.5,
                 },

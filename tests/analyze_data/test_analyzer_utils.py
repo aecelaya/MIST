@@ -395,10 +395,34 @@ class TestBuildBaseConfig:
         """build_base_config returns a dict with all required top-level keys."""
         cfg = au.build_base_config()
         for key in (
-            "mist_version", "dataset_info", "preprocessing",
-            "model", "training", "inference",
+            "mist_version", "dataset_info", "spatial_config",
+            "preprocessing", "model", "training", "inference",
         ):
             assert key in cfg
+
+    def test_spatial_config_has_patch_size_and_target_spacing(self):
+        """spatial_config contains patch_size and target_spacing, both None."""
+        cfg = au.build_base_config()
+        assert "patch_size" in cfg["spatial_config"]
+        assert "target_spacing" in cfg["spatial_config"]
+        assert cfg["spatial_config"]["patch_size"] is None
+        assert cfg["spatial_config"]["target_spacing"] is None
+
+    def test_patch_size_not_in_model_params(self):
+        """model.params no longer contains patch_size or target_spacing."""
+        cfg = au.build_base_config()
+        assert "patch_size" not in cfg["model"]["params"]
+        assert "target_spacing" not in cfg["model"]["params"]
+
+    def test_target_spacing_not_in_preprocessing(self):
+        """preprocessing no longer contains target_spacing."""
+        cfg = au.build_base_config()
+        assert "target_spacing" not in cfg["preprocessing"]
+
+    def test_patch_size_not_in_inference_inferer_params(self):
+        """inference.inferer.params no longer contains patch_size."""
+        cfg = au.build_base_config()
+        assert "patch_size" not in cfg["inference"]["inferer"]["params"]
 
     def test_modality_starts_as_none(self):
         """dataset_info.modality is None before the analyzer fills it in."""

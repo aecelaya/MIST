@@ -517,21 +517,23 @@ class Analyzer:
         """
         # Guard: these keys are written by analyze_dataset. A missing key means
         # check_resampled_dims was called out of order.
-        required_keys = ("crop_to_foreground", "target_spacing")
-        preprocessing = self.config.get("preprocessing", {})
-        missing = [k for k in required_keys if k not in preprocessing]
-        if missing:
+        if "crop_to_foreground" not in self.config.get("preprocessing", {}):
             raise RuntimeError(
-                f"check_resampled_dims requires config keys "
-                f"{list(required_keys)} under 'preprocessing', but "
-                f"{missing} are missing. Ensure analyze_dataset has been "
-                "called before check_resampled_dims."
+                "check_resampled_dims requires 'crop_to_foreground' under "
+                "'preprocessing', but it is missing. Ensure analyze_dataset "
+                "has been called before check_resampled_dims."
+            )
+        if "target_spacing" not in self.config.get("spatial_config", {}):
+            raise RuntimeError(
+                "check_resampled_dims requires 'target_spacing' under "
+                "'spatial_config', but it is missing. Ensure analyze_dataset "
+                "has been called before check_resampled_dims."
             )
 
         # Capture config values in local variables so the closure does not
         # hold a reference to self (keeps the worker lightweight).
         crop_to_fg = bool(self.config["preprocessing"]["crop_to_foreground"])
-        tgt_spacing = self.config["preprocessing"]["target_spacing"]
+        tgt_spacing = self.config["spatial_config"]["target_spacing"]
         n_labels = len(self.dataset_info["labels"])
 
         def _process(patient, cropped_dims_i):
@@ -732,7 +734,7 @@ class Analyzer:
 
         # Get the target spacing for the dataset.
         target_spacing = self.get_target_spacing()
-        self.config["preprocessing"]["target_spacing"] = [
+        self.config["spatial_config"]["target_spacing"] = [
             float(spacing) for spacing in target_spacing
         ]
 
@@ -780,22 +782,9 @@ class Analyzer:
         # The patch size can be overridden by the user in the config file or in
         # the command line arguments for the training pipeline.
         patch_size = analyzer_utils.get_best_patch_size(median_dims)
-        self.config["model"]["params"]["patch_size"] = [
+        self.config["spatial_config"]["patch_size"] = [
             int(size) for size in patch_size
         ]
-
-        # Set the patch size for inference to be the same as training.
-        self.config["inference"]["inferer"]["params"]["patch_size"] = (
-            self.config["model"]["params"]["patch_size"]
-        )
-
-        # Add the target spacing to the model parameters in the model section
-        # of the configuration. This is already in the preprocessing section
-        # of the configuration, but this makes loading models and keeping track
-        # of model-specific parameters easier.
-        self.config["model"]["params"]["target_spacing"] = (
-            self.config["preprocessing"]["target_spacing"]
-        )
 
         # Build and add the evaluation metrics to the evaluation section of the
         # configuration.

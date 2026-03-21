@@ -19,8 +19,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 
 from mist.utils import io, progress_bar
+from mist.models.model_registry import get_model_from_registry
 from mist.models.model_loader import (
-    get_model,
     load_pretrained_encoder,
     validate_encoder_compatibility,
 )
@@ -153,18 +153,9 @@ class BaseTrainer(ABC):
 
         # Overwrite the patch size if it is specified in command line arguments.
         if self.mist_args.patch_size is not None:
-            self.config["model"]["params"]["patch_size"] = [
+            self.config["spatial_config"]["patch_size"] = [
                 int(dim) for dim in self.mist_args.patch_size
             ]
-
-        # Set the patch size for inference to be the same as training.
-        self.config["inference"]["inferer"]["params"]["patch_size"] = (
-            self.config["model"]["params"]["patch_size"]
-        )
-
-        # Use pocket model if specified in command line arguments.
-        if self.mist_args.pocket:
-            self.config["model"]["params"]["use_pocket_model"] = True
 
         # Overwrite training parameters from command line arguments.
         # If the user specified to run only on certain folds, then update the
@@ -396,7 +387,7 @@ class BaseTrainer(ABC):
 
         # Build the model based on the architecture and parameters specified in
         # the configuration file.
-        model = get_model(
+        model = get_model_from_registry(
             self.config["model"]["architecture"],
             **self.config["model"]["params"]
         )
@@ -440,7 +431,7 @@ class BaseTrainer(ABC):
         # deep supervision if the model supports it.
         loss_cls = get_loss(training["loss"]["name"])
         loss_params = {
-            "sddl_spacing_xyz": self.config["preprocessing"]["target_spacing"],
+            "sddl_spacing_xyz": self.config["spatial_config"]["target_spacing"],
         }
         loss_function = loss_cls(**loss_params)
         loss_function = DeepSupervisionLoss(loss_function)

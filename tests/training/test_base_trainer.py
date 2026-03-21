@@ -197,11 +197,15 @@ def tmp_pipeline(tmp_path: Path) -> Tuple[Path, Path]:
     df.to_csv(results / "train_paths.csv", index=False)
 
     config = {
+        "spatial_config": {
+            "patch_size": [16, 16, 16],
+            "target_spacing": [1.0, 1.0, 1.0],
+        },
         "model": {
             "architecture": "dummy",
-            "params": {"patch_size": [16, 16, 16]}
+            "params": {}
         },
-        "preprocessing": {"target_spacing": [1.0, 1.0, 1.0]},
+        "preprocessing": {},
         "training": {
             "nfolds": 2,
             "folds": [0],
@@ -233,7 +237,6 @@ def tmp_pipeline(tmp_path: Path) -> Tuple[Path, Path]:
             "inferer": {
                 "name": "sliding_window",
                 "params": {
-                    "patch_size": [16, 16, 16],
                     "patch_blend_mode": "gaussian",
                     "patch_overlap": 0.5,
                 },
@@ -261,7 +264,6 @@ def mist_args(tmp_pipeline):
         numpy=str(numpy_dir),
         model=None,
         patch_size=None,
-        pocket=False,
         folds=None,
         epochs=None,
         batch_size_per_gpu=None,
@@ -296,7 +298,7 @@ def patch_path_resolver(monkeypatch):
 @pytest.fixture(autouse=True)
 def patch_registries(monkeypatch):
     """Patch registries: model, loss, optimizer, and LR scheduler."""
-    monkeypatch.setattr(bt, "get_model", lambda arch, **p: DummyModel())
+    monkeypatch.setattr(bt, "get_model_from_registry", lambda arch, **p: DummyModel())
     monkeypatch.setattr(bt, "get_loss", lambda name: DummyLoss)
     monkeypatch.setattr(bt, "get_alpha_scheduler", lambda cfg: object())
 
@@ -573,7 +575,6 @@ def test_overwrite_config_from_args(tmp_pipeline, mist_args, monkeypatch):
     mist_args.l2_penalty = 0.01
     mist_args.learning_rate = 0.005
     mist_args.lr_scheduler = "cosine"
-    mist_args.pocket = True
     mist_args.val_percent = 0.025
 
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1, raising=False)
@@ -581,8 +582,7 @@ def test_overwrite_config_from_args(tmp_pipeline, mist_args, monkeypatch):
 
     cfg = trainer.config
     assert cfg["model"]["architecture"] == "myarch"
-    assert cfg["model"]["params"]["patch_size"] == [32, 32, 32]
-    assert cfg["model"]["params"]["use_pocket_model"] is True
+    assert cfg["spatial_config"]["patch_size"] == [32, 32, 32]
     assert cfg["training"]["epochs"] == 3
     assert cfg["training"]["batch_size_per_gpu"] == 2
     assert cfg["training"]["loss"]["name"] == "my_loss"

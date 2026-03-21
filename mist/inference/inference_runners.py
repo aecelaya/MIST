@@ -74,7 +74,7 @@ def predict_single_example(
     prediction = inference_utils.back_to_original_space(
         raw_prediction=prediction,
         original_ants_image=original_ants_image,
-        target_spacing=mist_configuration["preprocessing"]["target_spacing"],
+        target_spacing=mist_configuration["spatial_config"]["target_spacing"],
         training_labels=training_labels,
         foreground_bounding_box=foreground_bounding_box,
     )
@@ -154,12 +154,13 @@ def test_on_fold(
     # inference. This is the default mode of operation for MIST, but future
     # versions may allow for other modes.
     inferer_name = config["inference"]["inferer"]["name"]
-    inferer_params = config["inference"]["inferer"]["params"]
+    inferer_params = {**config["inference"]["inferer"]["params"]}
     ensembler_strategy = config["inference"]["ensemble"]["strategy"]
     tta_enabled = config["inference"]["tta"]["enabled"]
     tta_strategy = config["inference"]["tta"]["strategy"]
 
-    # Add device to inferer parameters.
+    # Inject patch_size from spatial_config and device before constructing.
+    inferer_params["patch_size"] = config["spatial_config"]["patch_size"]
     inferer_params["device"] = device
     inferer = get_inferer(inferer_name)(**inferer_params)
     ensembler = get_ensembler(ensembler_strategy)
@@ -272,7 +273,6 @@ def infer_from_dataframe(
             relevant parameters.
         models_directory: Directory containing the trained models. The models
             should be in the format "model_fold_0.pt", "model_fold_1.pt", etc.
-            The model_config.json file should also be in this directory.
         postprocessing_strategy_filepath: Optional path to a JSON file
             containing postprocessing strategies. If provided, the strategies
             will be applied to the predictions.
@@ -302,12 +302,13 @@ def infer_from_dataframe(
     # inference. This is the default mode of operation for MIST, but future
     # versions may allow for other modes.
     inferer_name = mist_configuration["inference"]["inferer"]["name"]
-    inferer_params = mist_configuration["inference"]["inferer"]["params"]
+    inferer_params = {**mist_configuration["inference"]["inferer"]["params"]}
     ensembler_strategy = mist_configuration["inference"]["ensemble"]["strategy"]
     tta_enabled = mist_configuration["inference"]["tta"]["enabled"]
     tta_strategy = mist_configuration["inference"]["tta"]["strategy"]
 
-    # Add device to inferer parameters.
+    # Inject patch_size from spatial_config and device before constructing.
+    inferer_params["patch_size"] = mist_configuration["spatial_config"]["patch_size"]
     inferer_params["device"] = device
     inferer = get_inferer(inferer_name)(**inferer_params)
     ensembler = get_ensembler(ensembler_strategy)

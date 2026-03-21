@@ -368,7 +368,7 @@ def preprocess_example(
     # Set preprocessing flags.
     skip = config["preprocessing"]["skip"]
     crop = config["preprocessing"]["crop_to_foreground"]
-    target_spacing = config["preprocessing"]["target_spacing"]
+    target_spacing = config["spatial_config"]["target_spacing"]
     compute_dtms = config["preprocessing"]["compute_dtms"]
     normalize_dtms = config["preprocessing"]["normalize_dtms"]
     labels = config["dataset_info"]["labels"]

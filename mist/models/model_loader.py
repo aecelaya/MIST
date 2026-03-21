@@ -31,7 +31,9 @@ def average_fold_weights(
         ValueError: If checkpoints have mismatched keys, indicating
             incompatible architectures.
     """
-    state_dicts = [torch.load(p, weights_only=True) for p in weights_paths]
+    state_dicts = [
+        torch.load(p, weights_only=True, map_location="cpu") for p in weights_paths
+    ]
 
     # Strip DDP module. prefix if present.
     cleaned = []
@@ -65,7 +67,7 @@ def average_fold_weights(
 
 # Architectures whose encoder structure is computed from patch_size and
 # target_spacing. Both must match for encoder weights to be compatible.
-_ADAPTIVE_ARCHITECTURES = {"nnunet", "fmgnet", "wnet"}
+_ADAPTIVE_ARCHITECTURES = {"nnunet", "nnunet-pocket", "fmgnet", "wnet"}
 
 
 def validate_encoder_compatibility(
@@ -103,22 +105,25 @@ def validate_encoder_compatibility(
     # For adaptive architectures the encoder depth and filter counts are
     # derived from patch_size and target_spacing; both must match.
     if source_arch in _ADAPTIVE_ARCHITECTURES:
-        source_params = source_config["model"]["params"]
-        target_params = target_config["model"]["params"]
+        source_spatial = source_config["spatial_config"]
+        target_spatial = target_config["spatial_config"]
 
-        if source_params["patch_size"] != target_params["patch_size"]:
+        if list(source_spatial["patch_size"]) != list(target_spatial["patch_size"]):
             _fail(
-                f"patch_size mismatch: source {source_params['patch_size']} "
-                f"vs target {target_params['patch_size']}. For adaptive "
+                f"patch_size mismatch: source {source_spatial['patch_size']} "
+                f"vs target {target_spatial['patch_size']}. For adaptive "
                 "architectures the encoder structure is determined by "
                 "patch_size."
             )
 
-        if source_params["target_spacing"] != target_params["target_spacing"]:
+        if (
+            list(source_spatial["target_spacing"])
+            != list(target_spatial["target_spacing"])
+        ):
             _fail(
                 "target_spacing mismatch: source "
-                f"{source_params['target_spacing']} vs target "
-                f"{target_params['target_spacing']}. For adaptive "
+                f"{source_spatial['target_spacing']} vs target "
+                f"{target_spatial['target_spacing']}. For adaptive "
                 "architectures the encoder structure is determined by "
                 "target_spacing."
             )
@@ -171,7 +176,7 @@ def load_pretrained_encoder(
         )
 
     # Load source weights and strip DDP module. prefix if present.
-    source_sd = torch.load(weights_path, weights_only=True)
+    source_sd = torch.load(weights_path, weights_only=True, map_location="cpu")
     if any(k.startswith("module.") for k in source_sd):
         source_sd = OrderedDict(
             {(k[7:] if k.startswith("module.") else k): v
@@ -222,8 +227,8 @@ def load_pretrained_encoder(
             summary["channel_strategy_applied"].append(key)
 
         else:
-            # Shape mismatch beyond in_channels (e.g., filter count change
-            # from use_pocket_model mismatch): skip and retain random init.
+            # Shape mismatch beyond in_channels (e.g., filter count differs
+            # between model variants): skip and retain random init.
             summary["skipped"].append(key)
 
     # strict=False preserves decoder random initialization.
@@ -248,93 +253,22 @@ def validate_mist_config_for_model_loading(config: Dict) -> None:
         if key not in config["model"]:
             raise ValueError(f"Missing required key '{key}' in model section.")
 
-    required_params_keys = [
-        "in_channels", "out_channels", "patch_size", "target_spacing",
-        "use_deep_supervision", "use_residual_blocks", "use_pocket_model"
-    ]
+    required_params_keys = ["in_channels", "out_channels"]
     for key in required_params_keys:
         if key not in config["model"]["params"]:
             raise ValueError(
                 f"Missing required key '{key}' in model parameters."
             )
 
-
-def convert_legacy_model_config(model_config: Dict) -> Dict:
-    """Convert legacy model config to new format.
-
-    Args:
-        model_config_path: Path to the legacy model config file. This file will
-            contain the following structure:
-            {
-                "model_name": "model_name",
-                "n_channels": 1,
-                "n_classes": 2,
-                "deep_supervision": false,
-                "pocket": false,
-                "patch_size": [128, 128, 128],
-                "target_spacing": [1.0, 1.0, 1.0],
-                "use_res_block": false
-            }
-
-    Returns:
-        A configuration dictionary in the new format:
-        {
-            "model": {
-                "architecture": "model_name",
-                "params": {
-                    "in_channels": 1,
-                    "out_channels": 2,
-                    "patch_size": [128, 128, 128],
-                    "target_spacing": [1.0, 1.0, 1.0],
-                    "use_deep_supervision": false,
-                    "use_residual_blocks": false,
-                    "use_pocket_model": false
-                }
-            }
-        }
-
-    Raises:
-        ValueError: If the config does not contain the expected keys.
-    """
-    required_keys = [
-        "model_name", "n_channels", "n_classes", "patch_size", "target_spacing",
-        "deep_supervision", "pocket", "use_res_block"
-    ]
-    for key in required_keys:
-        if key not in model_config:
+    if "spatial_config" not in config:
+        raise ValueError("Missing required key 'spatial_config' in configuration.")
+    required_spatial_keys = ["patch_size", "target_spacing"]
+    for key in required_spatial_keys:
+        if key not in config["spatial_config"]:
             raise ValueError(
-                f"Missing required key '{key}' in legacy model config."
+                f"Missing required key '{key}' in spatial_config."
             )
 
-    # Convert the legacy config to the new format.
-    new_config = {
-        "model": {
-            "architecture": model_config["model_name"],
-            "params": {
-                "in_channels": model_config["n_channels"],
-                "out_channels": model_config["n_classes"],
-                "patch_size": model_config["patch_size"],
-                "target_spacing": model_config["target_spacing"],
-                "use_deep_supervision": model_config["deep_supervision"],
-                "use_residual_blocks": model_config["use_res_block"],
-                "use_pocket_model": model_config["pocket"]
-            }
-        }
-    }
-    return new_config
-
-
-def get_model(model_name: str, **kwargs) -> torch.nn.Module:
-    """Build a model instance using the registered model name and parameters.
-
-    Args:
-        model_name: Name of the registered model.
-        kwargs: Model-specific arguments.
-
-    Returns:
-        Instantiated PyTorch model.
-    """
-    return get_model_from_registry(model_name, **kwargs)
 
 
 def load_model_from_config(
@@ -351,20 +285,22 @@ def load_model_from_config(
         PyTorch model with weights loaded.
 
     Raises:
-        FileNotFoundError: If the config or weights file does not exist.
+        FileNotFoundError: If the weights file does not exist.
         ValueError: If the model name is invalid or required config keys are
             missing.
     """
     # Load and validate the config file.
     validate_mist_config_for_model_loading(config)
 
-    # Build model from registry.
-    model = get_model(
-        config["model"]["architecture"], **config["model"]["params"]
+    # Build model from registry. Merge spatial_config so adaptive architectures
+    # receive patch_size and target_spacing alongside model-specific params.
+    model_kwargs = {**config["model"]["params"], **config["spatial_config"]}
+    model = get_model_from_registry(
+        config["model"]["architecture"], **model_kwargs
     )
 
     # Load checkpoint weights.
-    state_dict = torch.load(weights_path, weights_only=True)
+    state_dict = torch.load(weights_path, weights_only=True, map_location="cpu")
 
     # If keys come from DDP, strip 'module.' prefix.
     if any(k.startswith("module.") for k in state_dict.keys()):

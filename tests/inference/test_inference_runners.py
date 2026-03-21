@@ -24,9 +24,12 @@ def mock_mist_config():
     """Fixture to provide a mock MIST configuration."""
     return {
         "dataset_info": {"modality": "ct", "labels": [0, 1]},
+        "spatial_config": {
+            "patch_size": [64, 64, 64],
+            "target_spacing": [1.0, 1.0, 1.0],
+        },
         "preprocessing": {
             "skip": False,
-            "target_spacing": [1.0, 1.0, 1.0],
             "crop_to_foreground": False,
             "normalize_with_nonzero_mask": False,
             "ct_normalization": {
@@ -43,11 +46,6 @@ def mock_mist_config():
             "params": {
                 "in_channels": 1,
                 "out_channels": 2,
-                "patch_size": [64, 64, 64],
-                "target_spacing": [1.0, 1.0, 1.0],
-                "use_deep_supervision": False,
-                "use_residual_blocks": False,
-                "use_pocket_model": False,
             },
         },
         "training": {
@@ -58,7 +56,6 @@ def mock_mist_config():
             "inferer": {
                 "name": "sliding_window",
                 "params": {
-                    "patch_size": [64, 64, 64],
                     "patch_blend_mode": "gaussian",
                     "patch_overlap": 0.5,
                 },

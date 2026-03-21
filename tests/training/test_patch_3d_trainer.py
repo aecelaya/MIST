@@ -128,9 +128,13 @@ def tmp_pipeline(tmp_path):
     # Config with sections used by Patch3DTrainer.
     cfg = {
         "dataset_info": {"labels": [0, 1, 2]},
+        "spatial_config": {
+            "patch_size": [32, 32, 32],
+            "target_spacing": [1.0, 1.0, 1.0],
+        },
         "model": {
             "architecture": "nnunet",
-            "params": {"patch_size": [32, 32, 32]}
+            "params": {}
         },
         "training": {
             "seed": 42,
@@ -177,7 +181,6 @@ def tmp_pipeline(tmp_path):
             "inferer": {
                 "name": "sliding_window",
                 "params": {
-                    "patch_size": [32, 32, 32],
                     "patch_blend_mode": "gaussian",
                     "patch_overlap": 0.5
                 }
@@ -277,7 +280,7 @@ def test_build_dataloaders_passes_expected_args(
     tr = captured["train"]
     assert tr["extract_patches"] is True
     assert tr["batch_size"] == t.config["training"]["batch_size_per_gpu"]
-    assert tr["roi_size"] == t.config["model"]["params"]["patch_size"]
+    assert tr["roi_size"] == t.config["spatial_config"]["patch_size"]
     assert tr["rank"] == 0 and tr["world_size"] == 1
 
     vl = captured["val"]
@@ -494,7 +497,7 @@ def test_validation_step_calls_sliding_window_and_validation_loss(
     mock_swi.assert_called_once()
     kwargs = mock_swi.call_args.kwargs
     assert torch.equal(kwargs["inputs"], batch["image"])
-    assert kwargs["roi_size"] == t.config["model"]["params"]["patch_size"]
+    assert kwargs["roi_size"] == t.config["spatial_config"]["patch_size"]
     expected_overlap = (
         t.config["inference"]["inferer"]["params"]["patch_overlap"]
     )
