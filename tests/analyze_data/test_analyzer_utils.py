@@ -503,11 +503,12 @@ class TestGetBestPatchSize:
     def test_isotropic_clamped_one_axis_redistributes_budget(self):
         """Small z forces clamping; freed budget pumps up x and y."""
         # Isotropic spacing → 3D mode.
-        # Iter 1: target_mm = 128mm, raw_z = 128 >= median_z=40 → fix z=40
-        # Iter 2: remaining = 128^3/40 = 52429; target_mm_xy = sqrt(52429)≈229
-        # snap(229) = 224; both x,y = 224
+        # Iter 1: target_mm = 128mm, raw_z = 128 >= median_z=40
+        #   → fix z = snap(40) = 32  (stores snapped value for accurate budget)
+        # Iter 2: remaining = 128^3/32 = 65536; target_mm_xy = sqrt(65536) = 256
+        #   → snap(256) = 256; both x,y = 256
         result = au.get_best_patch_size([512, 512, 40], [1.0, 1.0, 1.0])
-        assert result == [224, 224, 32]
+        assert result == [256, 256, 32]
 
     def test_isotropic_all_axes_clamped_to_median(self):
         """Tiny image: all axes clamped to median, snapped down."""

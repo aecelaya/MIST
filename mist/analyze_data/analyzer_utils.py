@@ -345,7 +345,9 @@ def get_best_patch_size(
             break
 
         for i in new_fixed:
-            fixed[i] = median_resampled_size[i]
+            # Store the snapped value so budget redistribution reflects what
+            # will actually be placed in the patch, not the raw median.
+            fixed[i] = _largest_multiple_of_32_leq(median_resampled_size[i])
             free_axes.remove(i)
 
     patch = []
