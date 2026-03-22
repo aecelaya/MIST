@@ -1,4 +1,5 @@
 """Unit tests for MedNeXt block components."""
+import pytest
 import torch
 
 # MIST imports.
@@ -68,3 +69,14 @@ def test_mednext_block_layer_norm():
     )
     y = block(x)
     assert y.shape == x.shape
+
+
+def test_mednext_block_invalid_norm_type():
+    """MedNeXtBlock raises ValueError for an unsupported norm_type."""
+    with pytest.raises(ValueError, match="norm_type must be 'group' or 'layer'"):
+        MedNeXtBlock(
+            in_channels=4,
+            out_channels=4,
+            kernel_size=3,
+            norm_type="batch",
+        )

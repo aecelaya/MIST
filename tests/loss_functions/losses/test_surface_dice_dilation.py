@@ -377,3 +377,21 @@ class TestVesselSDDL:
         """surface_logic must be an nn.Module so its parameters are tracked."""
         loss_fn = VesselSDDL(sddl_spacing_xyz=ISOTROPIC)
         assert isinstance(loss_fn.surface_logic, torch.nn.Module)
+
+
+class TestSurfaceDilationLogicBoundaryKsizeZero:
+    """Tests for the boundary_ksize <= 0 guard in _compute_boundary."""
+
+    def test_boundary_ksize_zero_returns_zeros(self):
+        """_compute_boundary returns all-zeros when boundary_ksize is 0."""
+        logic = SurfaceDilationLogic(
+            spacing_xyz=ISOTROPIC,
+            tau_mm="auto",
+            tau_safety_factor=1.25,
+            boundary_ksize=0,
+            eps=1e-6,
+        )
+        p = torch.rand(2, 3, 8, 8, 8)
+        result = logic._soft_boundary(p)
+        assert torch.all(result == 0)
+        assert result.shape == p.shape

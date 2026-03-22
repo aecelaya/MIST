@@ -539,3 +539,74 @@ def test_load_model_from_config_keeps_non_ddp_keys(
         assert model is dummy_model
 
 
+# ---------------------------------------------------------------------------
+# validate_mist_config_for_model_loading — spatial_config coverage gaps
+# ---------------------------------------------------------------------------
+
+def test_validate_missing_spatial_config_key(valid_mist_config):
+    """Missing 'spatial_config' key raises ValueError."""
+    valid_mist_config.pop("spatial_config")
+    with pytest.raises(
+        ValueError, match="Missing required key 'spatial_config' in configuration."
+    ):
+        validate_mist_config_for_model_loading(valid_mist_config)
+
+
+def test_validate_missing_spatial_config_subkey(valid_mist_config):
+    """Missing key inside 'spatial_config' raises ValueError."""
+    valid_mist_config["spatial_config"].pop("patch_size")
+    with pytest.raises(
+        ValueError, match="Missing required key 'patch_size' in spatial_config."
+    ):
+        validate_mist_config_for_model_loading(valid_mist_config)
+
+
+# ---------------------------------------------------------------------------
+# load_pretrained_encoder — skipped-key coverage gaps
+# ---------------------------------------------------------------------------
+
+def test_load_pretrained_encoder_target_key_absent_from_source_is_skipped(
+    source_checkpoint,
+):
+    """A target encoder key not present in the source checkpoint is skipped."""
+    class _ExtraKeyModel(torch.nn.Module):
+        def get_encoder_state_dict(self):
+            return {"nonexistent_key": torch.randn(4, 1, 3, 3, 3)}
+
+        def load_state_dict(self, sd, strict=False):
+            pass
+
+        def forward(self, x):
+            return x
+
+    _, summary = load_pretrained_encoder(_ExtraKeyModel(), source_checkpoint)
+    assert "nonexistent_key" in summary["skipped"]
+    assert len(summary["loaded"]) == 0
+
+
+def test_load_pretrained_encoder_incompatible_shape_is_skipped(
+    nnunet_source, source_checkpoint
+):
+    """A key whose shape[0] differs between source and target is skipped."""
+    source_enc = nnunet_source.get_encoder_state_dict()
+    first_key = next(iter(source_enc))
+    source_shape = source_enc[first_key].shape
+
+    # Different shape[0] (output filters): neither direct-load nor channel
+    # strategy applies, so the key must land in summary["skipped"].
+    incompatible = torch.randn(source_shape[0] + 8, *source_shape[1:])
+
+    class _IncompatibleModel(torch.nn.Module):
+        def get_encoder_state_dict(self):
+            return {first_key: incompatible}
+
+        def load_state_dict(self, sd, strict=False):
+            pass
+
+        def forward(self, x):
+            return x
+
+    _, summary = load_pretrained_encoder(_IncompatibleModel(), source_checkpoint)
+    assert first_key in summary["skipped"]
+
+

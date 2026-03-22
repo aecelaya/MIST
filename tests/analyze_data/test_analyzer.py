@@ -606,6 +606,18 @@ class TestAnalyzerHelpers:
         with pytest.raises(RuntimeError, match="analyze_dataset"):
             a.check_resampled_dims(np.ones((TRAIN_N, 3)) * 5)
 
+    def test_check_resampled_dims_raises_if_target_spacing_missing(
+        self, args
+    ):
+        """check_resampled_dims raises RuntimeError when target_spacing is absent."""
+        a = Analyzer(args)
+        # Provide crop_to_foreground so the first guard passes,
+        # but remove target_spacing so the second guard raises.
+        a.config.setdefault("preprocessing", {})["crop_to_foreground"] = False
+        a.config.get("spatial_config", {}).pop("target_spacing", None)
+        with pytest.raises(RuntimeError, match="analyze_dataset"):
+            a.check_resampled_dims(np.ones((TRAIN_N, 3)) * 5)
+
 
 # ---------------------------------------------------------------------------
 # get_ct_normalization_parameters
@@ -913,6 +925,36 @@ class TestAnalyzerRun:
         )
         with pytest.raises(FileNotFoundError):
             Analyzer(args).run()
+
+    def test_run_calls_validate_dataset_when_verify_true(
+        self, args, monkeypatch
+    ):
+        """run() calls validate_dataset() when args.verify is True."""
+        args.verify = True
+        called = []
+        monkeypatch.setattr(
+            Analyzer,
+            "validate_dataset",
+            lambda self: called.append(True),
+            raising=True,
+        )
+        Analyzer(args).run()
+        assert called
+
+    def test_run_calls_data_dumper_when_data_dump_true(
+        self, args, monkeypatch
+    ):
+        """run() instantiates and runs DataDumper when args.data_dump is True."""
+        args.data_dump = True
+        called = []
+        monkeypatch.setattr(
+            DataDumper,
+            "run",
+            lambda self: called.append(True),
+            raising=True,
+        )
+        Analyzer(args).run()
+        assert called
 
 
 # ---------------------------------------------------------------------------

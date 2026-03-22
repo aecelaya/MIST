@@ -275,3 +275,27 @@ def test_surface_dice_zero_when_disjoint():
         distances, tolerance_mm=0.1
     )
     assert surface_dice == 0.0
+
+
+def test_compute_surface_distances_empty_gt_borders():
+    """GT all-zero: no GT surface voxels, distmap_gt falls back to all-inf."""
+    mask_gt = np.zeros((8, 8, 8), dtype=bool)
+    mask_pred = np.zeros((8, 8, 8), dtype=bool)
+    mask_pred[2:6, 2:6, 2:6] = True
+    distances = metrics.compute_surface_distances(mask_gt, mask_pred, (1.0, 1.0, 1.0))
+    assert set(distances.keys()) == {
+        "distances_gt_to_pred", "distances_pred_to_gt",
+        "surfel_areas_gt", "surfel_areas_pred",
+    }
+
+
+def test_compute_surface_distances_empty_pred_borders():
+    """Pred all-zero: no pred surface voxels, distmap_pred falls back to all-inf."""
+    mask_gt = np.zeros((8, 8, 8), dtype=bool)
+    mask_gt[2:6, 2:6, 2:6] = True
+    mask_pred = np.zeros((8, 8, 8), dtype=bool)
+    distances = metrics.compute_surface_distances(mask_gt, mask_pred, (1.0, 1.0, 1.0))
+    assert set(distances.keys()) == {
+        "distances_gt_to_pred", "distances_pred_to_gt",
+        "surfel_areas_gt", "surfel_areas_pred",
+    }
