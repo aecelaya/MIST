@@ -706,16 +706,63 @@ The scheduler can be specified with the `--lr-scheduler` flag or by editing
 The `polynomial` learning rate schedule uses a fixed decay rate of `0.9`. Future
 versions of MIST will make this value configurable.
 
-### Example
+### Linear warmup
 
-Run the MIST training pipeline with a polynomial learning schedule with a
-higher initial learning rate.
+Any scheduler can be preceded by a linear warmup phase using `--warmup-epochs`.
+During warmup, the learning rate increases linearly from 1% of the target LR up
+to the full LR over the specified number of epochs. The main schedule then runs
+for the remaining `epochs - warmup_epochs` steps, so the full decay budget is
+preserved.
+
+```
+LR
+ |        /‾‾‾‾‾‾‾‾‾‾‾‾\
+ |       /               \
+ |      /                 \___
+ |     /  warmup  |  main schedule
+ +-----|-----------|-----------------> epoch
+       0     warmup_epochs
+```
+
+Warmup is off by default (`warmup_epochs: 0`). It is most useful when:
+
+- Using transformer-based architectures such as SwinUNETR, where large gradient
+  updates in early epochs can destabilize attention weights.
+- Fine-tuning from pretrained encoder weights (`--pretrained-weights`), where a
+  sudden full-LR update can damage learned features before the rest of the
+  network has adapted.
+
+A warmup of 5–10 epochs is a reasonable starting point for most cases. For
+longer runs (1000 epochs) with transformer architectures, 20–30 epochs is more
+appropriate.
+
+### Examples
+
+Run with a polynomial learning rate schedule and a higher initial learning rate.
 
 ```console
 mist_train --numpy /path/to/preprocessed/npy/files \
            --results /path/to/results/folder \
            --learning-rate 0.01 \
            --lr-scheduler polynomial
+```
+
+Run with cosine annealing and a 10-epoch linear warmup.
+
+```console
+mist_train --numpy /path/to/preprocessed/npy/files \
+           --results /path/to/results/folder \
+           --lr-scheduler cosine \
+           --warmup-epochs 10
+```
+
+Or set it directly in `config.json`:
+
+```json
+"training": {
+    "lr_scheduler": "cosine",
+    "warmup_epochs": 10
+}
 ```
 
 ## Docker

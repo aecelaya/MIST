@@ -224,6 +224,8 @@ the choice of patch size determined by the analysis pipeline.
 - `--batch-size-per-gpu`: Batch size per GPU worker. *(default: `2`)*
 - `--learning-rate`: Initial learning rate. *(default: `0.001`)*
 - `--lr-scheduler`: Learning rate scheduler *(default: `cosine`)*.
+- `--warmup-epochs`: Number of linear warmup epochs before the main LR
+  schedule begins. *(default: `0`)*
 - `--optimizer`: Optimizer *(default: `adam`)*.
 - `--l2-penalty`: L2 penalty (weight decay). *(default: `0.00001`)*
 - `--folds`: Specify which folds to run. If not provided, all folds are trained.

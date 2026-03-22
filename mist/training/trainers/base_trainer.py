@@ -236,6 +236,11 @@ class BaseTrainer(ABC):
                 self.mist_args.lr_scheduler
             )
 
+        if getattr(self.mist_args, "warmup_epochs", None) is not None:
+            self.config["training"]["warmup_epochs"] = int(
+                self.mist_args.warmup_epochs
+            )
+
         # Overwrite the validation percentage if specified in command line.
         if self.mist_args.val_percent is not None:
             self.config["training"]["val_percent"] = float(
@@ -321,6 +326,13 @@ class BaseTrainer(ABC):
             warnings.append(
                 f"  --lr-scheduler: '{tr_old['lr_scheduler']}' → "
                 f"'{tr_new['lr_scheduler']}'"
+            )
+
+        old_warmup = tr_old.get("warmup_epochs", 0)
+        new_warmup = tr_new.get("warmup_epochs", 0)
+        if old_warmup != new_warmup:
+            warnings.append(
+                f"  --warmup-epochs: {old_warmup} → {new_warmup}"
             )
 
         if tr_old["l2_penalty"] != tr_new["l2_penalty"]:
@@ -581,6 +593,7 @@ class BaseTrainer(ABC):
             name=training["lr_scheduler"],
             optimizer=optimizer,
             epochs=training["epochs"],
+            warmup_epochs=training.get("warmup_epochs", 0),
         )
 
         # Get gradient scaler if AMP is enabled.

@@ -42,15 +42,62 @@ def get_lr_scheduler(
     name: str,
     optimizer: Optimizer,
     epochs: int,
+    warmup_epochs: int = 0,
 ) -> LRScheduler:
-    """Factory function for learning rate schedulers."""
+    """Factory function for learning rate schedulers.
+
+    When warmup_epochs > 0, a linear warmup phase is prepended to the
+    requested schedule. The warmup ramps the LR from
+    LRSchedulerConstants.WARMUP_START_FACTOR × base_lr up to base_lr over
+    warmup_epochs steps. The main scheduler then runs for the remaining
+    epochs - warmup_epochs steps so the full decay budget is preserved.
+
+    Args:
+        name: Scheduler name (cosine, polynomial, constant).
+        optimizer: The optimizer whose LR will be scheduled.
+        epochs: Total number of training epochs.
+        warmup_epochs: Number of linear warmup epochs (default: 0).
+
+    Returns:
+        LRScheduler — a plain scheduler when warmup_epochs == 0, or a
+        SequentialLR that chains warmup → main schedule otherwise.
+
+    Raises:
+        ValueError: If name is not in the registry or warmup_epochs >= epochs.
+    """
     name = name.lower()
     if name not in LR_SCHEDULER_REGISTRY:
         raise ValueError(
             f"Unknown scheduler '{name}'. "
             f"Available: {list_lr_schedulers()}"
         )
-    return LR_SCHEDULER_REGISTRY[name](optimizer, epochs)
+
+    if warmup_epochs < 0:
+        raise ValueError(
+            f"warmup_epochs must be >= 0, got {warmup_epochs}."
+        )
+
+    if warmup_epochs == 0:
+        return LR_SCHEDULER_REGISTRY[name](optimizer, epochs)
+
+    if warmup_epochs >= epochs:
+        raise ValueError(
+            f"warmup_epochs ({warmup_epochs}) must be less than "
+            f"epochs ({epochs})."
+        )
+
+    warmup = torch.optim.lr_scheduler.LinearLR(
+        optimizer,
+        start_factor=LRSchedulerConstants.WARMUP_START_FACTOR,
+        end_factor=1.0,
+        total_iters=warmup_epochs,
+    )
+    main = LR_SCHEDULER_REGISTRY[name](optimizer, epochs - warmup_epochs)
+    return torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[warmup, main],
+        milestones=[warmup_epochs],
+    )
 
 
 def list_lr_schedulers() -> List[str]:

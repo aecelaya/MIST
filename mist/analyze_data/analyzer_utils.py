@@ -338,6 +338,7 @@ def build_base_config() -> dict[str, Any]:
             "optimizer": "adam",
             "learning_rate": 0.001,
             "lr_scheduler": "cosine",
+            "warmup_epochs": 0,
             "l2_penalty": 0.00001,
             "amp": True,
             "augmentation": {

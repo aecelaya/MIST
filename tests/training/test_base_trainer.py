@@ -275,6 +275,7 @@ def mist_args(tmp_pipeline):
         l2_penalty=None,
         learning_rate=None,
         lr_scheduler=None,
+        warmup_epochs=None,
         val_percent=None,
         resume=False,
     )
@@ -338,7 +339,8 @@ def patch_registries(monkeypatch):
             pass
 
     monkeypatch.setattr(
-        bt, "get_lr_scheduler", lambda name, optimizer, epochs: DummyScheduler()
+        bt, "get_lr_scheduler",
+        lambda name, optimizer, epochs, warmup_epochs=0: DummyScheduler()
     )
 
 

@@ -72,3 +72,49 @@ def test_get_lr_scheduler_invalid_raises():
         reg.get_lr_scheduler("nope", optimizer=opt, epochs=3)
     msg = str(ei.value)
     assert "Unknown scheduler" in msg and "Available:" in msg
+
+
+def test_get_lr_scheduler_warmup_returns_sequential():
+    """warmup_epochs > 0 returns a SequentialLR chaining warmup + main."""
+    opt = _make_optimizer(lr=0.1)
+    sched = reg.get_lr_scheduler("cosine", optimizer=opt, epochs=10, warmup_epochs=3)
+    assert isinstance(sched, torch.optim.lr_scheduler.SequentialLR)
+
+
+def test_get_lr_scheduler_warmup_ramps_lr():
+    """LR increases during warmup then follows main schedule."""
+    base_lr = 0.1
+    opt = _make_optimizer(lr=base_lr)
+    sched = reg.get_lr_scheduler("cosine", optimizer=opt, epochs=10, warmup_epochs=3)
+
+    lrs = []
+    for _ in range(10):
+        opt.step()
+        sched.step()
+        lrs.append(opt.param_groups[0]["lr"])
+
+    # LR should increase during warmup (steps 0-2) then decrease.
+    assert lrs[0] < lrs[1] < lrs[2]
+    # After warmup the cosine decay should bring LR below the peak.
+    assert lrs[-1] < lrs[2]
+
+
+def test_get_lr_scheduler_warmup_zero_equals_no_warmup():
+    """warmup_epochs=0 returns the plain scheduler, not a SequentialLR."""
+    opt = _make_optimizer(lr=0.1)
+    sched = reg.get_lr_scheduler("cosine", optimizer=opt, epochs=10, warmup_epochs=0)
+    assert isinstance(sched, torch.optim.lr_scheduler.CosineAnnealingLR)
+
+
+def test_get_lr_scheduler_warmup_negative_raises():
+    """Negative warmup_epochs raises ValueError."""
+    opt = _make_optimizer()
+    with pytest.raises(ValueError, match="warmup_epochs must be >= 0"):
+        reg.get_lr_scheduler("cosine", optimizer=opt, epochs=10, warmup_epochs=-1)
+
+
+def test_get_lr_scheduler_warmup_gte_epochs_raises():
+    """warmup_epochs >= epochs raises ValueError."""
+    opt = _make_optimizer()
+    with pytest.raises(ValueError, match="warmup_epochs"):
+        reg.get_lr_scheduler("cosine", optimizer=opt, epochs=5, warmup_epochs=5)

@@ -314,6 +314,7 @@ def test_add_train_args_defaults_and_basic_parse(patched_registries):
     assert ns.batch_size_per_gpu is None
     assert ns.learning_rate is None
     assert ns.lr_scheduler is None
+    assert ns.warmup_epochs is None
     assert ns.optimizer is None
     assert ns.l2_penalty is None
     assert ns.folds is None
@@ -338,6 +339,7 @@ def test_add_train_args_full_parse_success(patched_registries):
         "--batch-size-per-gpu", "2",
         "--learning-rate", "0.001",
         "--lr-scheduler", "cos",
+        "--warmup-epochs", "5",
         "--optimizer", "adam",
         "--l2-penalty", "0.0005",
         "--folds", "0", "2", "4",
@@ -357,6 +359,7 @@ def test_add_train_args_full_parse_success(patched_registries):
     assert ns.batch_size_per_gpu == 2
     assert ns.learning_rate == pytest.approx(0.001)
     assert ns.lr_scheduler == "cos"
+    assert ns.warmup_epochs == 5
     assert ns.optimizer == "adam"
     assert ns.l2_penalty == pytest.approx(0.0005)
     assert ns.folds == [0, 2, 4]
