@@ -43,7 +43,7 @@ def _parse_postprocess_args(
     )
     p.arg(
         "--num-workers-postprocess", type=positive_int, default=1,
-        help="Number of parallel workers for postprocessing. Defaults to 1.",
+        help="Number of parallel workers for postprocessing.",
     )
 
     # Optional evaluation arguments.

@@ -41,10 +41,10 @@ def _parse_eval_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     parser.arg(
         "--num-workers-evaluate", type=int, default=1,
-        help="Number of parallel workers for evaluation. *(default: 1)*",
+        help="Number of parallel workers for evaluation.",
     )
-    parser.arg(
-        "--validate", action="store_true", default=False,
+    parser.flag(
+        "--validate",
         help=(
             "Validate each mask pair before evaluation. Checks that images are "
             "3D, have an integer or boolean dtype, and contain only labels "

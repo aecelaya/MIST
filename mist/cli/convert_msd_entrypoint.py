@@ -25,8 +25,8 @@ def _parse_convert_msd_args(
         help="Directory to save the converted MIST-format dataset.",
     )
     parser.arg(
-        "--num-workers", type=int, default=1,
-        help="Number of parallel threads for file copying. *(default: 1)*",
+        "--num-workers-conversion", type=int, default=1,
+        help="Number of parallel threads for file copying.",
     )
     return parser.parse_args(argv)
 
@@ -36,7 +36,7 @@ def run_convert_msd(ns: argparse.Namespace) -> None:
     source = Path(ns.source).expanduser().resolve()
     output = Path(ns.output).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
-    convert_msd(source, output, max_workers=ns.num_workers)
+    convert_msd(source, output, max_workers=ns.num_workers_conversion)
 
 
 def convert_msd_entry(argv: Optional[List[str]] = None) -> None:

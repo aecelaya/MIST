@@ -112,7 +112,7 @@ def add_preprocess_args(parser: ArgParser) -> None:
         "--num-workers-preprocess",
         type=positive_int,
         default=1,
-        help="Number of parallel workers for preprocessing. Defaults to 1.",
+        help="Number of parallel workers for preprocessing.",
     )
     parser.boolean_flag("--no-preprocess", default=False, help="Turn off most preprocessing.")
     parser.boolean_flag("--compute-dtms", default=False, help="Compute DTMs.")
@@ -142,7 +142,7 @@ def add_train_args(parser: ArgParser) -> None:
     g.add_argument("--batch-size-per-gpu", type=positive_int, help="Batch size per GPU/CPU worker.")
     g.add_argument("--learning-rate", type=positive_float, help="Learning rate.")
     g.add_argument("--lr-scheduler", type=str, choices=list_lr_schedulers(), help="Learning rate scheduler.")
-    g.add_argument("--warmup-epochs", type=non_negative_int, help="Number of linear warmup epochs before the main LR schedule. *(default: 0)*")
+    g.add_argument("--warmup-epochs", type=non_negative_int, help="Number of linear warmup epochs before the main LR schedule.")
     g.add_argument("--optimizer", type=str, choices=list_optimizers(), help="Optimizer to use.")
     g.add_argument("--l2-penalty", type=positive_float, help="L2 penalty (weight decay).")
     g.add_argument("--folds", nargs="+", type=int, help="Specify which folds to run.")
@@ -154,7 +154,7 @@ def add_train_args(parser: ArgParser) -> None:
         "--num-workers-evaluate",
         type=positive_int,
         default=1,
-        help="Number of parallel workers for post-training evaluation. *(default: 1)*",
+        help="Number of parallel workers for post-training evaluation.",
     )
 
     # Transfer learning.
@@ -179,7 +179,7 @@ def add_train_args(parser: ArgParser) -> None:
         choices=["average", "first", "skip"],
         help="How to handle in_channels mismatch between source and target "
              "encoder. 'average': mean over source channels. 'first': use "
-             "first source channel only. 'skip': keep random init. (default: average)",
+             "first source channel only. 'skip': keep random init.",
     )
 
     # Overwrite.

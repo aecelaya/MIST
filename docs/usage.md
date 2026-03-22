@@ -707,7 +707,7 @@ Converts a Medical Segmentation Decathlon dataset.
 |---|---|---|
 | `--source` | Yes | Path to the MSD dataset directory (must contain `dataset.json`). |
 | `--output` | Yes | Directory to save the converted MIST-format dataset. |
-| `--num-workers` | No | Number of parallel threads for file copying. *(default: 1)* |
+| `--num-workers-conversion` | No | Number of parallel threads for file copying. *(default: 1)* |
 
 ```console
 mist_convert_msd --source /path/to/msd/dataset \
@@ -726,7 +726,7 @@ Converts a CSV-format dataset.
 | `--train-csv` | Yes | Path to training CSV with columns: `id`, `mask`, `image1` [, `image2`, ...]. |
 | `--output` | Yes | Directory to save the converted MIST-format dataset. |
 | `--test-csv` | No | Path to optional test CSV with columns: `id`, `image1` [, `image2`, ...]. |
-| `--num-workers` | No | Number of parallel threads for file copying. *(default: 1)* |
+| `--num-workers-conversion` | No | Number of parallel threads for file copying. *(default: 1)* |
 
 ```console
 mist_convert_csv --train-csv /path/to/train.csv \

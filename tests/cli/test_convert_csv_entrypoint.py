@@ -42,21 +42,21 @@ class TestParseConvertCsvArgs:
         assert ns.test_csv == str(tmp_path / "test.csv")
 
     def test_num_workers_defaults_to_one(self, tmp_path):
-        """--num-workers is optional and defaults to None."""
+        """--num-workers-conversion is optional and defaults to 1."""
         ns = entry._parse_convert_csv_args([
             "--train-csv", str(tmp_path / "train.csv"),
             "--output", str(tmp_path / "out"),
         ])
-        assert ns.num_workers == 1
+        assert ns.num_workers_conversion == 1
 
     def test_num_workers_is_parsed(self, tmp_path):
-        """--num-workers is captured as an integer."""
+        """--num-workers-conversion is captured as an integer."""
         ns = entry._parse_convert_csv_args([
             "--train-csv", str(tmp_path / "train.csv"),
             "--output", str(tmp_path / "out"),
-            "--num-workers", "4",
+            "--num-workers-conversion", "4",
         ])
-        assert ns.num_workers == 4
+        assert ns.num_workers_conversion == 4
 
     def test_missing_train_csv_exits(self, tmp_path):
         """Omitting --train-csv causes SystemExit."""
@@ -98,7 +98,7 @@ class TestRunConvertCsv:
             train_csv=str(tmp_path / "train.csv"),
             output=str(tmp_path / "out"),
             test_csv=None,
-            num_workers=None,
+            num_workers_conversion=None,
         )
         entry.run_convert_csv(ns)
 
@@ -125,7 +125,7 @@ class TestRunConvertCsv:
             train_csv=str(tmp_path / "train.csv"),
             output=str(tmp_path / "out"),
             test_csv=str(tmp_path / "test.csv"),
-            num_workers=None,
+            num_workers_conversion=None,
         )
         entry.run_convert_csv(ns)
         assert captured["test_csv"] == (tmp_path / "test.csv").resolve()
@@ -147,7 +147,7 @@ class TestRunConvertCsv:
             train_csv=str(tmp_path / "train.csv"),
             output=str(tmp_path / "out"),
             test_csv=None,
-            num_workers=8,
+            num_workers_conversion=8,
         )
         entry.run_convert_csv(ns)
         assert captured["max_workers"] == 8
@@ -164,7 +164,7 @@ class TestConvertCsvEntry:
         """convert_csv_entry calls _parse_convert_csv_args then run_convert_csv."""
         ns = SimpleNamespace(
             train_csv="/train.csv", output="/out",
-            test_csv=None, num_workers=None,
+            test_csv=None, num_workers_conversion=None,
         )
         called = {"parsed": False, "ran": False}
 

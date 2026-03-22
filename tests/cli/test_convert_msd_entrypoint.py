@@ -25,21 +25,21 @@ class TestParseConvertMsdArgs:
         assert ns.output == str(tmp_path / "out")
 
     def test_num_workers_defaults_to_one(self, tmp_path):
-        """--num-workers is optional and defaults to None."""
+        """--num-workers-conversion is optional and defaults to 1."""
         ns = entry._parse_convert_msd_args([
             "--source", str(tmp_path / "msd"),
             "--output", str(tmp_path / "out"),
         ])
-        assert ns.num_workers == 1
+        assert ns.num_workers_conversion == 1
 
     def test_num_workers_is_parsed(self, tmp_path):
-        """--num-workers is captured as an integer."""
+        """--num-workers-conversion is captured as an integer."""
         ns = entry._parse_convert_msd_args([
             "--source", str(tmp_path / "msd"),
             "--output", str(tmp_path / "out"),
-            "--num-workers", "4",
+            "--num-workers-conversion", "4",
         ])
-        assert ns.num_workers == 4
+        assert ns.num_workers_conversion == 4
 
     def test_missing_source_exits(self, tmp_path):
         """Omitting --source causes SystemExit."""
@@ -75,7 +75,7 @@ class TestRunConvertMsd:
         ns = argparse.Namespace(
             source=str(tmp_path / "msd"),
             output=str(tmp_path / "out"),
-            num_workers=None,
+            num_workers_conversion=None,
         )
         entry.run_convert_msd(ns)
 
@@ -100,7 +100,7 @@ class TestRunConvertMsd:
         ns = argparse.Namespace(
             source=str(tmp_path / "msd"),
             output=str(tmp_path / "out"),
-            num_workers=8,
+            num_workers_conversion=8,
         )
         entry.run_convert_msd(ns)
         assert captured["max_workers"] == 8
@@ -115,7 +115,7 @@ class TestConvertMsdEntry:
 
     def test_parses_then_runs(self, monkeypatch):
         """convert_msd_entry calls _parse_convert_msd_args then run_convert_msd."""
-        ns = SimpleNamespace(source="/src", output="/out", num_workers=None)
+        ns = SimpleNamespace(source="/src", output="/out", num_workers_conversion=None)
         called = {"parsed": False, "ran": False}
 
         monkeypatch.setattr(

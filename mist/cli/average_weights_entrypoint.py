@@ -2,11 +2,12 @@
 from typing import List, Optional
 import argparse
 
+from mist.cli.args import ArgParser
 from mist.models.model_loader import average_fold_weights
 
 
 def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
+    parser = ArgParser(
         description=(
             "Average weights from multiple MIST fold checkpoints. "
             "Produces a single initialization checkpoint by element-wise "
@@ -15,7 +16,7 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
             "recommended input for --pretrained-weights."
         )
     )
-    parser.add_argument(
+    parser.arg(
         "--weights",
         nargs="+",
         required=True,
@@ -23,7 +24,7 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Paths to fold checkpoint files (.pt or .pth). Provide all folds "
              "from a cross-validation run, e.g. fold_0.pt fold_1.pt ...",
     )
-    parser.add_argument(
+    parser.arg(
         "--output",
         type=str,
         required=True,

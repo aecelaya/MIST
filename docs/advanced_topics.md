@@ -1150,6 +1150,7 @@ how many patients are processed in parallel using a Python thread pool:
 | `mist_train`, `mist_run_all`     | `--num-workers-evaluate`   | `1`     |
 | `mist_evaluate`                  | `--num-workers-evaluate`   | `1`     |
 | `mist_postprocess`               | `--num-workers-postprocess`| `1`     |
+| `mist_convert_msd`, `mist_convert_csv` | `--num-workers-conversion` | `1` |
 
 `mist_train` exposes `--num-workers-evaluate` because it automatically runs
 evaluation on the held-out fold predictions after each fold completes. The

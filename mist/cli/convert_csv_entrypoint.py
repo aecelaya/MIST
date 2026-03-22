@@ -33,8 +33,8 @@ def _parse_convert_csv_args(
         ),
     )
     parser.arg(
-        "--num-workers", type=int, default=1,
-        help="Number of parallel threads for file copying. *(default: 1)*",
+        "--num-workers-conversion", type=int, default=1,
+        help="Number of parallel threads for file copying.",
     )
     return parser.parse_args(argv)
 
@@ -47,7 +47,7 @@ def run_convert_csv(ns: argparse.Namespace) -> None:
     test_csv = (
         Path(ns.test_csv).expanduser().resolve() if ns.test_csv else None
     )
-    convert_csv(train_csv, output, test_csv, max_workers=ns.num_workers)
+    convert_csv(train_csv, output, test_csv, max_workers=ns.num_workers_conversion)
 
 
 def convert_csv_entry(argv: Optional[List[str]] = None) -> None:
