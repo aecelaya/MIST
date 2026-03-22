@@ -209,12 +209,11 @@ the following arguments:
 
 - `--model`: Network architecture. *(default: `nnunet`)*
 - `--patch-size`: Patch size as three integers: `X Y Z`. This will overwrite the
-the choice of patch size determined by the analysis pipeline.
+  choice of patch size determined by the analysis pipeline.
 
 **Loss function:**
 
-- `--loss`: Loss function for training. *(default: `dice_ce`)*  
-- `--use-dtms`: Flag to use distance transform maps during training.  
+- `--loss`: Loss function for training. *(default: `dice_ce`)*
 - `--composite-loss-weighting`: Weighting schedule for composite losses.
 *(default: `None`)*
 
@@ -226,14 +225,20 @@ the choice of patch size determined by the analysis pipeline.
 - `--lr-scheduler`: Learning rate scheduler *(default: `cosine`)*.
 - `--warmup-epochs`: Number of linear warmup epochs before the main LR
   schedule begins. *(default: `0`)*
-- `--optimizer`: Optimizer *(default: `adam`)*.
-- `--l2-penalty`: L2 penalty (weight decay). *(default: `0.00001`)*
+- `--optimizer`: Optimizer *(default: `adamw`)*.
+- `--l2-penalty`: L2 penalty (weight decay). *(default: `0.0001`)*
 - `--folds`: Specify which folds to run. If not provided, all folds are trained.
 - `--val-percent`: Specify a percentage of the training data to set aside as a
-validation set. If not specified, the we use the entire held out fold as a
-a validation set during training.
+  validation set. If not specified, we use the entire held out fold as a
+  validation set during training.
 - `--resume`: Resume training from the latest checkpoint. See
   [Resuming training](#resuming-training) for details.
+
+!!! note
+    Gradient clipping norm (`training.grad_clip_norm`, default `1.0`) is
+    configurable directly in `config.json` but is not exposed as a CLI flag.
+    See [Optimizers](advanced_topics.md#optimizers) in the advanced topics
+    for details.
 
 ### Example
 

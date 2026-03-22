@@ -79,10 +79,12 @@ Below is an example of a valid `config.json` file.
       "composite_loss_weighting": null
     },
 
-    "optimizer": "adam",
+    "optimizer": "adamw",
     "learning_rate": 0.001,
     "lr_scheduler": "cosine",
-    "l2_penalty": 1e-05,
+    "warmup_epochs": 0,
+    "l2_penalty": 1e-04,
+    "grad_clip_norm": 1.0,
     "amp": true,
 
     "augmentation": {
@@ -677,6 +679,12 @@ The learning rate can be adjusted with `training.learning_rate` entry in the
 `config.json` file. Weight decay is set with `training.l2_penalty`. These
 parameters can also be set with the `--learning-rate` and `--l2-penalty` flags
 in the `mist_run_all` or `mist_train` commands.
+
+Gradient clipping is applied after every backward pass and is controlled by
+`training.grad_clip_norm` in `config.json` *(default: `1.0`)*. Lowering this
+value increases regularization and can help stabilize training when using
+aggressive learning rates or transformer-based architectures. It is not
+exposed as a CLI flag and must be set directly in the configuration file.
 
 ### Example
 

@@ -131,7 +131,10 @@ class Patch3DTrainer(BaseTrainer):
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(
-                model.parameters(), max_norm=constants.GRAD_CLIP_VALUE
+                model.parameters(),
+                max_norm=self.config["training"].get(
+                    "grad_clip_norm", constants.GRAD_CLIP_VALUE
+                )
             )
             scaler.step(optimizer)
             scaler.update()
@@ -149,7 +152,10 @@ class Patch3DTrainer(BaseTrainer):
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
-                model.parameters(), max_norm=constants.GRAD_CLIP_VALUE
+                model.parameters(),
+                max_norm=self.config["training"].get(
+                    "grad_clip_norm", constants.GRAD_CLIP_VALUE
+                )
             )
             optimizer.step()
         return loss
