@@ -1143,13 +1143,17 @@ Analysis, preprocessing, evaluation, and postprocessing all operate
 patient-by-patient. Each stage exposes a `--num-workers-*` flag that controls
 how many patients are processed in parallel using a Python thread pool:
 
-| Command              | Flag                       | Default |
-|----------------------|----------------------------|---------|
-| `mist_analyze`       | `--num-workers-analyze`    | `1`     |
-| `mist_preprocess`    | `--num-workers-preprocess` | `1`     |
-| `mist_train`         | `--num-workers-evaluate`   | `1`     |
-| `mist_evaluate`      | `--num-workers-evaluate`   | `1`     |
-| `mist_postprocess`   | `--num-workers-postprocess`| `1`     |
+| Command                          | Flag                       | Default |
+|----------------------------------|----------------------------|---------|
+| `mist_analyze`, `mist_run_all`   | `--num-workers-analyze`    | `1`     |
+| `mist_preprocess`, `mist_run_all`| `--num-workers-preprocess` | `1`     |
+| `mist_train`, `mist_run_all`     | `--num-workers-evaluate`   | `1`     |
+| `mist_evaluate`                  | `--num-workers-evaluate`   | `1`     |
+| `mist_postprocess`               | `--num-workers-postprocess`| `1`     |
+
+`mist_train` exposes `--num-workers-evaluate` because it automatically runs
+evaluation on the held-out fold predictions after each fold completes. The
+flag controls the parallelism for that built-in evaluation step.
 
 Increasing these values speeds up each stage on machines with many CPU cores.
 A good starting point is to match the number of available CPU cores, capped at
