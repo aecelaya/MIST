@@ -1,7 +1,7 @@
 """Handle command line arguments for main MIST pipelines."""
 from typing import Union
 import argparse
-from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser # pylint: disable=unused-import
+from argparse import ArgumentParser
 
 # MIST imports.
 from mist.models.model_registry import list_registered_models

@@ -141,7 +141,7 @@ class Postprocessor:
                 raise ValueError(f"Missing 'apply_to_labels' key in step {i}.")
             if "per_label" not in step:
                 raise ValueError(
-                    f"Missing 'apply_sequentially' key in step {i}."
+                    f"Missing 'per_label' key in step {i}."
                 )
             if (
                 not isinstance(step["apply_to_labels"], list) or
@@ -152,7 +152,7 @@ class Postprocessor:
                 )
             if not isinstance(step["per_label"], bool):
                 raise ValueError(
-                    f"'apply_sequentially' in step {i} must be a boolean."
+                    f"'per_label' in step {i} must be a boolean."
                 )
             if step["transform"] not in POSTPROCESSING_TRANSFORMS:
                 raise ValueError(
@@ -166,7 +166,7 @@ class Postprocessor:
             ):
                 raise ValueError(
                     f"'replace_small_objects_with_label' in step {i} requires "
-                    "'apply_sequentially': true."
+                    "'per_label': true."
                 )
         return strategy
 
