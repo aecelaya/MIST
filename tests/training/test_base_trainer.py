@@ -1347,7 +1347,7 @@ def test_build_components_loads_pretrained_encoder(
     """When pretrained_weights is set, load_pretrained_encoder is called and
     the summary is printed on rank 0."""
     mist_args.pretrained_weights = "/fake/encoder.pt"
-    mist_args.pretrained_config = None  # skip config validation
+    mist_args.pretrained_config = "/fake/source_config.json"
 
     dummy_summary = {
         "loaded": list(range(10)),
@@ -1355,6 +1355,11 @@ def test_build_components_loads_pretrained_encoder(
         "skipped": list(range(1)),
     }
 
+    _real_read = bt.io.read_json_file
+    monkeypatch.setattr(
+        bt.io, "read_json_file",
+        lambda path: {} if path == "/fake/source_config.json" else _real_read(path),
+    )
     monkeypatch.setattr(
         bt, "load_pretrained_encoder",
         lambda model, path, strategy: (model, dummy_summary),
