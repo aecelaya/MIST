@@ -247,7 +247,12 @@ the following arguments:
 - `--resume`: Resume training from the latest checkpoint. See
   [Resuming training](#resuming-training) for details.
 
-**Transfer learning:**
+**Transfer learning** *(experimental)*:
+
+!!! warning "Experimental feature"
+    Transfer learning is still under active development. You are welcome to
+    try it, but you may encounter rough edges. If you run into problems,
+    please [open an issue on GitHub](https://github.com/mist-medical/MIST/issues).
 
 - `--pretrained-weights`: Path to a pretrained checkpoint to initialize the
   encoder from. Accepts a single fold checkpoint or the output of
