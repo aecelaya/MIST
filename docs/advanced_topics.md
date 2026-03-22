@@ -620,7 +620,7 @@ is `null` or set to `constant` with no explicit `value`.
 | `gsl` | (Dice + CE) + Generalized surface | Yes | 0.5 | Rarely needed — same reason as `bl`. |
 | `cldice` | (Dice + CE) + Soft skeleton (topology) | No | 0.5 | **Recommended** — skeleton term is unreliable early in training; a linear or cosine schedule lets Dice + CE dominate until predictions stabilize. |
 | `volumetric_sddl` *(experimental)* | (Dice + CE) + Surface Dice Dilation | No | 0.5 | May help — boundary term can be noisier early in training. |
-| `vessel_sddl` *(experimental)* | clDice + Surface Dice Dilation | No | 0.5 | May help — same reason as `volumetric_sddl`; consider combining with a `cldice`-style schedule. |
+| `vessel_sddl` *(experimental)* | ((Dice+CE) + clDice) + Surface Dice Dilation | No | 0.5 | May help — same reason as `volumetric_sddl`; consider combining with a `cldice`-style schedule. Note: the same $\alpha$ is used for both the inner clDice blend and the outer surface blend. |
 
 `composite_loss_weighting` is stored in `config.json` as a `{name, params}`
 object under `training.loss`, or set to `null` to disable it (equal weighting
