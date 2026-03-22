@@ -5,19 +5,22 @@ from pathlib import Path
 from typing import Dict, List, Union, cast
 import ants
 import numpy as np
-from rich.console import Console
-from rich.text import Text
 from rich.table import Table
 
 # MIST imports.
 from mist.utils import io, progress_bar
+from mist.utils.console import (
+    console,
+    print_section_header,
+    print_info,
+    print_warning,
+    print_success,
+)
 from mist.postprocessing.transform_registry import (
     get_transform,
     POSTPROCESSING_TRANSFORMS,
 )
 from mist.postprocessing.postprocessing_utils import StrategyStep
-
-console = Console()
 
 
 def _postprocess_single_file(
@@ -193,20 +196,17 @@ class Postprocessor:
                 skipped_files.append(p.name)
 
         if skipped_files:
-            console.print(
-                f"[yellow]Warning:[/yellow] Skipped {len(skipped_files)} "
-                ".nii.gz file(s) that are not valid files (e.g., directories "
-                "or broken symlinks):"
+            print_warning(
+                f"Skipped {len(skipped_files)} .nii.gz file(s) that are not "
+                "valid files (e.g., directories or broken symlinks):"
             )
             for fname in skipped_files:
-                console.print(f" - [yellow]{fname}[/yellow]")
+                print_info(f" - {fname}")
         return valid_files
 
     def _print_strategy(self) -> None:
         """Print the transform strategy in a formatted table."""
-        console.print(
-            Text("Postprocessing predictions", style="bold underline")
-        )
+        print_section_header("Postprocessing predictions")
 
         table = Table(title="Strategy Summary", show_lines=True)
         table.add_column("Transform", style="bold")
@@ -278,9 +278,9 @@ class Postprocessor:
 
         base_filepaths = self._gather_base_filepaths(base_dir)
         if not base_filepaths:
-            console.print(
-                "[yellow]Warning: No .nii.gz files found in base directory. "
-                "Nothing to postprocess.[/yellow]"
+            print_warning(
+                "No .nii.gz files found in base directory. "
+                "Nothing to postprocess."
             )
             return
         self._print_strategy()
@@ -318,15 +318,10 @@ class Postprocessor:
                         )
 
         if messages:
-            console.print(
-                Text(
-                    "Postprocessing completed with the following messages:",
-                    style="bold underline"
-                )
+            print_section_header(
+                "Postprocessing completed with the following messages:"
             )
             for message in messages:
-                console.print(message)
+                print_info(message)
         else:
-            console.print(
-                "[green]Postprocessing completed successfully![/green]"
-            )
+            print_success("Postprocessing completed successfully.")

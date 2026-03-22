@@ -9,6 +9,7 @@ import pytest
 
 # MIST imports.
 import mist.cli.train_entrypoint as entry
+from mist.utils import console as console_mod
 
 
 # =============================================================================
@@ -389,8 +390,8 @@ def test_train_entry_happy_path_no_test_empty_eval(tmp_path, monkeypatch):
     # Capture console prints.
     logs = []
     monkeypatch.setattr(
-        "rich.console.Console.print",
-        lambda self, *a, **k: logs.append(" ".join(map(str, a))),
+        console_mod.console, "print",
+        lambda msg, **k: logs.append(str(msg)),
     )
 
     # Evaluator should not be called since dataframe is empty.

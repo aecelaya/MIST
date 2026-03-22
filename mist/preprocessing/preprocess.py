@@ -7,18 +7,16 @@ import ants
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-import rich
 import SimpleITK as sitk
 
 # MIST imports.
 from mist.utils import io, progress_bar
+from mist.utils.console import print_section_header, print_warning, print_success
 from mist.analyze_data import analyzer_utils
 from mist.preprocessing import preprocessing_utils
 from mist.preprocessing.preprocessing_constants import (
     PreprocessingConstants as pc
 )
-
-console = rich.console.Console()
 
 
 def resample_image(
@@ -545,9 +543,7 @@ def preprocess_dataset(args: argparse.Namespace) -> None:
         io.write_json_file(config_path, config)
 
     # Print preprocessing message and get progress bar.
-    text = rich.text.Text("\nPreprocessing dataset\n") # type: ignore
-    text.stylize("bold")
-    console.print(text)
+    print_section_header("Preprocessing dataset")
 
     if config["preprocessing"]["skip"]:
         progress = progress_bar.get_progress_bar("Converting nifti to npy")
@@ -600,8 +596,10 @@ def preprocess_dataset(args: argparse.Namespace) -> None:
                     error_messages.append(err)
 
     if error_messages:
-        console.print(rich.text.Text("\n".join(error_messages)))  # type: ignore
-        console.print(rich.text.Text(  # type: ignore
+        print_warning("\n".join(error_messages))
+        print_warning(
             f"{len(error_messages)} of {len(patients)} patient(s) had errors "
             "and were skipped."
-        ))
+        )
+    else:
+        print_success("Preprocessing complete.")

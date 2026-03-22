@@ -2,15 +2,12 @@
 import concurrent.futures
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
-import rich
 import pandas as pd
 
 # MIST imports.
 from mist.utils import io, progress_bar
+from mist.utils.console import console, print_info, print_warning
 from mist.conversion_tools import conversion_utils
-
-# Set up console for rich text.
-console = rich.console.Console()
 
 
 def _validate_csv_columns(df: pd.DataFrame, mode: str) -> None:
@@ -137,11 +134,11 @@ def copy_csv_data(
                     error_messages.append(err)
 
     if error_messages:
-        console.print(rich.text.Text("\n".join(error_messages)))  # type: ignore
-        console.print(rich.text.Text(  # type: ignore
+        print_warning("\n".join(error_messages))
+        print_warning(
             f"{len(error_messages)} of {len(patients)} patient(s) had errors "
             "and were skipped."
-        ))
+        )
 
 
 def convert_csv(
@@ -232,12 +229,10 @@ def convert_csv(
 
     # Write MIST dataset description to json file.
     dataset_json_path = dest / "dataset.json"
-    console.print(rich.text.Text(  # type: ignore
-        f"MIST dataset parameters written to {dataset_json_path}\n"
-    ))
+    print_info(f"MIST dataset parameters written to {dataset_json_path}")
     console.print(dataset_json)
-    console.print(rich.text.Text(  # type: ignore
-        "\nPlease add task, modality, labels, and final classes to parameters.\n"
-    ))
+    print_info(
+        "Please add task, modality, labels, and final classes to parameters."
+    )
 
     io.write_json_file(dataset_json_path, dataset_json)

@@ -2,15 +2,13 @@
 import concurrent.futures
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
-import rich
 import numpy as np
 import SimpleITK as sitk
 
 # MIST imports.
 from mist.utils import io, progress_bar
+from mist.utils.console import console, print_info, print_warning
 from mist.conversion_tools import conversion_utils
-
-console = rich.console.Console()
 
 
 def _copy_single_patient_msd(
@@ -139,11 +137,11 @@ def copy_msd_data(
                     error_messages.append(err)
 
     if error_messages:
-        console.print(rich.text.Text("\n".join(error_messages)))  # type: ignore
-        console.print(rich.text.Text(  # type: ignore
+        print_warning("\n".join(error_messages))
+        print_warning(
             f"{len(error_messages)} of {len(patients)} patient(s) had errors "
             "and were skipped."
-        ))
+        )
 
 
 def convert_msd(
@@ -238,12 +236,10 @@ def convert_msd(
 
     # Write MIST dataset description to json file.
     output_json_path = dest / "dataset.json"
-    console.print(rich.text.Text(  # type: ignore
-        f"MIST dataset parameters written to {output_json_path}\n"
-    ))
+    print_info(f"MIST dataset parameters written to {output_json_path}")
     console.print(dataset_json)
-    console.print(rich.text.Text(  # type: ignore
-        "\nPlease add task, modality, labels, and final classes to parameters.\n"
-    ))
+    print_info(
+        "Please add task, modality, labels, and final classes to parameters."
+    )
 
     io.write_json_file(output_json_path, dataset_json)

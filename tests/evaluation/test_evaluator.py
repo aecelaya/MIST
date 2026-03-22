@@ -11,6 +11,7 @@ from mist.analyze_data import analyzer_utils
 from mist.evaluation import evaluation_utils
 from mist.evaluation.evaluator import Evaluator
 from mist.utils import progress_bar as pb_mod
+from mist.utils import console as console_mod
 from tests.evaluation.helpers import (
     FakeExecutor,
     fake_get_progress_bar,
@@ -675,8 +676,8 @@ class TestEvaluatorRun:
         )
         printed = []
         monkeypatch.setattr(
-            "rich.console.Console.print",
-            lambda self, *a, **k: printed.append(" ".join(map(str, a))),
+            console_mod.console, "print",
+            lambda msg, **k: printed.append(str(msg)),
         )
         evaluator.run()
         assert Path(evaluator.output_csv_path).exists()

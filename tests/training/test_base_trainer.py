@@ -5,6 +5,7 @@ import math
 import pickle
 import rich
 from io import StringIO
+from mist.utils import console as console_mod
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Tuple
@@ -828,15 +829,14 @@ def test_validation_no_improvement_message(
 
     monkeypatch.setattr(trainer, "setup", lambda *a, **k: None)
 
-    buf = StringIO()
+    out = []
     monkeypatch.setattr(
-        trainer.console, "print", lambda msg: buf.write(str(msg))
+        console_mod.console, "print", lambda msg: out.append(str(msg))
     )
 
     trainer.train_fold(fold=0, rank=0, world_size=1)
 
-    output = buf.getvalue()
-    assert "Validation loss did not improve" in output
+    assert any("Validation loss did not improve" in s for s in out)
 
 
 def test_run_cross_validation_rank0_prints_and_calls_all_folds(
@@ -854,7 +854,7 @@ def test_run_cross_validation_rank0_prints_and_calls_all_folds(
 
     out = []
     monkeypatch.setattr(
-        trainer.console, "print", lambda msg: out.append(str(msg))
+        console_mod.console, "print", lambda msg: out.append(str(msg))
     )
 
     calls = []
@@ -885,7 +885,7 @@ def test_run_cross_validation_nonzero_rank_no_print_but_calls_folds(
 
     out = []
     monkeypatch.setattr(
-        trainer.console, "print", lambda msg: out.append(str(msg))
+        console_mod.console, "print", lambda msg: out.append(str(msg))
     )
 
     calls = []
@@ -998,7 +998,7 @@ def test_resume_warns_on_loss_override(tmp_pipeline, mist_args, monkeypatch):
 
     printed = []
     monkeypatch.setattr(
-        rich.console.Console, "print", lambda self, msg: printed.append(str(msg))
+        console_mod.console, "print", lambda msg: printed.append(str(msg))
     )
 
     DummyTrainer(mist_args)
@@ -1013,7 +1013,7 @@ def test_resume_no_warning_when_no_overrides(tmp_pipeline, mist_args, monkeypatc
 
     printed = []
     monkeypatch.setattr(
-        rich.console.Console, "print", lambda self, msg: printed.append(str(msg))
+        console_mod.console, "print", lambda msg: printed.append(str(msg))
     )
 
     DummyTrainer(mist_args)
@@ -1114,7 +1114,7 @@ def test_resume_loads_checkpoint_and_prints_message(
     trainer2.checkpoints_dir = trainer.checkpoints_dir
 
     out = []
-    monkeypatch.setattr(trainer2.console, "print", lambda msg: out.append(str(msg)))
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: out.append(str(msg)))
     trainer2.train_fold(fold=0, rank=0, world_size=1)
 
     assert any("Resuming fold 0" in s for s in out)
@@ -1128,7 +1128,7 @@ def test_resume_warns_when_no_checkpoint(
     trainer = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=0.5)
 
     out = []
-    monkeypatch.setattr(trainer.console, "print", lambda msg: out.append(str(msg)))
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: out.append(str(msg)))
     trainer.train_fold(fold=0, rank=0, world_size=1)
 
     assert any("No checkpoint found" in s for s in out)
@@ -1158,7 +1158,7 @@ def test_run_cross_validation_skips_completed_fold(
     trainer2.checkpoints_dir = trainer.checkpoints_dir
 
     out = []
-    monkeypatch.setattr(trainer2.console, "print", lambda msg: out.append(str(msg)))
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: out.append(str(msg)))
 
     called_folds = []
     original_train_fold = trainer2.train_fold
@@ -1278,9 +1278,7 @@ def test_check_resume_overrides_warns_on_all_training_diffs(
 
     printed = []
     monkeypatch.setattr(
-        bt.rich.console.Console,
-        "print",
-        lambda self, msg: printed.append(str(msg)),
+        console_mod.console, "print", lambda msg: printed.append(str(msg))
     )
 
     DummyTrainer(args)
@@ -1370,9 +1368,7 @@ def test_build_components_loads_pretrained_encoder(
 
     printed = []
     monkeypatch.setattr(
-        bt.rich.console.Console,
-        "print",
-        lambda self, msg: printed.append(str(msg)),
+        console_mod.console, "print", lambda msg: printed.append(str(msg))
     )
 
     trainer = DummyTrainer(mist_args)

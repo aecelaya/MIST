@@ -18,10 +18,15 @@ from importlib import metadata
 import ants
 import pandas as pd
 import numpy as np
-import rich
 
 # MIST imports.
 from mist.utils import io, progress_bar
+from mist.utils.console import (
+    print_section_header,
+    print_warning,
+    print_error,
+    print_success,
+)
 from mist.preprocessing import preprocessing_utils
 from mist.analyze_data import analyzer_utils
 from mist.analyze_data.analyzer_constants import AnalyzeConstants as constants
@@ -104,13 +109,9 @@ class Analyzer:
         dataset_info: Dataset information from MIST arguments.
         config: Configuration dictionary.
         paths_df: Dataframe containing paths to images and masks.
-        console: Rich console for printing messages.
     """
 
     def __init__(self, mist_arguments: argparse.Namespace) -> None:
-        # Initialize the rich console for printing messages.
-        self.console = rich.console.Console()
-
         # Get MIST command line arguments.
         self.mist_arguments = mist_arguments
 
@@ -139,9 +140,8 @@ class Analyzer:
         # is aware that the configuration file is being overwritten and that
         # they should check the new configuration file for any changes.
         if self.config_json.exists() and self.mist_arguments.overwrite:
-            self.console.print(
-                "[yellow]Overwriting existing configuration at "
-                f"{self.config_json}[/yellow]"
+            print_warning(
+                f"Overwriting existing configuration at {self.config_json}"
             )
 
         # Number of parallel workers for analysis. Stored as an instance
@@ -555,11 +555,10 @@ class Analyzer:
                 msg = None
                 if image_memory_size > constants.MAX_RECOMMENDED_MEMORY_SIZE:
                     msg = (
-                        f"[yellow][Warning] In {patient['id']}: Resampled "
-                        "example is larger than the recommended memory size "
-                        f"of {constants.MAX_RECOMMENDED_MEMORY_SIZE / 1e9} "
-                        "GB. Consider coarsening or removing this "
-                        "example.[/yellow]"
+                        f"In {patient['id']}: Resampled example is larger "
+                        "than the recommended memory size of "
+                        f"{constants.MAX_RECOMMENDED_MEMORY_SIZE / 1e9} GB. "
+                        "Consider coarsening or removing this example."
                     )
                 return new_dims, msg
             except Exception as e:
@@ -592,7 +591,7 @@ class Analyzer:
 
         for msg in messages:
             if msg:
-                self.console.print(msg)
+                print_warning(msg)
 
         return list(np.median(resampled_dims, axis=0))
 
@@ -679,13 +678,11 @@ class Analyzer:
         )
         total_out_of_range = sum(r[4] for r in per_patient)
         if total_out_of_range > 0:
-            self.console.print(
-                f"[yellow][Warning] {total_out_of_range:,} foreground voxels "
-                "had HU values outside the histogram range "
-                f"[{constants.CT_HU_HIST_MIN:.0f}, "
-                f"{constants.CT_HU_HIST_MAX:.0f}]. These voxels are included "
-                "in mean/std but excluded from window bound "
-                "estimation.[/yellow]"
+            print_warning(
+                f"{total_out_of_range:,} foreground voxels had HU values "
+                f"outside the histogram range [{constants.CT_HU_HIST_MIN:.0f},"
+                f" {constants.CT_HU_HIST_MAX:.0f}]. These voxels are included "
+                "in mean/std but excluded from window bound estimation."
             )
         _, global_z_score_mean, global_z_score_std = _welford_merge(
             welford_stats
@@ -819,14 +816,14 @@ class Analyzer:
 
                 if not mask_labels.issubset(dataset_labels_set):
                     return True, (
-                        f"[red]In {patient['id']}: Labels in mask do not "
-                        f"match  those specified in {data_path}[/red]"
+                        f"In {patient['id']}: Labels in mask do not match "
+                        f"those specified in {data_path}"
                     )
 
                 if not analyzer_utils.is_image_3d(mask_header):
                     return True, (
-                        f"[red]In {patient['id']}: Got 4D mask, make sure all"
-                        "images are 3D[/red]"
+                        f"In {patient['id']}: Got 4D mask, make sure all "
+                        "images are 3D"
                     )
 
                 for image_path in image_list:
@@ -835,13 +832,13 @@ class Analyzer:
                         mask_header, image_header
                     ):
                         return True, (
-                            f"[red]In {patient['id']}: Mismatch between image "
-                            " and mask header information[/red]"
+                            f"In {patient['id']}: Mismatch between image and "
+                            "mask header information"
                         )
                     if not analyzer_utils.is_image_3d(image_header):
                         return True, (
-                            f"[red]In {patient['id']}: Got 4D image, make"
-                            " sure all images are 3D[/red]"
+                            f"In {patient['id']}: Got 4D image, make sure all "
+                            "images are 3D"
                         )
 
                 if len(image_list) > 1:
@@ -852,16 +849,14 @@ class Analyzer:
                             anchor_header, image_header
                         ):
                             return True, (
-                                f"[red]In {patient['id']}: Mismatch between "
-                                "images' header information[/red]"
+                                f"In {patient['id']}: Mismatch between images' "
+                                "header information"
                             )
 
                 return False, None
 
             except Exception as e:
-                return True, (
-                    f"[red]In {patient['id']}: {e}[/red]"
-                )
+                return True, f"In {patient['id']}: {e}"
 
         n_workers = self.n_workers
         patients = [
@@ -889,12 +884,9 @@ class Analyzer:
         # Print any validation messages and report excluded patients.
         for msg in messages:
             if msg:
-                self.console.print(msg)
+                print_error(msg)
         if bad_data:
-            self.console.print(
-                f"[bold red]Excluding {len(bad_data)} example(s) from "
-                "training.[/bold red]"
-            )
+            print_error(f"Excluding {len(bad_data)} example(s) from training.")
 
         # If all of the data is bad, then raise an error.
         if len(bad_data) >= len(self.paths_df):
@@ -910,9 +902,7 @@ class Analyzer:
 
     def run(self) -> None:
         """Run the analyzer to get configuration file."""
-        text = rich.text.Text("\nAnalyzing dataset\n")  # type: ignore
-        text.stylize("bold")
-        self.console.print(text)
+        print_section_header("Analyzing dataset")
 
         # Step 1: Optionally verify dataset integrity (checks headers,
         # dimensions, etc.). Skipped by default; enabled with --verify.
@@ -975,3 +965,5 @@ class Analyzer:
 
             test_paths_csv = self.results_dir / "test_paths.csv"
             test_paths_df.to_csv(test_paths_csv, index=False)
+
+        print_success("Analysis complete.")

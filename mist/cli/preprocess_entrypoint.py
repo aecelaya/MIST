@@ -3,11 +3,11 @@ from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
 from typing import Optional, List
 import argparse
-import rich.console
 
 # MIST imports.
 from mist.cli import args as argmod
 from mist.preprocessing import preprocess
+from mist.utils.console import print_warning
 
 
 def _parse_preprocess_args(
@@ -70,9 +70,8 @@ def _prepare_preprocess_dirs(ns: argparse.Namespace) -> None:
                 "Use --overwrite or choose a different --numpy directory."
             )
         if non_empty and getattr(ns, "overwrite", False):
-            rich.console.Console().print(
-                f"[yellow]Overwriting existing preprocessed data in "
-                f"{numpy_dir}[/yellow]"
+            print_warning(
+                f"Overwriting existing preprocessed data in {numpy_dir}"
             )
 
     numpy_dir.mkdir(parents=True, exist_ok=True)

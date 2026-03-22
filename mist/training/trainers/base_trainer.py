@@ -21,6 +21,13 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 
 from mist.utils import io, progress_bar
+from mist.utils.console import (
+    print_section_header,
+    print_info,
+    print_warning,
+    print_error,
+    print_success,
+)
 from mist.models.model_registry import get_model_from_registry
 from mist.models.model_loader import (
     load_pretrained_encoder,
@@ -342,15 +349,14 @@ class BaseTrainer(ABC):
             )
 
         if warnings:
-            self.console.print(
-                "[yellow]Warning: --resume is set but the following overrides "
-                "change training configuration from the saved run. Training "
-                "dynamics may be inconsistent from the resumed epoch "
-                "onwards.[/yellow]"
+            print_warning(
+                "--resume is set but the following overrides change training "
+                "configuration from the saved run. Training dynamics may be "
+                "inconsistent from the resumed epoch onwards."
             )
             for w in warnings:
-                self.console.print(f"[yellow]{w}[/yellow]")
-            self.console.print("")
+                print_info(w)
+            print_info("")
 
     def _update_num_gpus_in_config(self) -> None:
         """Get the number of GPUs and add it to the configuration."""
@@ -527,12 +533,12 @@ class BaseTrainer(ABC):
                 model, pretrained_weights, strategy
             )
             if rank == 0:
-                self.console.print(
-                    f"[bold]Pretrained encoder loaded from {pretrained_weights}[/bold]\n"
+                print_info(
+                    f"Pretrained encoder loaded from {pretrained_weights}\n"
                     f"  Loaded:                   {len(transfer_summary['loaded'])} params\n"
                     f"  Channel strategy applied: "
                     f"{len(transfer_summary['channel_strategy_applied'])} params\n"
-                    f"  Skipped:                  {len(transfer_summary['skipped'])} params\n"
+                    f"  Skipped:                  {len(transfer_summary['skipped'])} params"
                 )
 
         use_ddp = world_size > 1
@@ -738,14 +744,13 @@ class BaseTrainer(ABC):
             loaded = self.load_checkpoint(fold, state)
             if rank == 0:
                 if loaded:
-                    self.console.print(
-                        f"[bold]Resuming fold {fold} from epoch "
-                        f"{state['epoch']}[/bold]\n"
+                    print_info(
+                        f"Resuming fold {fold} from epoch {state['epoch']}"
                     )
                 else:
-                    self.console.print(
-                        f"[yellow]No checkpoint found for fold {fold}, "
-                        f"starting from scratch.[/yellow]\n"
+                    print_warning(
+                        f"No checkpoint found for fold {fold}, "
+                        "starting from scratch."
                     )
 
         # Build data loaders for the fold.
@@ -817,9 +822,9 @@ class BaseTrainer(ABC):
                     # Check for NaN/Inf and flag for early exit.
                     if not np.isfinite(mean_loss):
                         if rank == 0:
-                            self.console.print(
-                                "[bold red]Stopping training: Detected NaN"
-                                "or inf loss value![/bold red]\n"
+                            print_error(
+                                "Stopping training: Detected NaN or inf "
+                                "loss value!"
                             )
                         stop_training[0] = 1
 
@@ -882,10 +887,10 @@ class BaseTrainer(ABC):
                 # Check if validation loss improved and save model (rank 0 only).
                 if rank == 0:
                     if val_mean_loss < state["best_val_loss"]:
-                        self.console.print(
-                            "[bold green]Validation loss IMPROVED from "
+                        print_success(
+                            f"Validation loss improved from "
                             f"{state['best_val_loss']:.4f} to "
-                            f"{val_mean_loss:.4f}[/bold green]\n"
+                            f"{val_mean_loss:.4f}"
                         )
 
                         # Update the best validation loss.
@@ -900,9 +905,7 @@ class BaseTrainer(ABC):
                         )
                         torch.save(to_save.state_dict(), model_name)
                     else:
-                        self.console.print(
-                            "Validation loss did not improve.\n"
-                        )
+                        print_info("Validation loss did not improve.")
 
             # Reset the dataloaders for the next epoch.
             train_loader.reset()
@@ -940,7 +943,7 @@ class BaseTrainer(ABC):
         """Run cross-validation for selected folds."""
         # Display the start of training message.
         if rank == 0:
-            self.console.print("\n[bold]Starting training[/bold]\n")
+            print_section_header("Starting training")
 
         for fold in self.config["training"]["folds"]:
             # Skip folds that are already complete when resuming.
@@ -950,9 +953,8 @@ class BaseTrainer(ABC):
                     checkpoint = torch.load(path, weights_only=False)
                     if checkpoint["epoch"] >= self.config["training"]["epochs"] - 1:
                         if rank == 0:
-                            self.console.print(
-                                f"[bold]Fold {fold} already complete, "
-                                f"skipping.[/bold]\n"
+                            print_info(
+                                f"Fold {fold} already complete, skipping."
                             )
                         continue
 
@@ -983,3 +985,5 @@ class BaseTrainer(ABC):
         # To enable pdb do not spawn multiprocessing for world_size = 1.
         else:
             self.run_cross_validation(0, world_size)
+
+        print_success("Training complete.")

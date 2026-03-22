@@ -4,13 +4,13 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 import os
 import argparse
-import rich
 import pandas as pd
 import torch
 
 # MIST imports.
 from mist.cli import args as argmod
 from mist.utils import io
+from mist.utils.console import print_warning, print_error
 from mist.training.trainers.patch_3d_trainer import Patch3DTrainer
 from mist.inference.inference_runners import test_on_fold, infer_from_dataframe
 from mist.evaluation import evaluation_utils
@@ -123,8 +123,6 @@ def _set_visible_devices(mist_arguments: argparse.Namespace) -> None:
 
 def train_entry(argv: Optional[List[str]] = None) -> None:
     """Entrypoint for the training command."""
-    console = rich.console.Console()
-
     ns = _parse_train_args(argv)
 
     # Validate artifacts from analyze + preprocess
@@ -167,12 +165,10 @@ def train_entry(argv: Optional[List[str]] = None) -> None:
     )
 
     if warnings:
-        console.print(warnings)
+        print_warning(warnings)
 
     if filepaths_df.empty:
-        console.print(
-            "[red]No valid prediction-mask pairs. Skipping evaluation.[/red]"
-        )
+        print_error("No valid prediction-mask pairs. Skipping evaluation.")
     else:
         evaluation_csv = results_dir / "evaluation_paths.csv"
         filepaths_df.to_csv(evaluation_csv, index=False)

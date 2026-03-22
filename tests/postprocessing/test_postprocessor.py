@@ -10,6 +10,7 @@ import pytest
 # MIST imports.
 from mist.postprocessing import postprocessor as pp_mod
 from mist.postprocessing.postprocessor import Postprocessor
+from mist.utils import console as console_mod
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +158,7 @@ def test_gather_base_filepaths_skips_non_files(tmp_path, minimal_strategy):
     with patch("mist.utils.io.read_json_file", return_value=minimal_strategy):
         post = Postprocessor(strategy_path="fake/path/strategy.json")
 
-    with patch.object(pp_mod.console, "print", side_effect=lambda *a, **k: printed.append(str(a[0]))):
+    with patch.object(console_mod.console, "print", side_effect=lambda *a, **k: printed.append(str(a[0]))):
         valid = post._gather_base_filepaths(tmp_path)
 
     assert len(valid) == 1
@@ -202,7 +203,7 @@ def test_print_strategy(mock_table_class, mock_read_json):
     postprocessor = Postprocessor(strategy_path="fake_path.json")
 
     printed = []
-    with patch.object(pp_mod.console, "print", side_effect=lambda *a, **k: printed.append(a[0])):
+    with patch.object(console_mod.console, "print", side_effect=lambda *a, **k: printed.append(a[0])):
         postprocessor._print_strategy()
 
     mock_table.add_column.assert_any_call("Transform", style="bold")
@@ -401,7 +402,7 @@ def test_run_postprocessor(
     postprocessor = Postprocessor(strategy_path="fake_path.json")
 
     printed = []
-    with patch.object(pp_mod.console, "print", side_effect=lambda *a, **k: printed.append(str(a[0]))):
+    with patch.object(console_mod.console, "print", side_effect=lambda *a, **k: printed.append(str(a[0]))):
         with patch(
             "concurrent.futures.ProcessPoolExecutor", ThreadPoolExecutor
         ):
@@ -420,7 +421,7 @@ def test_run_postprocessor(
         assert np.all(result[2:4, 2:4] == 2)
         assert np.all(result[:2, :2] == 0)
         assert any(
-            "Postprocessing completed successfully!" in msg for msg in printed
+            "Postprocessing completed successfully" in msg for msg in printed
         )
 
 
@@ -436,7 +437,7 @@ def test_run_empty_base_dir_warns_and_returns(
 
     printed = []
     with patch.object(
-        pp_mod.console, "print",
+        console_mod.console, "print",
         side_effect=lambda *a, **k: printed.append(str(a[0]))
     ):
         postprocessor.run(tmp_path, output_dir)
@@ -472,7 +473,7 @@ def test_run_unexpected_worker_exception_is_caught(
 
     printed = []
     with patch.object(
-        pp_mod.console, "print",
+        console_mod.console, "print",
         side_effect=lambda *a, **k: printed.append(str(a[0]))
     ):
         with patch("concurrent.futures.ProcessPoolExecutor", ThreadPoolExecutor):
@@ -519,7 +520,7 @@ def test_run_patient_id_preserves_dots(
 
     printed = []
     with patch.object(
-        pp_mod.console, "print",
+        console_mod.console, "print",
         side_effect=lambda *a, **k: printed.append(str(a[0]))
     ):
         with patch("concurrent.futures.ProcessPoolExecutor", ThreadPoolExecutor):

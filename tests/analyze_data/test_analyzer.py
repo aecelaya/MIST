@@ -137,8 +137,8 @@ def capture_console(monkeypatch):
     """Capture rich console output; returns a list of message strings."""
     logs = []
     monkeypatch.setattr(
-        "rich.console.Console.print",
-        lambda self, *a, **k: logs.append(" ".join(str(x) for x in a)),
+        "mist.utils.console.console.print",
+        lambda msg, **k: logs.append(str(msg)),
     )
     return logs
 
@@ -1092,7 +1092,7 @@ class TestValidateDataset:
         assert len(a.paths_df) == TRAIN_N - 1
         assert any(
             "In 0:" in m
-            and "Mismatch between image  and mask header information" in m
+            and "Mismatch between image and mask header information" in m
             for m in capture_console
         )
         assert_exclusion_summary(capture_console, 1)

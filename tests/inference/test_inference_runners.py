@@ -222,15 +222,13 @@ def fold_runner(mock_mist_config, monkeypatch, tmp_path):
     image_write = MagicMock()
     predict_single = MagicMock(return_value=_DummyANTsImage())
     printed = []
-    console = MagicMock()
-    console.print.side_effect = lambda msg: printed.append(str(msg))
     mock_read_json = MagicMock()
     mock_get_test_dataset = MagicMock(return_value=_DummyLoader(n=1))
 
     monkeypatch.setattr(ir.ants, "image_read", MagicMock(return_value=_DummyANTsImage()))
     monkeypatch.setattr(ir.ants, "image_write", image_write)
     monkeypatch.setattr(ir.progress_bar, "get_progress_bar", MagicMock(return_value=_PB()))
-    monkeypatch.setattr(ir.rich.console, "Console", MagicMock(return_value=console))
+    monkeypatch.setattr("mist.utils.console.console.print", lambda msg: printed.append(str(msg)))
     monkeypatch.setattr(ir, "predict_single_example", predict_single)
     monkeypatch.setattr(ir, "Predictor", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(ir, "get_strategy", MagicMock(return_value=lambda: SimpleNamespace(name="tta")))
@@ -298,12 +296,10 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
         "fg_bbox": None,
     })
     printed = []
-    console = MagicMock()
-    console.print.side_effect = lambda msg: printed.append(str(msg))
 
     monkeypatch.setattr(ir.ants, "image_write", image_write)
     monkeypatch.setattr(ir.progress_bar, "get_progress_bar", MagicMock(return_value=_PB()))
-    monkeypatch.setattr(ir.rich.console, "Console", MagicMock(return_value=console))
+    monkeypatch.setattr("mist.utils.console.console.print", lambda msg: printed.append(str(msg)))
     monkeypatch.setattr(ir, "predict_single_example", predict_single)
     monkeypatch.setattr(ir, "Predictor", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(ir, "get_strategy", MagicMock(return_value=lambda: SimpleNamespace(name="tta")))
@@ -536,7 +532,7 @@ def test_test_on_fold_error_message_collected_and_printed_single(
 
     fold_runner.image_write.assert_not_called()
     assert any(
-        "[red][Error] Prediction failed for pX: boom[/red]" in m
+        "Prediction failed for pX: boom" in m
         for m in fold_runner.printed
     )
 
@@ -558,11 +554,11 @@ def test_test_on_fold_error_messages_multiple_printed(
 
     fold_runner.image_write.assert_not_called()
     assert any(
-        "[red][Error] Prediction failed for pA: missing.nii.gz[/red]" in m
+        "Prediction failed for pA: missing.nii.gz" in m
         for m in fold_runner.printed
     )
     assert any(
-        "[red][Error] Prediction failed for pB: bad shape[/red]" in m
+        "Prediction failed for pB: bad shape" in m
         for m in fold_runner.printed
     )
 

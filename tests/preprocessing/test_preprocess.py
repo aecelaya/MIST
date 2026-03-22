@@ -11,6 +11,7 @@ import pytest
 
 # MIST imports.
 from mist.preprocessing import preprocess as pp
+from mist.utils import console as console_mod
 
 
 class _DummyAntsImage:
@@ -1539,7 +1540,7 @@ def test_preprocess_dataset_prints_error_summary_on_failures(
 
     printed = []
     monkeypatch.setattr(
-        pp.console, "print", lambda *a, **k: printed.append(str(a[0]))
+        console_mod.console, "print", lambda msg, **k: printed.append(str(msg))
     )
 
     ns = argparse.Namespace(

@@ -8,12 +8,11 @@ from typing import Any, Dict, Optional, Tuple, Union
 import ants
 import numpy as np
 import pandas as pd
-import rich
-
 from mist.analyze_data import analyzer_utils
 from mist.evaluation import evaluation_utils
 from mist.metrics.metrics_registry import get_metric
 from mist.utils import progress_bar
+from mist.utils.console import print_warning, print_success
 
 
 class Evaluator:
@@ -382,9 +381,6 @@ class Evaluator:
                 Defaults to 1. Increase for faster evaluation on machines
                 with many CPUs, but reduce if you encounter OOM errors.
         """
-        # Create a local console object for printing to avoid pickling errors.
-        console = rich.console.Console()
-
         all_error_messages = []
         results_list = []
 
@@ -417,7 +413,7 @@ class Evaluator:
 
         # Report errors.
         if all_error_messages:
-            console.print("\n".join(all_error_messages))
+            print_warning("\n".join(all_error_messages))
 
         # Create DataFrame.
         if results_list:
@@ -434,7 +430,6 @@ class Evaluator:
 
         # Save to disk.
         self.results_dataframe.to_csv(self.output_csv_path, index=False)
-        console.print(
-            "[bold green]Evaluation complete. Results saved to "
-            f"{self.output_csv_path}[/bold green]"
+        print_success(
+            f"Evaluation complete. Results saved to {self.output_csv_path}"
         )

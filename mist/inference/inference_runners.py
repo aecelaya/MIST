@@ -10,11 +10,11 @@ from typing import Any, Dict, Optional, Union, List
 import ants
 import numpy as np
 import pandas as pd
-import rich
 import torch
 
 # MIST imports.
 from mist.utils import progress_bar, io
+from mist.utils.console import print_section_header, print_error, print_success
 from mist.inference import inference_utils
 from mist.inference.inference_constants import InferenceConstants as ic
 from mist.inference.predictor import Predictor
@@ -191,7 +191,6 @@ def test_on_fold(
     os.makedirs(output_directory, exist_ok=True)
 
     # Progress bar and error messages.
-    console = rich.console.Console()
     error_messages = []
 
     # Begin inference loop.
@@ -243,8 +242,7 @@ def test_on_fold(
                 )
             except (FileNotFoundError, RuntimeError, ValueError) as e:
                 error_messages.append(
-                    f"[red][Error] Prediction failed for {patient_id}: "
-                    f"{str(e)}[/red]"
+                    f"Prediction failed for {patient_id}: {str(e)}"
                 )
             else:
                 # Write prediction as .nii.gz file.
@@ -253,7 +251,7 @@ def test_on_fold(
     # Print error messages if any occurred during inference.
     if error_messages:
         for error in error_messages:
-            console.print(error)
+            print_error(error)
 
 
 def infer_from_dataframe(
@@ -351,7 +349,6 @@ def infer_from_dataframe(
     os.makedirs(output_directory, exist_ok=True)
 
     # Set up rich progress bar.
-    console = rich.console.Console()
     error_messages = []
 
     # Start inference loop.
@@ -415,8 +412,7 @@ def infer_from_dataframe(
                         error_messages.extend(postprocessing_error_messages)
             except (FileNotFoundError, RuntimeError, ValueError) as e:
                 error_messages.append(
-                    f"[red][Error] Prediction failed for {patient_id}: "
-                    f"{str(e)}[/red]"
+                    f"Prediction failed for {patient_id}: {str(e)}"
                 )
                 continue
             else:
@@ -426,15 +422,8 @@ def infer_from_dataframe(
     # Print a summary of the inference results. If there are any error or
     # warning messages, print them. Otherwise, print a success message.
     if error_messages:
-        console.print(
-            rich.text.Text(  # type: ignore[attr-defined]  # Rich's Text is valid but not fully covered by stubs in all versions.
-                "Inference completed with the following messages:",
-                style="bold underline"
-            )
-        )
+        print_section_header("Inference completed with the following messages:")
         for message in error_messages:
-            console.print(message)
+            print_error(message)
     else:
-        console.print(
-            "[green]Inference completed successfully![/green]"
-        )
+        print_success("Inference completed successfully.")
