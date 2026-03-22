@@ -92,6 +92,10 @@ class DummySummaryWriter:
         self.scalars = []
         self.closed = False
 
+    def add_scalar(self, tag, value, step):
+        """Collect a single scalar in memory."""
+        self.scalars.append((tag, float(value), int(step)))
+
     def add_scalars(self, tag, scalars, step):
         """Collect scalars in memory."""
         self.scalars.append((tag, dict(scalars), int(step)))
@@ -1209,8 +1213,12 @@ def test_validation_rank0_ddp_allreduce_and_mean(
 
     # Inspect the logged scalars. Validation mean should be val_loss/world_size.
     assert created_writers, "SummaryWriter was not instantiated"
-    tag, scalars, step = created_writers[-1].scalars[-1]
-    assert tag == "losses"
+    writer = created_writers[-1]
+    losses_entry = next(
+        (e for e in writer.scalars if e[0] == "losses"), None
+    )
+    assert losses_entry is not None, "'losses' scalars were not logged"
+    _, scalars, _ = losses_entry
     # With FakeDist all_reduce as a no-op, the code divides by world_size
     # explicitly.
     assert scalars["validation"] == pytest.approx(4.0 / 2)

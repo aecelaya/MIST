@@ -918,6 +918,21 @@ class BaseTrainer(ABC):
                     "validation": float(val_mean_loss),
                 }
                 logs_writer.add_scalars("losses", summary_data, epoch + 1)
+
+                # Log learning rate.
+                logs_writer.add_scalar(
+                    "learning_rate",
+                    state["optimizer"].param_groups[0]["lr"],
+                    epoch + 1,
+                )
+
+                # Log alpha only for composite losses (non-composite losses
+                # do not use alpha, so logging it would be meaningless).
+                if state["composite_loss_weighting"] is not None:
+                    logs_writer.add_scalar(
+                        "alpha", float(state["alpha"]), epoch + 1
+                    )
+
                 logs_writer.flush()
 
                 # Reset states of running losses for the next epoch.
