@@ -773,6 +773,68 @@ Or set it directly in `config.json`:
 }
 ```
 
+## Transfer learning
+
+MIST supports initializing the encoder from a pretrained checkpoint before
+training. This is useful for:
+
+- **Domain adaptation** — fine-tuning a model trained on one dataset to a new
+  but related task.
+- **Few-shot settings** — starting from a good initialization when labeled data
+  is scarce.
+- **Architecture reuse** — reusing encoder weights across tasks that share the
+  same input modality and architecture.
+
+### Averaging fold weights
+
+After a full cross-validation run, each fold produces a separate model
+checkpoint. The `mist_average_weights` command combines them into a single
+initialization checkpoint by element-wise averaging:
+
+```console
+mist_average_weights \
+    --weights /path/to/results/models/fold_0.pt \
+              /path/to/results/models/fold_1.pt \
+              /path/to/results/models/fold_2.pt \
+              /path/to/results/models/fold_3.pt \
+              /path/to/results/models/fold_4.pt \
+    --output /path/to/pretrained_init.pt
+```
+
+Averaged weights generalize better than any single fold and are the recommended
+input for `--pretrained-weights`.
+
+### Fine-tuning from pretrained weights
+
+Pass the pretrained checkpoint and its source `config.json` to `mist_train`:
+
+```console
+mist_train --numpy /path/to/preprocessed/data \
+           --results /path/to/results \
+           --pretrained-weights /path/to/pretrained_init.pt \
+           --pretrained-config /path/to/source/config.json
+```
+
+MIST validates encoder compatibility between the source and target models before
+loading weights. If the input channels differ between source and target, the
+`--input-channel-strategy` flag controls how the mismatch is resolved:
+
+| Strategy  | Behaviour |
+|-----------|-----------|
+| `average` | Take the element-wise mean across all source input channels. *(default)* |
+| `first`   | Use only the first source input channel. |
+| `skip`    | Skip the mismatched layer and keep the random initialization. |
+
+!!! note
+    `--pretrained-config` is required when `--pretrained-weights` is set.
+    MIST uses it to verify that the source and target architectures are
+    compatible before loading any weights.
+
+!!! tip
+    Combine transfer learning with `--warmup-epochs` (e.g. 5–10 epochs) to
+    avoid damaging the pretrained encoder features with a large initial LR
+    update. See [Linear warmup](#linear-warmup) for details.
+
 ## Docker
 The MIST package is also available as a Docker image. Start by pulling the
 `mistmedical/mist` image from DockerHub:

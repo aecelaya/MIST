@@ -55,8 +55,8 @@ results/
     models/
     predictions/
     config.json
-    data_dump.json
-    data_dump.md
+    data_dump.json  (only with --data-dump)
+    data_dump.md    (only with --data-dump)
     results.csv
     train_paths.csv
     evaluation_paths.csv
@@ -72,8 +72,8 @@ results/
 | `models/`              | Trained PyTorch models for each fold.                                       |
 | `predictions/`         | Predictions from cross validation and test set (if specified).              |
 | `config.json`          | Dataset configuration (target spacing, normalization, patch size, etc.).    |
-| `data_dump.json`       | Full structured dataset statistics produced by the analysis step (machine-readable). |
-| `data_dump.md`         | Narrativized dataset summary optimized for review and LLM consumption.      |
+| `data_dump.json`       | Full structured dataset statistics (machine-readable). Only produced when `--data-dump` is passed to `mist_analyze`. |
+| `data_dump.md`         | Narrativized dataset summary optimized for review and LLM consumption. Only produced when `--data-dump` is passed to `mist_analyze`. |
 | `results.csv`          | Evaluation results from five-fold cross validation.                         |
 | `train_paths.csv`      | CSV with `id`, `fold`, and paths to images/masks for training.              |
 | `evaluation_paths.csv` | CSV with `id`, `mask`, and `prediction` paths for evaluation.               |
@@ -97,6 +97,10 @@ following arguments:
 - `--nfolds`: How many folds to split the dataset into. *(default: 5)*
 - `--num-workers-analyze`: Number of parallel workers for dataset analysis.
 *(default: 1)*
+- `--verify`: Verify dataset integrity before analysis (checks headers,
+  dimensions, and that all declared files are present).
+- `--data-dump`: Save extended dataset statistics alongside `config.json`
+  (`data_dump.json` and `data_dump.md`). See [Data Dump](#data-dump) below.
 - `--overwrite`: Overwrite previous results/configuration.
 
 !!!note
@@ -117,7 +121,7 @@ mist_analyze --data /path/to/dataset.json \
 
 ### Data Dump
 
-After computing dataset parameters, the analysis step produces two additional
+When the `--data-dump` flag is passed, the analysis step produces two additional
 files alongside `config.json`: `data_dump.json` and `data_dump.md`.
 
 `data_dump.json` contains a full structured summary of the dataset statistics,
@@ -234,6 +238,20 @@ the following arguments:
   validation set during training.
 - `--resume`: Resume training from the latest checkpoint. See
   [Resuming training](#resuming-training) for details.
+
+**Transfer learning:**
+
+- `--pretrained-weights`: Path to a pretrained checkpoint to initialize the
+  encoder from. Accepts a single fold checkpoint or the output of
+  `mist_average_weights`. See [Transfer learning](#transfer-learning) in the
+  [advanced topics](advanced_topics.md#transfer-learning) for details.
+- `--pretrained-config`: Path to the source model's `config.json`. Required
+  when `--pretrained-weights` is set — used to validate encoder compatibility
+  between source and target models.
+- `--input-channel-strategy`: How to handle an input-channel mismatch between
+  the source and target encoder. Choices: `average` (mean over source channels),
+  `first` (use first source channel only), `skip` (keep random initialization).
+  *(default: `average`)*
 
 !!! note
     Gradient clipping norm (`training.grad_clip_norm`, default `1.0`) is
