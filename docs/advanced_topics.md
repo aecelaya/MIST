@@ -215,15 +215,23 @@ patch[i]  = target_mm / target_spacing[i]   for each axis i
 Any axis whose raw patch would exceed the median resampled image size is
 clamped to that size and the freed voxels are redistributed to the remaining
 axes. Each axis is then snapped down to the **nearest multiple of 32**
-(minimum 32), which is required for exact encoder–decoder reconstruction in
-the nnUNet (up to 5 stride-2 downsampling steps → 2⁵ = 32).
+(minimum 32). This is required because the nnUNet encoder applies up to 5
+stride-2 downsampling steps (2⁵ = 32), and the decoder must reconstruct the
+output at the original resolution — any dimension not divisible by 32 would
+produce a size mismatch between encoder and decoder feature maps.
 
 ### Quasi-2D mode
 
-Used when `max(target_spacing) / min(target_spacing) > 3`. The
-**low-resolution axis** is whichever axis has the largest spacing (not assumed
-to be z). Its patch size is chosen as the largest value that still leaves the
-full budget available for the two in-plane axes:
+Used when `max(target_spacing) / min(target_spacing) > 3`. In highly
+anisotropic data (e.g., thick-slice CT where the z-spacing is 5–10× the
+in-plane spacing), allocating equal voxels to every axis would waste most of
+the budget on the low-resolution axis while under-sampling the high-resolution
+in-plane axes. Quasi-2D mode instead maximises in-plane resolution by keeping
+the low-resolution axis thin.
+
+The **low-resolution axis** is whichever axis has the largest spacing (not
+assumed to be z). Its patch size is chosen as the largest value that still
+leaves the full budget available for the two in-plane axes:
 
 ```
 lr_patch  = budget / max(in_plane_median)²
@@ -234,10 +242,11 @@ ip_patch  = sqrt(budget / lr_patch)
 ```
 
 Both in-plane axes receive the same patch size (square patch). The
-low-resolution axis is not snapped to a multiple of 32 — the nnUNet
-automatically uses stride-1 in that direction, so any size ≥ 1 is valid.
-The minimum low-resolution patch size is 5, ensuring a 3×3×3 kernel has
-genuine (non-padded) context at every position.
+low-resolution axis is not snapped to a multiple of 32 — the nnUNet uses
+stride-1 (no downsampling) in that direction, so feature map sizes are
+preserved and no divisibility constraint applies. Any size ≥ 1 is valid.
+The minimum low-resolution patch size is 5, ensuring a 3×3×3 convolution
+kernel has genuine (non-padded) context at every position along that axis.
 
 ### Overriding the patch size
 
@@ -259,11 +268,20 @@ mist_train --numpy /path/to/numpy --results /path/to/results \
            --patch-size 192 192 96
 ```
 
-Each architecture imposes its own patch size constraints when overriding manually:
+Each architecture imposes its own patch size constraints when overriding manually.
+The key distinction is between *adaptive* and *fixed* topology:
+
+- **Adaptive** (nnUNet, FMG-Net, W-Net): the architecture inspects
+  `target_spacing` at construction time and skips downsampling on any axis that
+  is already low-resolution (applying stride-1 there instead). Those axes
+  accept any patch size ≥ 1.
+- **Fixed** (MedNeXt, SwinUNETR): the same stride schedule is applied to every
+  axis regardless of spacing, so all dimensions must meet the divisibility
+  requirement.
 
 | Architecture | Constraint | Notes |
 |---|---|---|
-| `nnunet`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: anisotropic (low-res) axis is never downsampled, so any value is valid there |
+| `nnunet`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: the low-res axis uses stride-1, so any value is valid there |
 | `fmgnet`, `wnet` | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet |
 | `mednext-*` | All dimensions divisible by **16** | Fixed 4-stage encoder (`2⁴ = 16`); no adaptation for anisotropic axes |
 | `swinunetr-*` | All dimensions divisible by **32** | Fixed: `patch_size=2` tokenizer × 4 downsampling stages; raises an error at model construction if violated |
@@ -928,6 +946,11 @@ mist_average_weights \
 Averaged weights generalize better than any single fold and are the recommended
 input for `--pretrained-weights`.
 
+!!! note
+    This averaged checkpoint is intended for transfer learning only — it is
+    **not** used for ensemble inference. For inference, MIST uses the individual
+    fold models in `results/models/` directly.
+
 ### Fine-tuning from pretrained weights
 
 Pass the pretrained checkpoint and its source `config.json` to `mist_train`:
@@ -1068,8 +1091,13 @@ Disable noise and blur while keeping other augmentations active:
 
 ## Foreground sampling probability
 
-The `training.dali_foreground_prob` key controls the probability of sampling a
-training patch that contains foreground (non-zero labels). This is useful in
+MIST uses NVIDIA DALI (Data Loading Library) for GPU-accelerated data loading
+and patch sampling during training. DALI pipelines run data preprocessing
+directly on the GPU, overlapping with model computation to reduce per-epoch
+overhead.
+
+The `training.dali_foreground_prob` key controls the probability that a
+sampled training patch contains foreground (non-zero labels). This is useful in
 medical segmentation tasks where most voxels are background, ensuring the model
 sees a balanced mix of positive and negative regions during training.
 
@@ -1096,9 +1124,12 @@ flag for the `mist_run_all` and `mist_train` commands.
 For example, if your system has eight GPUs available, but you only want to
 use GPUs `0` and `5`, then run `mist_run_all <other arguments> --gpus 0 5`.
 
-Note that `training.hardware.master_port` controls the port used for multi-GPU
-communication. If you run multiple jobs on the same machine, ensure each job
-uses a different `master_port` value.
+`training.hardware.master_port` is a TCP port number used by PyTorch's
+distributed training backend to coordinate the GPU worker processes during
+startup. It defaults to `12345`. If you run multiple concurrent MIST jobs on
+the same machine, each job must use a different `master_port` value — port
+conflicts will cause a job to fail with an "address already in use" error.
+Change this value by editing `config.json` directly.
 
 ## Evaluation metrics
 

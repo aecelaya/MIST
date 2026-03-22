@@ -44,9 +44,10 @@ data/
 
 !!!note
     The naming convention is for this example only. MIST does not enforce any
-    specific naming conventions for the files inside of you dataset - only that
-    the names of the images/masks be consistent within each patient directory
-    and that they are identifiable by a list of identifier strings.
+    specific naming conventions for the files inside of your dataset — only that
+    filenames are consistent across patient directories and that each file can be
+    identified by at least one unique substring (e.g., `"t1n.nii.gz"` to match
+    all T1 images, or `"seg.nii.gz"` to match all mask files).
 
 MIST offers support for MSD and CSV formatted datasets via `mist_convert_msd`
 and `mist_convert_csv`. For more details, please see
@@ -62,7 +63,7 @@ following key-value pairs.
 | ```modality``` | Options are ``ct``, ``mr``, or ``other``. |
 | ```train-data``` | Path to training data directory. Can be absolute or relative to the dataset JSON file. |
 | ```test-data``` | Path to test data directory (optional). Can be absolute or relative to the dataset JSON file. |
-| ```mask``` | List containing identifying strings for mask or ground truth images in dataset. |
+| ```mask``` | List containing identifying strings for the segmentation mask (ground truth) files. |
 | ```images``` | Dictionary where each key is an image type (i.e., T1, T2, CT, etc.) and each value  is a list containing identifying strings for that image type. |
 | ```labels``` | List of labels in dataset (starting with 0). |
 | ```final_classes``` | Dictionary where each key is the name of the final segmentation class  (i.e., WT, ET, TC for BraTS) and each value is a list of the labels in that class. |

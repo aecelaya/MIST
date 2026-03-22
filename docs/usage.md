@@ -135,8 +135,14 @@ ratio.
 - **Label statistics** – per-label voxel counts, presence rates, volume
 fractions (relative to both foreground and the effective image region), and
 shape descriptors:
-    - *PCA-based descriptors* (linearity, planarity, sphericity) characterising
-    the global geometry of each label.
+    - *PCA-based descriptors* — three shape metrics derived from the eigenvalues
+    of the label's spatial covariance matrix:
+        - *Linearity*: how much the shape extends along a single axis (high for
+          elongated structures such as vessels).
+        - *Planarity*: how much the shape lies in a plane (high for disc-like
+          structures).
+        - *Sphericity*: how uniformly the shape extends in all directions (high
+          for compact, roughly spherical structures).
     - *Isoperimetric Quotient (IQ)* measuring compactness relative to a sphere.
     - *Skeleton ratio* — the fraction of label voxels on the morphological
     medial axis, which is the primary signal for thin, branching structures
@@ -148,7 +154,7 @@ architecture or loss function choices.
 `data_dump.md` is a human-readable Markdown version of the same statistics,
 pre-filled with metric definitions and auto-generated observations. It is
 intended to be reviewed and annotated by the user before being passed to an LLM
-for architecture and training configuration advice (this feature is currently in progress, stay tuned!).
+for architecture and training configuration advice.
 
 ## Preprocessing
 
@@ -166,18 +172,19 @@ To run the preprocessing portion of the MIST pipeline only, use the
 - `--numpy`: Path to save the preprocessed NumPy files. *(default: `./numpy`)*
 - `--num-workers-preprocess`: Number of parallel workers for preprocessing.
   *(default: 1)*
-- `--compute-dtms`: Compute per-class distance transform maps (DTMs) from ground
-truth masks.
+- `--compute-dtms`: Compute per-class Distance Transform Maps (DTMs) from ground
+truth masks. DTMs encode each voxel's signed distance to the nearest label
+boundary and are required by certain loss functions (`bl`, `hdos`, `gsl`).
 - `--no-preprocess`: Skip preprocessing steps and only convert raw NIfTI files
 into NumPy format.
 - `--overwrite`: Overwrite previous preprocessing output.
 
 !!!note
-  The `--no-preprocess` flag is a true pass-through: images are read as-is and
-  converted directly to NumPy arrays with no spatial transforms applied
-  (no reorientation, no cropping, no resampling, no normalization). Use this
-  flag when your images are already fully preprocessed externally and stored
-  as NIfTI files. DTMs are still computed if `--compute-dtms` is passed.
+  Use `--no-preprocess` when your images are already fully preprocessed
+  externally and stored as NIfTI files. MIST will read each image as-is and
+  convert it directly to NumPy format — reorientation, cropping, resampling,
+  and normalization are all skipped. DTMs are still computed if
+  `--compute-dtms` is also passed.
 
 ### Example
 
@@ -206,7 +213,8 @@ the following arguments:
 
 **Hardware:**
 
-- `--gpus`: IDs of GPUs to use; use `-1` for all GPUs. *(default: `-1`)*
+- `--gpus`: Integer GPU IDs to use (e.g., `0 1 2`). The special value `-1`
+  selects all available GPUs automatically. *(default: `-1`)*
 - `--num-workers-evaluate`: Number of parallel workers for the post-training
   evaluation step. *(default: `1`)*
 
@@ -328,8 +336,10 @@ The `mist_predict` command uses the following arguments:
 
 - `--models-dir`: (**required**) Path to the `./results/models` directory.
 - `--config`: (**required**) Path to the `./results/config.json` file.
-- `--paths-csv`: (**required**) Path to CVS containing patient IDs and paths to
-imaging data (see below for more details).
+- `--paths-csv`: (**required**) Path to CSV file containing patient IDs and
+  paths to imaging data. Must have an `id` column and one column per image
+  type matching the dataset's image keys (e.g., `t1`, `t2`). See the table
+  below for the required format.
 - `--output`: (**required**) Path to directory containing predictions.
 - `--device`: Device to run inference with. This can be `cpu`, `cuda`, or the
 integer ID of a specific GPU (i.e., `1`). *(default: `cuda`)*.
@@ -586,7 +596,9 @@ include and which metrics to compute, along with any metric-specific parameters:
 
 Lesion-wise metrics evaluate each GT lesion individually, track false positives,
 and aggregate using `sum(scores) / (num_gt_above_thresh + num_fp)` — the same
-formula used by the BraTS challenge.
+formula used by the BraTS (Brain Tumor Segmentation) challenge. This scoring
+penalizes both missed lesions and spurious predictions equally, regardless of
+lesion size.
 
 | Parameter                 | Default | Description |
 |---------------------------|---------|-------------|
