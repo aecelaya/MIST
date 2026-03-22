@@ -213,12 +213,14 @@ patch[i]  = target_mm / target_spacing[i]   for each axis i
 ```
 
 Any axis whose raw patch would exceed the median resampled image size is
-clamped to that size and the freed voxels are redistributed to the remaining
-axes. Each axis is then snapped down to the **nearest multiple of 32**
-(minimum 32). This is required because the nnUNet encoder applies up to 5
-stride-2 downsampling steps (2⁵ = 32), and the decoder must reconstruct the
-output at the original resolution — any dimension not divisible by 32 would
-produce a size mismatch between encoder and decoder feature maps.
+clamped to that size; the freed voxels are redistributed to the remaining
+axes. Every axis is then snapped down to the **nearest multiple of 32 ≤ the
+clamped value** (minimum 32), so a clamped axis ends up at the largest multiple
+of 32 that fits within the median image size. This snapping is required because
+the nnUNet encoder applies up to 5 stride-2 downsampling steps (2⁵ = 32), and
+the decoder must reconstruct the output at the original resolution — any
+dimension not divisible by 32 would produce a size mismatch between encoder
+and decoder feature maps.
 
 ### Quasi-2D mode
 
