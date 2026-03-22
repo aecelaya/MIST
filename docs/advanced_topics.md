@@ -1133,6 +1133,64 @@ the same machine, each job must use a different `master_port` value — port
 conflicts will cause a job to fail with an "address already in use" error.
 Change this value by editing `config.json` directly.
 
+## Parallelism
+
+MIST uses two distinct forms of parallelism depending on the pipeline stage.
+
+### Patient-level I/O parallelism
+
+Analysis, preprocessing, evaluation, and postprocessing all operate
+patient-by-patient. Each stage exposes a `--num-workers-*` flag that controls
+how many patients are processed in parallel using a Python thread pool:
+
+| Command              | Flag                       | Default |
+|----------------------|----------------------------|---------|
+| `mist_analyze`       | `--num-workers-analyze`    | `1`     |
+| `mist_preprocess`    | `--num-workers-preprocess` | `1`     |
+| `mist_train`         | `--num-workers-evaluate`   | `1`     |
+| `mist_evaluate`      | `--num-workers-evaluate`   | `1`     |
+| `mist_postprocess`   | `--num-workers-postprocess`| `1`     |
+
+Increasing these values speeds up each stage on machines with many CPU cores.
+A good starting point is to match the number of available CPU cores, capped at
+the number of patients in the dataset.
+
+!!! note
+    Not all stages have the same memory cost per worker. **Analysis** only
+    reads image headers and samples voxel statistics, so it is lightweight and
+    scales well to many workers. **Preprocessing** loads each full 3D volume
+    into memory, resamples it, normalizes it, and writes NumPy arrays — each
+    additional worker holds at least one complete image in RAM, more if DTMs
+    are enabled. **Evaluation and postprocessing** load segmentation masks,
+    which are smaller than raw images but still non-trivial for large volumes.
+    On memory-constrained systems it may be necessary to use a higher worker
+    count for analysis than for preprocessing.
+
+### Training data-loading parallelism (DALI)
+
+Training uses a different mechanism. MIST uses NVIDIA DALI to build a
+GPU-accelerated data pipeline that reads, augments, and assembles batches
+while the GPU is busy computing gradients. DALI's parallelism is controlled
+by CPU threads *within* the pipeline, not by Python workers.
+
+The number of DALI CPU threads is set via `training.hardware.num_cpu_workers`
+in `config.json` (default: `8`). There is no CLI flag for this — it is a
+hardware-tuning setting that belongs in the configuration file alongside the
+rest of the training hardware parameters. Edit it directly if your machine
+has significantly more or fewer CPU cores than the default assumes:
+
+```json
+"hardware": {
+  "num_cpu_workers": 16
+}
+```
+
+!!! note
+    `num_cpu_workers` is not the same as the `--num-workers-*` flags. It does
+    not control how many patients are loaded in parallel — it controls how many
+    CPU threads DALI uses internally to prepare the next batch while the current
+    batch is on the GPU.
+
 ## Evaluation metrics
 
 The `evaluation` section of `config.json` controls which metrics are computed
