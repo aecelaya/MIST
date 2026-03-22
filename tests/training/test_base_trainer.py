@@ -967,6 +967,58 @@ def test_set_seed_swallows_dist_errors(tmp_pipeline, mist_args, monkeypatch):
     assert os.environ["PYTHONHASHSEED"] == "123"
 
 
+def test_resume_raises_on_incompatible_model_override(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """--resume + --model mismatch raises ValueError before training starts."""
+    mist_args.resume = True
+    mist_args.model = "different_arch"
+
+    with pytest.raises(ValueError, match="incompatible with the saved checkpoint"):
+        DummyTrainer(mist_args)
+
+
+def test_resume_raises_on_incompatible_patch_size_override(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """--resume + --patch-size mismatch raises ValueError before training starts."""
+    mist_args.resume = True
+    mist_args.patch_size = [32, 32, 32]  # config default is [16, 16, 16]
+
+    with pytest.raises(ValueError, match="incompatible with the saved checkpoint"):
+        DummyTrainer(mist_args)
+
+
+def test_resume_warns_on_loss_override(tmp_pipeline, mist_args, monkeypatch):
+    """--resume + --loss override prints a yellow warning."""
+    mist_args.resume = True
+    mist_args.loss = "dice"  # config default is dummy_loss
+
+    printed = []
+    monkeypatch.setattr(
+        rich.console.Console, "print", lambda self, msg: printed.append(str(msg))
+    )
+
+    DummyTrainer(mist_args)
+
+    assert any("Warning" in s and "--resume" in s for s in printed)
+    assert any("--loss" in s for s in printed)
+
+
+def test_resume_no_warning_when_no_overrides(tmp_pipeline, mist_args, monkeypatch):
+    """--resume with no config overrides produces no warning."""
+    mist_args.resume = True
+
+    printed = []
+    monkeypatch.setattr(
+        rich.console.Console, "print", lambda self, msg: printed.append(str(msg))
+    )
+
+    DummyTrainer(mist_args)
+
+    assert not any("Warning" in s for s in printed)
+
+
 def test_save_and_load_checkpoint_roundtrip(
     tmp_pipeline, mist_args, monkeypatch
 ):

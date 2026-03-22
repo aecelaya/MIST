@@ -4,6 +4,7 @@ from typing import Dict, Any
 from abc import ABC, abstractmethod
 from pathlib import Path
 import contextlib
+import copy
 import os
 import math
 import random
@@ -58,8 +59,18 @@ class BaseTrainer(ABC):
         self.config_json = self.results_dir / "config.json"
         self.config = io.read_json_file(self.config_json)
 
+        # Snapshot config before CLI overrides so resume checks can compare.
+        _original_config = copy.deepcopy(self.config)
+
         # Merge command line overrides into the config.
         self._overwrite_config_from_args()
+
+        # Set up console early so _check_resume_overrides can print.
+        self.console = rich.console.Console()
+
+        # Warn or raise if --resume is combined with config-altering overrides.
+        if getattr(self.mist_args, "resume", False):
+            self._check_resume_overrides(_original_config)
 
         # Resolve hardware configuration.
         self._update_num_gpus_in_config()
@@ -80,9 +91,6 @@ class BaseTrainer(ABC):
         # the main process before any spawned training processes start, so
         # incompatible configs fail fast.
         self._validate_pretrained_config()
-
-        # Set up console for rich text output.
-        self.console = rich.console.Console()
 
     def __getstate__(self):
         """Customize pickling so mp.spawn can serialize this object."""
@@ -236,6 +244,101 @@ class BaseTrainer(ABC):
 
         # Write the updated configuration to the config.json file.
         io.write_json_file(self.config_json, self.config)
+
+    def _check_resume_overrides(self, original_config: Dict[str, Any]) -> None:
+        """Warn or raise when --resume is combined with config-altering flags.
+
+        Architecture and patch-size changes are incompatible with a saved
+        checkpoint (weights won't load) and raise immediately. Changes to
+        loss, optimizer, or learning-rate schedule alter training dynamics
+        mid-run and emit a yellow warning so the user can make an informed
+        decision.
+
+        Args:
+            original_config: Deep copy of the config as it was on disk before
+                any CLI overrides were applied.
+        """
+        new = self.config
+        old = original_config
+
+        # --- Hard errors: checkpoint weights will not load ----------------
+        incompatible = []
+        old_arch = old["model"]["architecture"]
+        new_arch = new["model"]["architecture"]
+        if old_arch != new_arch:
+            incompatible.append(
+                f"  --model: '{old_arch}' → '{new_arch}' "
+                f"(checkpoint weights are incompatible)"
+            )
+
+        old_patch = old["spatial_config"]["patch_size"]
+        new_patch = new["spatial_config"]["patch_size"]
+        if old_patch != new_patch:
+            incompatible.append(
+                f"  --patch-size: {old_patch} → {new_patch} "
+                f"(checkpoint weights are incompatible)"
+            )
+
+        if incompatible:
+            raise ValueError(
+                "--resume is set but the following overrides are incompatible "
+                "with the saved checkpoint:\n"
+                + "\n".join(incompatible)
+                + "\nRemove these flags or start a fresh run with --overwrite."
+            )
+
+        # --- Warnings: training dynamics change mid-run -------------------
+        warnings = []
+        tr_old = old["training"]
+        tr_new = new["training"]
+
+        if tr_old["loss"]["name"] != tr_new["loss"]["name"]:
+            warnings.append(
+                f"  --loss: '{tr_old['loss']['name']}' → "
+                f"'{tr_new['loss']['name']}'"
+            )
+
+        old_clw = tr_old["loss"]["composite_loss_weighting"]
+        new_clw = tr_new["loss"]["composite_loss_weighting"]
+        if old_clw != new_clw:
+            warnings.append(
+                f"  --composite-loss-weighting: {old_clw} → {new_clw}"
+            )
+
+        if tr_old["optimizer"] != tr_new["optimizer"]:
+            warnings.append(
+                f"  --optimizer: '{tr_old['optimizer']}' → "
+                f"'{tr_new['optimizer']}'"
+            )
+
+        if tr_old["learning_rate"] != tr_new["learning_rate"]:
+            warnings.append(
+                f"  --learning-rate: {tr_old['learning_rate']} → "
+                f"{tr_new['learning_rate']}"
+            )
+
+        if tr_old["lr_scheduler"] != tr_new["lr_scheduler"]:
+            warnings.append(
+                f"  --lr-scheduler: '{tr_old['lr_scheduler']}' → "
+                f"'{tr_new['lr_scheduler']}'"
+            )
+
+        if tr_old["l2_penalty"] != tr_new["l2_penalty"]:
+            warnings.append(
+                f"  --l2-penalty: {tr_old['l2_penalty']} → "
+                f"{tr_new['l2_penalty']}"
+            )
+
+        if warnings:
+            self.console.print(
+                "[yellow]Warning: --resume is set but the following overrides "
+                "change training configuration from the saved run. Training "
+                "dynamics may be inconsistent from the resumed epoch "
+                "onwards.[/yellow]"
+            )
+            for w in warnings:
+                self.console.print(f"[yellow]{w}[/yellow]")
+            self.console.print("")
 
     def _update_num_gpus_in_config(self) -> None:
         """Get the number of GPUs and add it to the configuration."""
