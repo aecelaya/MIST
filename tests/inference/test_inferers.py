@@ -64,30 +64,16 @@ def test_sliding_window_inferer_basic(mock_sw_inference):
     mock_sw_inference.assert_called_once()
 
 
-def test_sliding_window_inferer_invalid_patch_size():
-    """Test that non-3D patch_size raises ValueError."""
-    with pytest.raises(
-        ValueError, match="patch_size must be a tuple of length 3"
-    ):
-        SlidingWindowInferer(patch_size=(16, 16))  # Invalid.
-
-
-def test_sliding_window_inferer_invalid_patch_elements():
-    """Test that negative or non-int patch_size elements raise ValueError."""
-    with pytest.raises(ValueError, match="must be positive integers"):
-        SlidingWindowInferer(patch_size=(16, -1, 16))  # Invalid.
-
-
-def test_sliding_window_inferer_invalid_overlap():
-    """Test that overlap outside [0, 1) raises ValueError."""
-    with pytest.raises(ValueError, match="patch_overlap must be in the range"):
-        SlidingWindowInferer(patch_size=(16, 16, 16), patch_overlap=1.5)
-
-
-def test_sliding_window_inferer_invalid_blend_mode():
-    """Test that unsupported blend mode raises ValueError."""
-    with pytest.raises(ValueError, match="Unsupported blend mode"):
-        SlidingWindowInferer(patch_size=(16, 16, 16), patch_blend_mode="linear")
+@pytest.mark.parametrize("kwargs,match", [
+    ({"patch_size": (16, 16)}, "patch_size must be a tuple of length 3"),
+    ({"patch_size": (16, -1, 16)}, "must be positive integers"),
+    ({"patch_size": (16, 16, 16), "patch_overlap": 1.5}, "patch_overlap must be in the range"),
+    ({"patch_size": (16, 16, 16), "patch_blend_mode": "linear"}, "Unsupported blend mode"),
+])
+def test_sliding_window_inferer_invalid_params(kwargs, match):
+    """Test that invalid constructor arguments raise ValueError."""
+    with pytest.raises(ValueError, match=match):
+        SlidingWindowInferer(**kwargs)
 
 
 # Registry tests.

@@ -1216,3 +1216,243 @@ def test_validation_rank0_ddp_allreduce_and_mean(
     assert scalars["validation"] == pytest.approx(4.0 / 2)
     # (Optional) train mean is also divided by world_size on rank 0 in DDP.
     assert scalars["train"] == pytest.approx(1.0 / 2)
+
+
+# =============================================
+# Coverage gap: warmup_epochs CLI override
+# =============================================
+
+def test_init_warmup_epochs_override(tmp_pipeline, monkeypatch):
+    """warmup_epochs CLI arg is applied to config when not None."""
+    results, numpy_dir = tmp_pipeline
+    args = SimpleNamespace(
+        results=str(results),
+        numpy=str(numpy_dir),
+        model=None,
+        patch_size=None,
+        folds=None,
+        epochs=None,
+        batch_size_per_gpu=None,
+        loss=None,
+        composite_loss_weighting=None,
+        optimizer=None,
+        l2_penalty=None,
+        learning_rate=None,
+        lr_scheduler=None,
+        warmup_epochs=5,
+        val_percent=None,
+        resume=False,
+    )
+    trainer = DummyTrainer(args)
+    assert trainer.config["training"]["warmup_epochs"] == 5
+
+
+# =============================================
+# Coverage gap: _check_resume_overrides warnings
+# =============================================
+
+def test_check_resume_overrides_warns_on_all_training_diffs(
+    tmp_pipeline, monkeypatch
+):
+    """All six warning branches fire when every overridable field differs."""
+    results, numpy_dir = tmp_pipeline
+    # Start with resume=True and overrides that differ from the saved config.
+    args = SimpleNamespace(
+        results=str(results),
+        numpy=str(numpy_dir),
+        model=None,
+        patch_size=None,
+        folds=None,
+        epochs=None,
+        batch_size_per_gpu=None,
+        loss="cross_entropy",               # differs from "dummy_loss"
+        composite_loss_weighting="linear",  # differs from None
+        optimizer="adam",                   # differs from "sgd"
+        l2_penalty=0.01,                    # differs from 0.0
+        learning_rate=0.001,                # differs from 0.01
+        lr_scheduler="cosine",              # differs from "constant"
+        warmup_epochs=3,                    # differs from missing/0
+        val_percent=None,
+        resume=True,
+    )
+
+    printed = []
+    monkeypatch.setattr(
+        bt.rich.console.Console,
+        "print",
+        lambda self, msg: printed.append(str(msg)),
+    )
+
+    DummyTrainer(args)
+
+    combined = "\n".join(printed)
+    assert "--loss" in combined
+    assert "--composite-loss-weighting" in combined
+    assert "--optimizer" in combined
+    assert "--learning-rate" in combined
+    assert "--lr-scheduler" in combined
+    assert "--warmup-epochs" in combined
+    assert "--l2-penalty" in combined
+
+
+# =============================================
+# Coverage gap: _validate_pretrained_config
+# =============================================
+
+def test_validate_pretrained_config_warns_when_no_config_path(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """pretrained_weights set but no config path emits a Python warning."""
+    mist_args.pretrained_weights = "/fake/weights.pt"
+    # pretrained_config is intentionally not set (absent == None via getattr)
+
+    with pytest.warns(UserWarning, match="--pretrained-config was not provided"):
+        DummyTrainer(mist_args)
+
+
+def test_validate_pretrained_config_calls_validator_when_both_set(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """When both pretrained_weights and pretrained_config are given, the
+    encoder compatibility validator is called with the loaded source config."""
+    mist_args.pretrained_weights = "/fake/weights.pt"
+    mist_args.pretrained_config = "/fake/source_config.json"
+
+    source_cfg = {"model": {"architecture": "nnunet"}}
+    _real_read = bt.io.read_json_file
+    monkeypatch.setattr(
+        bt.io, "read_json_file",
+        lambda path: source_cfg if path == "/fake/source_config.json" else _real_read(path),
+    )
+
+    calls = []
+    monkeypatch.setattr(
+        bt, "validate_encoder_compatibility",
+        lambda src, dst: calls.append((src, dst)),
+    )
+
+    DummyTrainer(mist_args)
+
+    assert len(calls) == 1
+    assert calls[0][0] is source_cfg
+
+
+# =============================================
+# Coverage gap: build_components pretrained encoder loading
+# =============================================
+
+def test_build_components_loads_pretrained_encoder(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """When pretrained_weights is set, load_pretrained_encoder is called and
+    the summary is printed on rank 0."""
+    mist_args.pretrained_weights = "/fake/encoder.pt"
+    mist_args.pretrained_config = None  # skip config validation
+
+    dummy_summary = {
+        "loaded": list(range(10)),
+        "channel_strategy_applied": list(range(2)),
+        "skipped": list(range(1)),
+    }
+
+    monkeypatch.setattr(
+        bt, "load_pretrained_encoder",
+        lambda model, path, strategy: (model, dummy_summary),
+    )
+    monkeypatch.setattr(
+        bt, "validate_encoder_compatibility", lambda *a: None
+    )
+
+    printed = []
+    monkeypatch.setattr(
+        bt.rich.console.Console,
+        "print",
+        lambda self, msg: printed.append(str(msg)),
+    )
+
+    trainer = DummyTrainer(mist_args)
+    trainer.build_components(rank=0, world_size=1)
+
+    combined = "\n".join(printed)
+    assert "Pretrained encoder loaded" in combined
+    assert "10" in combined   # loaded count
+    assert "2" in combined    # channel_strategy_applied count
+
+
+# =============================================
+# Coverage gap: build_components spacing-aware loss
+# =============================================
+
+def test_build_components_spacing_aware_loss_injects_spacing(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """A spacing-aware loss name causes sddl_spacing_xyz to be passed to the
+    loss constructor."""
+    spacing_loss = next(iter(bt.TrainerConstants.SPACING_AWARE_LOSSES))
+
+    import json
+    results, numpy_dir = tmp_pipeline
+    config_path = Path(results) / "config.json"
+    config = json.loads(config_path.read_text())
+    config["training"]["loss"]["name"] = spacing_loss
+    config_path.write_text(json.dumps(config))
+
+    received_params = {}
+
+    def capturing_loss_cls(**kwargs):
+        received_params.update(kwargs)
+        return DummyLoss()
+
+    monkeypatch.setattr(bt, "get_loss", lambda name: capturing_loss_cls)
+
+    trainer = DummyTrainer(mist_args)
+    trainer.build_components(rank=0, world_size=1)
+
+    assert "sddl_spacing_xyz" in received_params
+    assert received_params["sddl_spacing_xyz"] == [1.0, 1.0, 1.0]
+
+
+# =============================================
+# Coverage gap: load_checkpoint with AMP scaler
+# =============================================
+
+def test_load_checkpoint_restores_scaler_state(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """When state has a scaler and the checkpoint has scaler_state_dict,
+    the scaler's load_state_dict is called."""
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+
+    # Write a checkpoint that includes a fake scaler_state_dict.
+    path = trainer._checkpoint_path(0)
+    model = state["model"]
+    fake_checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": state["optimizer"].state_dict(),
+        "lr_scheduler_state_dict": state["lr_scheduler"].state_dict(),
+        "scaler_state_dict": {"scale": 65536.0},
+        "epoch": 2,
+        "global_step": 100,
+        "best_val_loss": 0.3,
+    }
+    _real_torch_save(fake_checkpoint, path)
+
+    # Attach a fake scaler with a load_state_dict tracker.
+    scaler_loads = []
+
+    class FakeScaler:
+        def load_state_dict(self, sd):
+            scaler_loads.append(sd)
+
+    state["scaler"] = FakeScaler()
+
+    loaded = trainer.load_checkpoint(fold=0, state=state)
+
+    assert loaded is True
+    assert len(scaler_loads) == 1
+    assert scaler_loads[0] == {"scale": 65536.0}
