@@ -67,7 +67,8 @@ def run_all_entry(argv: Optional[List[str]] = None) -> None:
     ns = _parse_run_all_args(argv)
 
     analyzer_keys = [
-        "data", "results", "nfolds", "num_workers_analyze", "overwrite"
+        "data", "results", "nfolds", "num_workers_analyze",
+        "verify", "data_dump", "overwrite",
     ]
     preprocess_keys = [
         "results", "numpy", "num_workers_preprocess",

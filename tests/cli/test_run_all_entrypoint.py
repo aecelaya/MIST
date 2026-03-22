@@ -200,7 +200,7 @@ def test_run_all_entry_forwards_subsets_correctly(monkeypatch, tmp_path):
 
     # Build expected subsets from the parsed Namespace.
     ns = entry._parse_run_all_args(argv=argv)
-    analyzer_keys = ["data", "results", "nfolds", "num_workers_analyze", "overwrite"]
+    analyzer_keys = ["data", "results", "nfolds", "num_workers_analyze", "verify", "data_dump", "overwrite"]
     preprocess_keys = [
         "results", "numpy", "num_workers_preprocess",
         "no_preprocess", "compute_dtms", "overwrite"

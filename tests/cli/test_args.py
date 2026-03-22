@@ -200,6 +200,8 @@ def test_add_analyzer_args_defaults_and_parsing():
     assert ns.data is None
     assert ns.results is None
     assert ns.nfolds is None
+    assert ns.verify is False
+    assert ns.data_dump is False
     assert ns.overwrite is False
 
     # Explicit values.
@@ -208,12 +210,16 @@ def test_add_analyzer_args_defaults_and_parsing():
             "--data", "path/to/dataset.json",
             "--results", "out",
             "--nfolds", "3",
+            "--verify",
+            "--data-dump",
             "--overwrite",
         ]
     )
     assert ns.data == "path/to/dataset.json"
     assert ns.results == "out"
     assert ns.nfolds == 3
+    assert ns.verify is True
+    assert ns.data_dump is True
     assert ns.overwrite is True
 
 

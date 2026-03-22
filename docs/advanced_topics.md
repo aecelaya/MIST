@@ -76,10 +76,7 @@ Below is an example of a valid `config.json` file.
 
     "loss": {
       "name": "dice_ce",
-      "params": {
-        "use_dtms": false,
-        "composite_loss_weighting": null
-      }
+      "composite_loss_weighting": null
     },
 
     "optimizer": "adam",
@@ -370,14 +367,14 @@ However, the following loss functions are available in MIST:
     - `vessel_sddl` — clDice + Surface Dice Dilation. Intended for thin,
       branching structures such as vessels or airways.
 
-    **Required parameter.** Both variants require `sddl_spacing_xyz: [sx, sy, sz]`
-    (voxel spacing in mm, Width/Height/Depth order) under
-    `training.loss.params` in `config.json`. The surface tolerance defaults to
-    `tau_mm: "auto"`, which sets it to `max(spacing) * 1.25`.
+    **Spacing.** Both variants read voxel spacing automatically from
+    `spatial_config.target_spacing` in `config.json` — no manual parameter
+    is required. The surface tolerance defaults to `tau_mm: "auto"`, which
+    sets it to `max(spacing) * 1.25`.
 
     **DTMs.** Neither SDDL variant uses precomputed DTMs — boundaries are
     computed directly from model predictions during training. The
-    `--compute-dtms` and `--use-dtms` flags are not required.
+    `--compute-dtms` flag is not required.
 
 The loss function can be specified with the `--loss` flag in the `mist_run_all`
 or `mist_train` commands or set in the `config.json` file under the
@@ -385,50 +382,121 @@ or `mist_train` commands or set in the `config.json` file under the
 
 ### Using distance transform maps
 
-The boundary, one-sided Hausdorff, and generalized surface loss functions use
-distance transform maps (DTMs). To use these losses, enable DTM computation for
-ground-truth labels with the `--compute-dtms` flag in the `mist_run_all` or
-`mist_preprocess` commands. Additionally, enable the use of DTMs during training
-with the `--use-dtms` flag in `mist_run_all` or `mist_train`. You can also set
-`preprocessing.compute_dtms` and `training.loss.params.use_dtms` to `true` in
-the `config.json` file.
+The boundary (`bl`), one-sided Hausdorff (`hdos`), and generalized surface
+(`gsl`) loss functions require precomputed distance transform maps (DTMs).
+Enable DTM computation with the `--compute-dtms` flag when running
+`mist_run_all` or `mist_preprocess`. MIST automatically detects which losses
+need DTMs from the loss name — no additional flag is required at training time.
 
-By default, MIST normalizes DTMs per label to the interval `[-1, 1]`, which
-helps stabilize training (especially with AMP). To disable this, set
-`preprocessing.normalize_dtms` to `false` in `config.json`.
+You can also enable DTM computation directly in `config.json`:
+
+```json
+"preprocessing": {
+  "compute_dtms": true,
+  "normalize_dtms": true
+}
+```
+
+**DTM normalization.** MIST uses signed distance transforms, where interior
+voxels (inside the label region) have negative values and exterior voxels
+(outside) have positive values. The magnitude at any voxel is its distance to
+the nearest boundary, measured in voxels.
+
+By default, MIST normalizes DTMs per label per volume by dividing interior
+distances by the largest interior distance and exterior distances by the largest
+exterior distance. This maps the interior to `[-1, 0]` and the exterior to
+`[0, 1]`, with the boundary itself remaining at `0`. Normalization is applied
+independently for each label, so a small structure and a large structure always
+produce DTMs in the same range.
+
+Without normalization, raw distances scale with structure size — a large organ
+may have interior distances in the hundreds of voxels, producing much larger
+gradients from the boundary loss term than a small lesion would. This imbalance
+can destabilize training and is particularly problematic under automatic mixed
+precision (AMP), where large values risk overflow in float16.
+
+Normalization is strongly recommended and enabled by default. To disable it,
+set `preprocessing.normalize_dtms` to `false` in `config.json`.
 
 ### Composite loss weighting schedules
 
-Boundary-based losses are often combined with region-based losses (e.g., Dice)
-via a weighted sum:
+Several MIST losses are *composite* — they blend a region-based term (e.g.,
+Dice) with a boundary- or topology-based term via a scalar weight $\alpha$:
 
 $$
 \alpha \mathcal{L}_{\text{region}} + (1 - \alpha)\mathcal{L}_{\text{boundary}}.
 $$
 
-MIST provides two schedules for $\alpha$: `constant` and `linear`.
+The composite losses in MIST are: `bl`, `hdos`, `gsl`, `cldice`,
+`volumetric_sddl`, and `vessel_sddl`. For all other losses (e.g., `dice`,
+`dice_ce`), `composite_loss_weighting` has no effect and should be left as
+`null`.
 
-- `constant`: fixes $\alpha$ = `0.5`.
-- `linear`: uses $\alpha$ = `1.0` for the first five epochs, then decreases
-  linearly to `0.0` by the final epoch.
+MIST supports three schedules for $\alpha$:
 
-Set this with `--composite-loss-weighting` or
-`training.loss.params.composite_loss_weighting` in `config.json`.
+| Schedule   | `name`     | Description |
+|------------|------------|-------------|
+| Constant   | `constant` | Fixed $\alpha$ throughout training. Default `value: 0.5`. |
+| Linear     | `linear`   | Linearly interpolates from `start_val` to `end_val` over training, with an optional `init_pause` (epochs) before decay begins. |
+| Cosine     | `cosine`   | Cosine-shaped decay from `start_val` to `end_val`, with an optional `init_pause`. Smoother than linear. |
 
-The table below summarizes the recommended use cases for composite loss
-weighting for different loss functions:
+**When to use scheduling.** With normalized DTMs (the default), the boundary
+term is well-scaled from epoch 0, so a constant $\alpha$ is usually sufficient
+for `bl`, `hdos`, and `gsl`. Scheduling may still help for experimental losses
+(`volumetric_sddl`, `vessel_sddl`) where the boundary term can be noisier early
+in training.
 
-| Loss     | Schedule   | Use DTMs? | Normalize DTMs? |
-|----------|------------|-----------|-----------------|
-| `bl`     | `linear`   | Yes       | Yes             |
-| `hdos`   | `linear`   | Yes       | Yes             |
-| `gsl`    | `linear`   | Yes       | Yes             |
-| `cldice` | `constant` | No        | No              |
+`composite_loss_weighting` is stored in `config.json` as a `{name, params}`
+object under `training.loss`, or set to `null` to disable it (equal weighting
+of both terms):
 
-### Example
+```json
+"loss": {
+  "name": "bl",
+  "composite_loss_weighting": {
+    "name": "constant",
+    "params": {
+      "value": 0.5
+    }
+  }
+}
+```
 
-Run the entire MIST pipeline with the generalized surface loss and use a linear
-composite loss weighting schedule:
+```json
+"loss": {
+  "name": "gsl",
+  "composite_loss_weighting": {
+    "name": "linear",
+    "params": {
+      "init_pause": 5,
+      "start_val": 1.0,
+      "end_val": 0.0
+    }
+  }
+}
+```
+
+```json
+"loss": {
+  "name": "vessel_sddl",
+  "composite_loss_weighting": {
+    "name": "cosine",
+    "params": {
+      "init_pause": 5,
+      "start_val": 1.0,
+      "end_val": 0.0
+    }
+  }
+}
+```
+
+The `--composite-loss-weighting` CLI flag accepts the schedule name and
+automatically writes the full default parameter set to `config.json`. Fine-tune
+the parameters afterward by editing `config.json` directly.
+
+### Examples
+
+Run the full pipeline with the generalized surface loss and a constant alpha:
 
 ```console
 mist_run_all --data /path/to/dataset.json \
@@ -436,31 +504,26 @@ mist_run_all --data /path/to/dataset.json \
              --results /path/to/results/folder \
              --loss gsl \
              --compute-dtms \
-             --use-dtms \
-             --composite-loss-weighting linear
+             --composite-loss-weighting constant
 ```
 
-Run the MIST training pipeline with the boundary loss and use a constant
-weighting schedule. This assumes that the DTMs have already been computed using
-the `mist_preprocess` command.
+Run training with the boundary loss and a linear schedule (DTMs already
+computed):
 
 ```console
 mist_train --numpy /path/to/preprocessed/npy/files \
            --results /path/to/results/folder \
            --loss bl \
-           --use-dtms \
-           --composite-loss-weighting constant
+           --composite-loss-weighting linear
 ```
 
-Run the MIST training pipeline with the clDice loss and use a constant weighting
-schedule. The clDice does **not** use DTMs, but does use composite loss
-weighting.
+Run training with clDice and a cosine schedule (no DTMs required):
 
 ```console
 mist_train --numpy /path/to/preprocessed/npy/files \
            --results /path/to/results/folder \
            --loss cldice \
-           --composite-loss-weighting constant
+           --composite-loss-weighting cosine
 ```
 
 ## Optimizers

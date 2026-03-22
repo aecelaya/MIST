@@ -914,9 +914,10 @@ class Analyzer:
         text.stylize("bold")
         self.console.print(text)
 
-        # Step 1: Run the dataset validation checks to clean up the paths
-        # dataframe and ensure that the dataset is valid for training.
-        self.validate_dataset()
+        # Step 1: Optionally verify dataset integrity (checks headers,
+        # dimensions, etc.). Skipped by default; enabled with --verify.
+        if getattr(self.mist_arguments, "verify", False):
+            self.validate_dataset()
 
         # Step 2: Add folds to the paths dataframe and update the
         # configuration with the number of folds that we are using.
@@ -942,16 +943,18 @@ class Analyzer:
         self.paths_df.to_csv(self.paths_csv, index=False)
         io.write_json_file(self.config_json, self.config)
 
-        # Step 5: Build and save the rich data dump (data_dump.json and
-        # data_dump.md) alongside the configuration file.
-        data_dumper = DataDumper(
-            paths_df=self.paths_df,
-            dataset_info=self.dataset_info,
-            config=self.config,
-            results_dir=self.results_dir,
-            cropped_dims=self.cropped_dims,
-        )
-        data_dumper.run()
+        # Step 5: Optionally build and save the rich data dump (data_dump.json
+        # and data_dump.md) alongside the configuration file. Skipped by
+        # default; enabled with --data-dump.
+        if getattr(self.mist_arguments, "data_dump", False):
+            data_dumper = DataDumper(
+                paths_df=self.paths_df,
+                dataset_info=self.dataset_info,
+                config=self.config,
+                results_dir=self.results_dir,
+                cropped_dims=self.cropped_dims,
+            )
+            data_dumper.run()
 
         # Step 6: If the user specified test data in the dataset JSON file,
         # create a test paths dataframe and save it as CSV.

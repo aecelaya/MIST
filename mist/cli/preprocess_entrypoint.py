@@ -3,6 +3,7 @@ from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
 from typing import Optional, List
 import argparse
+import rich.console
 
 # MIST imports.
 from mist.cli import args as argmod
@@ -67,6 +68,11 @@ def _prepare_preprocess_dirs(ns: argparse.Namespace) -> None:
             raise FileExistsError(
                 f"Destination {numpy_dir} already contains files. "
                 "Use --overwrite or choose a different --numpy directory."
+            )
+        if non_empty and getattr(ns, "overwrite", False):
+            rich.console.Console().print(
+                f"[yellow]Overwriting existing preprocessed data in "
+                f"{numpy_dir}[/yellow]"
             )
 
     numpy_dir.mkdir(parents=True, exist_ok=True)
