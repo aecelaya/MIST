@@ -281,6 +281,12 @@ Create a file `mist/models/mymodel/mist_mymodel.py`. The class must be a
 `"prediction"` key (and optionally a `"deep_supervision"` list). In eval mode,
 return the logit tensor directly.
 
+!!! warning "Do not apply softmax to model outputs"
+    MIST models must return **raw logits** — never apply softmax (or any other
+    activation) to the final output. Softmax is applied inside the loss
+    function's `preprocess()` step. Applying it in the model as well will
+    silently produce incorrect gradients and degraded training performance.
+
 ```python
 # mist/models/mymodel/mist_mymodel.py
 import torch
@@ -293,7 +299,7 @@ class MyModel(nn.Module):
         self.net = nn.Conv3d(in_channels, out_channels, kernel_size=1)
 
     def forward(self, x: torch.Tensor):
-        output = self.net(x)
+        output = self.net(x)  # Raw logits — no softmax here.
         if self.training:
             return {"prediction": output}
         return output
@@ -446,6 +452,16 @@ for `bl`, `hdos`, and `gsl`. Scheduling may still help for experimental losses
 (`volumetric_sddl`, `vessel_sddl`) where the boundary term can be noisier early
 in training.
 
+`cldice` is also a candidate for scheduling. Its topology term is computed by
+extracting a soft skeleton from the predicted probability map via iterative
+morphological operations. Early in training, when predictions are still noisy
+and poorly shaped, the extracted skeleton is unreliable — penalizing based on it
+can push the network in unhelpful directions before it has learned a reasonable
+approximation of the structure. Starting with higher Dice weight and gradually
+increasing the skeleton term's contribution (via a linear or cosine schedule)
+gives the network time to develop well-formed predictions before the topology
+term becomes the dominant signal.
+
 `composite_loss_weighting` is stored in `config.json` as a `{name, params}`
 object under `training.loss`, or set to `null` to disable it (equal weighting
 of both terms):
@@ -525,6 +541,127 @@ mist_train --numpy /path/to/preprocessed/npy/files \
            --loss cldice \
            --composite-loss-weighting cosine
 ```
+
+### Adding a custom loss
+
+One of MIST's core design goals is extensibility. Adding a new loss function
+requires no changes to the training loop, CLI, or configuration schema —
+only three steps are needed.
+
+**Step 1 — Implement the loss class.**
+
+Create a file `mist/loss_functions/losses/my_loss.py`. The class must subclass
+`SegmentationLoss` and implement `forward`. Call `self.preprocess()` at the
+start of `forward` to convert the raw model outputs and ground truth labels into
+the form expected by loss computations.
+
+`self.preprocess(y_true, y_pred)` does two things:
+
+1. Converts `y_true` from integer class labels of shape `(B, 1, H, W, D)` to
+   a one-hot float tensor of shape `(B, C, H, W, D)`.
+2. Applies softmax to `y_pred` along the channel dimension, converting raw
+   logits of shape `(B, C, H, W, D)` into class probabilities.
+
+Both outputs are `float32` and share the same shape `(B, C, H, W, D)`. If
+`exclude_background=True` was passed at construction, channel 0 is dropped from
+both tensors before they are returned.
+
+```python
+# mist/loss_functions/losses/my_loss.py
+from typing import Any
+import torch
+from mist.loss_functions.base import SegmentationLoss
+from mist.loss_functions.loss_registry import register_loss
+
+
+@register_loss("my_loss")
+class MyLoss(SegmentationLoss):
+    """A custom single-component segmentation loss."""
+
+    def forward(
+        self,
+        y_true: torch.Tensor,
+        y_pred: torch.Tensor,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        y_true, y_pred = self.preprocess(y_true, y_pred)
+
+        # Implement your loss here using y_true and y_pred.
+        # Both are shape (B, C, H, W, D) and float32.
+        # self.spatial_dims_3d = (2, 3, 4) — spatial axes for reductions.
+        # self.avoid_division_by_zero — small epsilon for numerical stability.
+        loss = ...
+        return loss
+```
+
+**Step 2 — Trigger registration at import time.**
+
+Add an import to `mist/loss_functions/__init__.py`:
+
+```python
+# mist/loss_functions/__init__.py  (add this line)
+from mist.loss_functions.losses.my_loss import MyLoss
+```
+
+After these two steps, `--loss my_loss` works with `mist_train` and
+`mist_run_all`, and `my_loss` appears in `training.loss.name` in `config.json`.
+
+**Step 3 — Opt into trainer features (optional).**
+
+The trainer uses three frozensets in
+`mist/training/trainers/trainer_constants.py` to gate optional features. Add
+your loss name to any that apply:
+
+```python
+# mist/training/trainers/trainer_constants.py
+DTM_AWARE_LOSSES: FrozenSet[str] = frozenset({"bl", "hdos", "gsl", "my_loss"})
+COMPOSITE_LOSSES: FrozenSet[str] = frozenset({..., "my_loss"})
+SPACING_AWARE_LOSSES: FrozenSet[str] = frozenset({..., "my_loss"})
+```
+
+| Frozenset | What it enables |
+|---|---|
+| `DTM_AWARE_LOSSES` | Precomputed DTMs are loaded and passed as `dtm=` in `forward`. Requires `--compute-dtms` at preprocessing time. |
+| `COMPOSITE_LOSSES` | `composite_loss_weighting` scheduling becomes available for this loss via `--composite-loss-weighting` or `config.json`. |
+| `SPACING_AWARE_LOSSES` | Voxel spacing is read from `spatial_config.target_spacing` and passed as `sddl_spacing_xyz=` at construction time. |
+
+#### Example: composite loss with DTMs
+
+The pattern below is how all built-in composite losses (`bl`, `hdos`, `gsl`)
+are implemented — a region term blended with a boundary term using a
+schedulable `alpha`:
+
+```python
+@register_loss("my_composite_loss")
+class MyCompositeLoss(SegmentationLoss):
+    """Custom composite loss blending Dice with a boundary term."""
+
+    def forward(
+        self,
+        y_true: torch.Tensor,
+        y_pred: torch.Tensor,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        dtm = kwargs.get("dtm")
+        if dtm is None:
+            raise ValueError("MyCompositeLoss requires a precomputed DTM.")
+        alpha = kwargs.get("alpha", 0.5)
+
+        y_true, y_pred = self.preprocess(y_true, y_pred)
+
+        # Region term (e.g., Dice).
+        region_loss = ...
+
+        # Boundary term using the DTM.
+        boundary_loss = ...
+
+        return alpha * region_loss + (1.0 - alpha) * boundary_loss
+```
+
+Then add `"my_composite_loss"` to both `DTM_AWARE_LOSSES` and
+`COMPOSITE_LOSSES` in `trainer_constants.py`. The trainer will automatically
+load DTMs and pass them to `forward`, and `--composite-loss-weighting` will
+control `alpha` across training.
 
 ## Optimizers
 
