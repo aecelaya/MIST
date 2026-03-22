@@ -778,7 +778,11 @@ class Analyzer:
         # Set a default patch size based on the median resampled image size.
         # The patch size can be overridden by the user in the config file or in
         # the command line arguments for the training pipeline.
-        patch_size = analyzer_utils.get_best_patch_size(median_dims)
+        patch_size = analyzer_utils.get_best_patch_size(
+            median_dims,
+            target_spacing,
+            batch_size_per_gpu=self.config["training"]["batch_size_per_gpu"],
+        )
         self.config["spatial_config"]["patch_size"] = [
             int(size) for size in patch_size
         ]

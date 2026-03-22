@@ -79,5 +79,33 @@ class AnalyzeConstants:
     # whole-image statistics.
     SMALL_STRUCTURE_SIZE_CATEGORIES = frozenset({"tiny", "small"})
 
+    # Minimum patch size along the low-resolution (anisotropic) axis in the
+    # quasi-2D patch selection mode. With a 3×3×3 kernel, at least 5 voxels
+    # are needed in the low-res axis to ensure the kernel has genuine
+    # (non-padded) context from neighboring slices at every position.
+    MIN_LOW_RES_AXIS_PATCH_SIZE = 5
+
+    # Reference GPU memory (bytes) used to scale the patch voxel budget.
+    # At this memory level the reference voxel budget is used as-is; smaller
+    # GPUs get a proportionally smaller budget and larger GPUs a larger one.
+    PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES = 16 * (1024 ** 3)  # 16 GB
+
+    # Per-patch voxel budget at the reference GPU memory and reference batch
+    # size. This is a conservative heuristic chosen to leave headroom for
+    # network activations, gradients, and optimizer state. It is not tuned to
+    # a specific architecture — heavier models (e.g. MedNeXt-large, SwinUNETR)
+    # may require a smaller patch size, which can be set manually in config.json
+    # or via --patch-size.
+    PATCH_BUDGET_REFERENCE_VOXELS = 128 ** 3
+
+    # The batch size per GPU assumed when the reference voxel budget was set.
+    # Matches the MIST default (training.batch_size_per_gpu = 2). The budget
+    # scales inversely with actual batch size so that total memory per step
+    # (batch_size × patch_voxels × overhead) stays constant.
+    PATCH_BUDGET_REFERENCE_BATCH_SIZE = 2
+
+    # Fallback voxel budget used when no CUDA device is available.
+    PATCH_BUDGET_DEFAULT_VOXELS = 128 ** 3
+
     # Create the base_config.json path.
     BASE_CONFIG_JSON_PATH = Path(__file__).parent / "base_config.json"

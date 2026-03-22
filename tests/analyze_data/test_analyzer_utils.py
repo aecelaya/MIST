@@ -368,20 +368,223 @@ class TestAddFoldsToDf:
 
 
 # ---------------------------------------------------------------------------
+# _largest_multiple_of_32_leq
+# ---------------------------------------------------------------------------
+
+class TestLargestMultipleOf32Leq:
+    """Tests for analyzer_utils._largest_multiple_of_32_leq."""
+
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            pytest.param(128.0, 128, id="exact_multiple"),
+            pytest.param(159.9, 128, id="just_below_160"),
+            pytest.param(160.0, 160, id="exact_160"),
+            pytest.param(170.0, 160, id="between_160_and_192"),
+            pytest.param(512.0, 512, id="exact_512"),
+        ],
+    )
+    def test_snaps_down_to_multiple_of_32(self, value, expected):
+        """Returns the largest multiple of 32 not exceeding value."""
+        assert au._largest_multiple_of_32_leq(value) == expected
+
+    def test_minimum_floor_applied_when_value_below_32(self):
+        """Values below 32 return the minimum (32 by default)."""
+        assert au._largest_multiple_of_32_leq(10.0) == 32
+
+    def test_custom_minimum(self):
+        """Custom minimum is respected when snapped value is below it."""
+        assert au._largest_multiple_of_32_leq(10.0, minimum=16) == 16
+
+
+# ---------------------------------------------------------------------------
+# _get_voxel_budget
+# ---------------------------------------------------------------------------
+
+class TestGetVoxelBudget:
+    """Tests for analyzer_utils._get_voxel_budget."""
+
+    def test_returns_default_when_cuda_unavailable(self, monkeypatch):
+        """Falls back to PATCH_BUDGET_DEFAULT_VOXELS when CUDA is absent."""
+        import torch
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        from mist.analyze_data.analyzer_constants import AnalyzeConstants as C
+        assert au._get_voxel_budget() == C.PATCH_BUDGET_DEFAULT_VOXELS
+
+    def test_returns_default_when_no_devices(self, monkeypatch):
+        """Falls back when CUDA reports zero devices."""
+        import torch
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "device_count", lambda: 0)
+        from mist.analyze_data.analyzer_constants import AnalyzeConstants as C
+        assert au._get_voxel_budget() == C.PATCH_BUDGET_DEFAULT_VOXELS
+
+    def test_scales_linearly_with_gpu_memory(self, monkeypatch):
+        """Budget scales linearly: 32 GB GPU → 2× the reference budget."""
+        import torch
+        from mist.analyze_data.analyzer_constants import AnalyzeConstants as C
+        from unittest.mock import MagicMock
+
+        fake_props = MagicMock()
+        fake_props.total_memory = 2 * C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+        monkeypatch.setattr(
+            torch.cuda, "get_device_properties", lambda i: fake_props
+        )
+
+        expected = 2 * C.PATCH_BUDGET_REFERENCE_VOXELS
+        assert au._get_voxel_budget() == expected
+
+    def test_uses_minimum_across_gpus(self, monkeypatch):
+        """With multiple GPUs the smallest VRAM determines the budget."""
+        import torch
+        from mist.analyze_data.analyzer_constants import AnalyzeConstants as C
+        from unittest.mock import MagicMock
+
+        small = MagicMock()
+        small.total_memory = C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES // 2  # 8 GB
+        large = MagicMock()
+        large.total_memory = C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES * 2   # 32 GB
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+        monkeypatch.setattr(
+            torch.cuda,
+            "get_device_properties",
+            lambda i: small if i == 0 else large,
+        )
+
+        expected = C.PATCH_BUDGET_REFERENCE_VOXELS // 2
+        assert au._get_voxel_budget() == expected
+
+    def test_budget_scales_inversely_with_batch_size(self, monkeypatch):
+        """Doubling batch size halves the per-patch voxel budget."""
+        import torch
+        from mist.analyze_data.analyzer_constants import AnalyzeConstants as C
+        from unittest.mock import MagicMock
+
+        props = MagicMock()
+        props.total_memory = C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+        monkeypatch.setattr(torch.cuda, "get_device_properties", lambda i: props)
+
+        budget_bs2 = au._get_voxel_budget(batch_size_per_gpu=2)
+        budget_bs4 = au._get_voxel_budget(batch_size_per_gpu=4)
+        assert budget_bs4 == budget_bs2 // 2
+
+
+# ---------------------------------------------------------------------------
 # get_best_patch_size
 # ---------------------------------------------------------------------------
 
 class TestGetBestPatchSize:
     """Tests for analyzer_utils.get_best_patch_size."""
 
-    def test_computes_floor_power_of_two(self):
-        """When med < max, choose nearest lower power of two; else cap at max."""
-        assert au.get_best_patch_size([180, 65, 33]) == [128, 64, 32]
+    # Fixture: pin the voxel budget to 128^3 so tests are GPU-independent.
+    @pytest.fixture(autouse=True)
+    def pin_budget(self, monkeypatch):
+        monkeypatch.setattr(
+            au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 128 ** 3
+        )
 
-    def test_input_too_small_raises_value_error(self):
-        """min(med) <= 1 raises ValueError."""
-        with pytest.raises(ValueError):
-            au.get_best_patch_size([1, 64, 64])
+    # --- 3D isotropic mode ---
+
+    def test_isotropic_no_clamping(self):
+        """Isotropic large image: budget distributes equally, snaps to mult-32."""
+        # target_mm = (128^3 * 1.0^3)^(1/3) = 128mm; raw = 128/1.0 = 128
+        # 128 < 512 → no clamping; snap(128) = 128
+        result = au.get_best_patch_size([512, 512, 512], [1.0, 1.0, 1.0])
+        assert result == [128, 128, 128]
+
+    def test_isotropic_clamped_one_axis_redistributes_budget(self):
+        """Small z forces clamping; freed budget pumps up x and y."""
+        # Isotropic spacing → 3D mode.
+        # Iter 1: target_mm = 128mm, raw_z = 128 >= median_z=40 → fix z=40
+        # Iter 2: remaining = 128^3/40 = 52429; target_mm_xy = sqrt(52429)≈229
+        # snap(229) = 224; both x,y = 224
+        result = au.get_best_patch_size([512, 512, 40], [1.0, 1.0, 1.0])
+        assert result == [224, 224, 32]
+
+    def test_isotropic_all_axes_clamped_to_median(self):
+        """Tiny image: all axes clamped to median, snapped down."""
+        # budget >> image → all axes raw > median → fix all at median
+        result = au.get_best_patch_size([32, 32, 32], [1.0, 1.0, 1.0])
+        assert result == [32, 32, 32]
+
+    def test_anisotropic_spacing_but_below_threshold_uses_3d_mode(self):
+        """Spacing ratio < 3 → 3D mode even if spacing is not uniform."""
+        # spacing ratio = 2.0/1.0 = 2.0, below threshold of 3.0 → 3D mode.
+        # target_mm = (128^3 * 1.0 * 1.0 * 2.0)^(1/3) ≈ 161.3mm
+        # raw = [161.3, 161.3, 80.6]; all < [512,512,512] → no clamp
+        # snap(161.3) = 160; snap(80.6) = 64
+        result = au.get_best_patch_size([512, 512, 512], [1.0, 1.0, 2.0])
+        assert result == [160, 160, 64]
+
+    # --- quasi-2D mode ---
+
+    def test_quasi_2d_thick_slice_z_axis(self):
+        """Thick-slice CT (z=low-res): z gets small patch, xy get full res."""
+        # anisotropy = 3.0/0.8 = 3.75 > 3.0 → quasi-2D; low_res_axis=2
+        # lr_raw = 128^3 / 512^2 = 8; clamp(8, 5, 40) = 8
+        # ip_raw = sqrt(128^3 / 8) = 512; snap(512)=512; min(512,512)=512
+        result = au.get_best_patch_size([512, 512, 40], [0.8, 0.8, 3.0])
+        assert result == [512, 512, 8]
+
+    def test_quasi_2d_low_res_axis_is_x(self):
+        """Low-resolution axis is detected correctly when it is axis 0."""
+        # spacing = [3.0, 0.8, 0.8] → low_res_axis = 0
+        # median_lr = 40 (axis 0), median_ip = max(512,512) = 512
+        # same arithmetic as above but result reordered
+        result = au.get_best_patch_size([40, 512, 512], [3.0, 0.8, 0.8])
+        assert result == [8, 512, 512]
+
+    def test_quasi_2d_low_res_axis_is_y(self):
+        """Low-resolution axis is detected correctly when it is axis 1."""
+        result = au.get_best_patch_size([512, 40, 512], [0.8, 3.0, 0.8])
+        assert result == [512, 8, 512]
+
+    def test_quasi_2d_lr_raw_below_minimum_clamped_up(self):
+        """lr_raw < MIN_LOW_RES_AXIS_PATCH_SIZE is clamped to that minimum."""
+        # Very large in-plane: 1024^2; lr_raw = 128^3/1024^2 = 2 < 5
+        # → lr_patch = min(5, median_lr=40) = 5
+        # ip_raw = sqrt(128^3/5) ≈ 648; snap(648) = 640; min(640,1024)=640
+        result = au.get_best_patch_size([1024, 1024, 40], [0.8, 0.8, 3.0])
+        assert result == [640, 640, 5]
+
+    def test_quasi_2d_tiny_z_uses_all_available_slices(self):
+        """When median_lr < MIN_LOW_RES_AXIS_PATCH_SIZE, patch = median_lr."""
+        # median_lr = 3 < 5; min_lr = min(5, 3) = 3 → lr_patch clamped to 3
+        result = au.get_best_patch_size([512, 512, 3], [0.8, 0.8, 3.0])
+        assert result[2] == 3
+
+    def test_quasi_2d_ip_patch_capped_to_median_ip(self):
+        """In-plane patch is capped at median_ip when budget would exceed it."""
+        # Small budget relative to image: ip_raw may snap down; confirm cap.
+        result = au.get_best_patch_size([64, 64, 10], [0.8, 0.8, 3.0])
+        for ax in (0, 1):
+            assert result[ax] <= 64
+
+    def test_larger_batch_size_yields_smaller_patch(self, monkeypatch):
+        """Doubling batch size from 2 → 4 halves the budget and shrinks patch."""
+        # Unpin the budget so batch_size_per_gpu is forwarded to _get_voxel_budget.
+        monkeypatch.setattr(
+            au,
+            "_get_voxel_budget",
+            lambda batch_size_per_gpu=2: 128 ** 3 // batch_size_per_gpu * 2,
+        )
+        result_bs2 = au.get_best_patch_size(
+            [512, 512, 512], [1.0, 1.0, 1.0], batch_size_per_gpu=2
+        )
+        result_bs4 = au.get_best_patch_size(
+            [512, 512, 512], [1.0, 1.0, 1.0], batch_size_per_gpu=4
+        )
+        # Smaller budget → smaller or equal patch per axis.
+        for a, b in zip(result_bs4, result_bs2):
+            assert a <= b
 
 
 # ---------------------------------------------------------------------------

@@ -206,7 +206,7 @@ def _patch_env(monkeypatch, tmp_path):
     monkeypatch.setattr(
         au,
         "get_best_patch_size",
-        lambda _dims: [16, 16, 16],
+        lambda _dims, _spacing, batch_size_per_gpu=2: [16, 16, 16],
         raising=True,
     )
 
@@ -742,7 +742,7 @@ class TestAnalyzerAnalyzeDataset:
         monkeypatch.setattr(
             au,
             "get_best_patch_size",
-            lambda _d: [24, 24, 24],
+            lambda _d, _s, batch_size_per_gpu=2: [24, 24, 24],
             raising=True,
         )
         monkeypatch.setattr(

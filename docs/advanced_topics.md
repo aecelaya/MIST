@@ -165,6 +165,111 @@ a different part of the MIST pipeline:
 | `inference`      | Settings for inference, including sliding-window parameters, ensembling, and test-time augmentation. `patch_overlap` must be in `[0, 1)` — a value of `1.0` is invalid. |
 | `evaluation`     | Metrics and class definitions for model evaluation.                                                  |
 
+## Patch size selection
+
+The analysis step automatically selects a patch size and writes it to
+`spatial_config.patch_size` in `config.json`. The algorithm uses available
+GPU memory and the target spacing to choose the best patch for the data. The
+patch size can always be overridden by editing `config.json` or passing
+`--patch-size` to `mist_train`.
+
+### Voxel budget
+
+The per-patch voxel budget is derived from the minimum GPU memory across all
+available CUDA devices, scaled linearly from a 16 GB / batch-size-2 reference,
+and inversely proportional to the configured batch size per GPU:
+
+```
+budget = (min_gpu_memory / 16 GB) × 128³ × (2 / batch_size_per_gpu)
+```
+
+This means an 8 GB GPU at batch size 2 yields a budget of `128³ / 2 ≈ 1 M`
+voxels, a 40 GB A100 at batch size 2 yields roughly `128³ × 2.5 ≈ 160³`
+voxels, and doubling the batch size to 4 halves the per-patch budget to keep
+total memory per step constant. If no GPU is detected at analysis time, the
+fallback budget is `128³`.
+
+The `128³` reference is a **conservative heuristic** chosen to leave headroom
+for network activations, gradients, and optimizer state — it is not tuned to
+a specific architecture. Heavier models (e.g. MedNeXt-large, SwinUNETR) may
+require a smaller patch size than the one selected automatically. If training
+runs out of memory, reduce `patch_size` in `config.json` or via `--patch-size`.
+If there is memory headroom to spare, increasing the patch size may improve
+segmentation accuracy.
+
+!!! note
+    The budget is only used during analysis to choose the initial patch size.
+    It is not stored in `config.json` and does not affect reproducibility —
+    only the resulting `patch_size` values matter for training.
+
+### 3D isotropic mode
+
+Used when `max(target_spacing) / min(target_spacing) ≤ 3`. A physically
+isotropic patch extent is computed from the budget:
+
+```
+target_mm = (budget × prod(target_spacing))^(1/3)
+patch[i]  = target_mm / target_spacing[i]   for each axis i
+```
+
+Any axis whose raw patch would exceed the median resampled image size is
+clamped to that size and the freed voxels are redistributed to the remaining
+axes. Each axis is then snapped down to the **nearest multiple of 32**
+(minimum 32), which is required for exact encoder–decoder reconstruction in
+the nnUNet (up to 5 stride-2 downsampling steps → 2⁵ = 32).
+
+### Quasi-2D mode
+
+Used when `max(target_spacing) / min(target_spacing) > 3`. The
+**low-resolution axis** is whichever axis has the largest spacing (not assumed
+to be z). Its patch size is chosen as the largest value that still leaves the
+full budget available for the two in-plane axes:
+
+```
+lr_patch  = budget / max(in_plane_median)²
+            clamped to [MIN_LOW_RES_AXIS_PATCH_SIZE, median_lr]
+
+ip_patch  = sqrt(budget / lr_patch)
+            snapped to nearest multiple of 32, capped at median_ip
+```
+
+Both in-plane axes receive the same patch size (square patch). The
+low-resolution axis is not snapped to a multiple of 32 — the nnUNet
+automatically uses stride-1 in that direction, so any size ≥ 1 is valid.
+The minimum low-resolution patch size is 5, ensuring a 3×3×3 kernel has
+genuine (non-padded) context at every position.
+
+### Overriding the patch size
+
+If the automatically selected patch is not suitable (e.g., different GPU
+memory, unusual anatomy), override it in two ways:
+
+**In `config.json`:**
+
+```json
+"spatial_config": {
+    "patch_size": [192, 192, 96]
+}
+```
+
+**Via CLI (overrides `config.json`):**
+
+```console
+mist_train --numpy /path/to/numpy --results /path/to/results \
+           --patch-size 192 192 96
+```
+
+Each architecture imposes its own patch size constraints when overriding manually:
+
+| Architecture | Constraint | Notes |
+|---|---|---|
+| `nnunet`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: anisotropic (low-res) axis is never downsampled, so any value is valid there |
+| `fmgnet`, `wnet` | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet |
+| `mednext-*` | All dimensions divisible by **16** | Fixed 4-stage encoder (`2⁴ = 16`); no adaptation for anisotropic axes |
+| `swinunetr-*` | All dimensions divisible by **32** | Fixed: `patch_size=2` tokenizer × 4 downsampling stages; raises an error at model construction if violated |
+
+The automatic patch selection always produces multiples of 32 (which satisfies all constraints), so manual overrides are the only case where you need to check this.
+
 ## Network architectures
 
 All MIST models are **3D-only**. For highly anisotropic data (e.g., thick-slice
@@ -242,14 +347,33 @@ MedNeXt base:
 }
 ```
 
-### SwinUNETR-V2 input constraints
+### MedNeXt patch size constraints
+
+MedNeXt uses a **fixed 4-stage encoder** (`blocks_down` has length 4 for all
+variants). Each stage halves the spatial resolution by stride-2 convolution,
+so all patch dimensions must be divisible by `2⁴ = 16`. Unlike nnUNet, there
+is no adaptive topology — the same stride schedule is applied to every axis
+regardless of spacing anisotropy.
+
+The automatic patch selection always produces multiples of 32 (which are also
+multiples of 16), so this constraint is satisfied out of the box. If you
+manually override `patch_size`, ensure all three dimensions are multiples of
+16. Values that are multiples of 32 also work and are recommended for
+consistency with other architectures.
+
+### SwinUNETR-V2 patch size constraints
 
 SwinUNETR-V2 requires that all three spatial dimensions of the input patch are
-**divisible by 32** (a consequence of the `patch_size=2` window plus four
-downsampling stages). If the patch size chosen by the analysis step doesn't
-satisfy this constraint, the model will raise an error at the first forward
-pass. Adjust `patch_size` in `config.json` to the nearest multiples of 32
-before training.
+divisible by **32** (the `patch_size=2` tokenizer followed by four
+downsampling stages: `2 × 2⁴ = 32`). Unlike nnUNet and MedNeXt, SwinUNETR
+validates this constraint at model construction time and raises a `ValueError`
+immediately if it is violated, rather than failing silently at the first
+forward pass.
+
+There is no adaptive topology — all three axes are always processed with the
+same stride schedule, so the constraint applies to every dimension including
+the anisotropic (low-res) axis. The automatic patch selection always produces
+multiples of 32, so this is satisfied out of the box.
 
 ### FMG-Net and W-Net design
 

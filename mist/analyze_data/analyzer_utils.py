@@ -8,6 +8,7 @@ import pandas as pd
 from sklearn.model_selection import KFold
 
 # MIST imports.
+from mist.analyze_data.analyzer_constants import AnalyzeConstants as constants
 from mist.utils import io as io_utils
 
 
@@ -207,29 +208,157 @@ def add_folds_to_df(df: pd.DataFrame, n_splits: int = 5) -> pd.DataFrame:
     return df.sort_values("fold").reset_index(drop=True)
 
 
-def get_best_patch_size(med_img_size: list[int]) -> list[int]:
-    """Get the best patch size based on median image size.
+def _get_voxel_budget(batch_size_per_gpu: int = 2) -> int:
+    """Return a per-patch voxel budget for patch size selection.
 
-    The best patch size is computed as the nearest power of two less than the
-    median image size along each axis.
+    Queries the minimum total memory across all available CUDA devices and
+    scales linearly from a 16 GB / batch-size-2 reference (128^3 voxels per
+    patch). The budget scales inversely with batch_size_per_gpu so that total
+    memory per step (batch_size × patch_voxels × network overhead) stays
+    roughly constant. Falls back to the default constant when no GPU is
+    present.
 
     Args:
-        med_img_size: Median image size in the x, y, and z directions.
+        batch_size_per_gpu: Number of samples per GPU per step. Defaults to 2,
+            matching the MIST default training configuration.
 
     Returns:
-        Selected patch size based on the input sizes.
-
-    Raises:
-        ValueError: If any dimension of med_img_size is less than or equal to 1.
+        Per-patch voxel budget as a positive integer.
     """
-    if min(med_img_size) <= 1:
-        raise ValueError(
-            f"All image dimensions must be greater than 1 to compute a valid "
-            f"patch size. Got: {med_img_size}."
+    import torch  # local import — torch may not be installed in all envs
+    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+        min_mem = min(
+            torch.cuda.get_device_properties(i).total_memory
+            for i in range(torch.cuda.device_count())
         )
-    return [
-        int(2 ** np.floor(np.log2(med_sz))) for med_sz in med_img_size
-    ]
+        return int(
+            min_mem
+            / constants.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES
+            * constants.PATCH_BUDGET_REFERENCE_VOXELS
+            * constants.PATCH_BUDGET_REFERENCE_BATCH_SIZE
+            / batch_size_per_gpu
+        )
+    return constants.PATCH_BUDGET_DEFAULT_VOXELS
+
+
+def _largest_multiple_of_32_leq(value: float, minimum: int = 32) -> int:
+    """Return the largest multiple of 32 that is ≤ value, floored to minimum.
+
+    The nnUNet encoder downsamples each isotropic axis by stride 2 for up to
+    MAX_DEPTH=5 levels, so patch dimensions must be divisible by 2^5 = 32 for
+    exact decoder reconstruction.
+
+    Args:
+        value: Upper bound (inclusive, may be a float).
+        minimum: Smallest allowed return value. Defaults to 32.
+
+    Returns:
+        Largest multiple of 32 that does not exceed value, at least minimum.
+    """
+    snapped = int(value // 32) * 32
+    return max(snapped, minimum)
+
+
+def get_best_patch_size(
+    median_resampled_size: list[int],
+    target_spacing: list[float],
+    batch_size_per_gpu: int = 2,
+) -> list[int]:
+    """Select a patch size from the median resampled image size and spacing.
+
+    Uses a GPU-memory-derived voxel budget and the target spacing to choose
+    between two strategies:
+
+    **Quasi-2D mode** (triggered when the target spacing is still anisotropic
+    after analysis, i.e. max/min spacing > MAX_DIVIDED_BY_MIN_SPACING_THRESHOLD):
+    The low-resolution axis is identified as the axis with the largest spacing.
+    Its patch size is chosen as the largest value that leaves the full voxel
+    budget available for the in-plane axes (clamped to
+    MIN_LOW_RES_AXIS_PATCH_SIZE … median_lr). Both in-plane axes receive the
+    same patch size (largest multiple of 32 that fits within the budget).
+
+    **3D isotropic mode** (all other cases):
+    A physically isotropic target patch extent in mm is computed from the
+    budget, then converted to per-axis voxel counts. Axes whose raw voxel
+    count would exceed the median image size are clamped and the remaining
+    budget is redistributed to the unclamped axes. Each axis is then snapped
+    down to the nearest multiple of 32 (minimum 32).
+
+    Args:
+        median_resampled_size: Median image size after resampling, [x, y, z].
+        target_spacing: Target voxel spacing in mm, [x, y, z].
+        batch_size_per_gpu: Number of samples per GPU per step. The voxel
+            budget scales inversely with this value so that total memory per
+            step stays constant. Defaults to 2 (the MIST default).
+
+    Returns:
+        Patch size as a list of three integers.
+    """
+    budget = _get_voxel_budget(batch_size_per_gpu)
+
+    anisotropy_ratio = max(target_spacing) / min(target_spacing)
+    low_res_axis = int(np.argmax(target_spacing))
+    in_plane_axes = [i for i in range(3) if i != low_res_axis]
+
+    if anisotropy_ratio > constants.MAX_DIVIDED_BY_MIN_SPACING_THRESHOLD:
+        # Quasi-2D: maximise in-plane resolution; keep low-res axis small.
+        median_lr = median_resampled_size[low_res_axis]
+        median_ip = max(median_resampled_size[i] for i in in_plane_axes)
+
+        # Largest low-res patch that leaves the full budget for in-plane.
+        # Enforce MIN_LOW_RES_AXIS_PATCH_SIZE unless the image itself is
+        # smaller, and never exceed the median image depth.
+        min_lr = min(constants.MIN_LOW_RES_AXIS_PATCH_SIZE, median_lr)
+        lr_patch = int(np.clip(budget / (median_ip ** 2), min_lr, median_lr))
+
+        # In-plane: both axes get the same patch (largest multiple of 32).
+        # Round to nearest int first to avoid floating-point under-snap.
+        ip_patch = _largest_multiple_of_32_leq(
+            int(round(np.sqrt(budget / lr_patch)))
+        )
+        ip_patch = min(ip_patch, median_ip)
+
+        patch = [ip_patch, ip_patch, ip_patch]
+        patch[low_res_axis] = lr_patch
+        return patch
+
+    # 3D isotropic mode: distribute budget proportionally in physical space,
+    # iteratively clamping axes that would exceed the median image size and
+    # redistributing the freed budget to the remaining axes.
+    free_axes = list(range(3))
+    fixed: dict[int, int] = {}
+
+    while free_axes:
+        free_spacings = [target_spacing[i] for i in free_axes]
+        remaining_budget = float(budget)
+        for v in fixed.values():
+            remaining_budget /= v
+
+        n = len(free_axes)
+        target_mm = (remaining_budget * float(np.prod(free_spacings))) ** (1.0 / n)
+
+        new_fixed = [
+            i for i in free_axes
+            if (target_mm / target_spacing[i]) >= median_resampled_size[i]
+        ]
+        if not new_fixed:
+            break
+
+        for i in new_fixed:
+            fixed[i] = median_resampled_size[i]
+            free_axes.remove(i)
+
+    patch = []
+    for i in range(3):
+        if i in fixed:
+            raw = float(fixed[i])
+        else:
+            raw = target_mm / target_spacing[i]
+        # Round to nearest int before snapping to avoid floating-point
+        # precision causing e.g. 127.9999 to snap to 96 instead of 128.
+        clamped = min(int(round(raw)), median_resampled_size[i])
+        patch.append(_largest_multiple_of_32_leq(clamped))
+    return patch
 
 
 def build_evaluation_config(dataset: dict[str, Any]) -> dict[str, Any]:
