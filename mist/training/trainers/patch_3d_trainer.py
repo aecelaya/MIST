@@ -102,24 +102,17 @@ class Patch3DTrainer(BaseTrainer):
         batch = kwargs["data"]
 
         # Unpack the state. This includes the model, optimizer, scaler, loss
-        # function (i.e., criterion), composite weight scheduler, and the
-        # current epoch.
+        # function (i.e., criterion), and the alpha weight for composite losses
+        # (pre-computed once per epoch by the training loop).
         model = state["model"]
         optimizer = state["optimizer"]
         scaler = state["scaler"]
         criterion = state["loss_function"]
-        composite_loss_weighting = state["composite_loss_weighting"]
+        alpha = state["alpha"]
 
         image = batch["image"]
         label = batch["label"]
         dtm = batch.get("dtm", None)
-
-        epoch = state["epoch"]
-        if composite_loss_weighting:
-            alpha = composite_loss_weighting(epoch)
-        else:
-            # Default to 0.5 for safe handling of alpha parameter.
-            alpha = 0.5
 
         optimizer.zero_grad()
         if scaler is not None:

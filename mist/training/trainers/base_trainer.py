@@ -3,6 +3,7 @@
 from typing import Dict, Any
 from abc import ABC, abstractmethod
 from pathlib import Path
+import contextlib
 import os
 import math
 import random
@@ -364,7 +365,6 @@ class BaseTrainer(ABC):
             # Sanity check the fold data.
             training_utils.sanity_check_fold_data(
                 fold=fold,
-                use_dtms=self._use_dtms(),
                 train_images=train_images,
                 train_labels=train_labels,
                 val_images=val_images,
@@ -492,6 +492,7 @@ class BaseTrainer(ABC):
             "epoch": 0,
             "global_step": 0,
             "best_val_loss": np.inf,
+            "alpha": 0.5,
         }
 
     def setup(self, rank: int, world_size: int) -> None:
@@ -564,54 +565,26 @@ class BaseTrainer(ABC):
             # Update the epoch in the state.
             state["epoch"] = epoch
 
+            # Compute alpha once per epoch so training_step doesn't repeat it.
+            clw = state["composite_loss_weighting"]
+            state["alpha"] = clw(epoch) if clw is not None else 0.5
+
             # Set up model for training.
             state["model"].train()
 
-            # Log progress on the first rank.
-            if rank == 0:
-                with progress_bar.TrainProgressBar(
+            # Run the training steps for this epoch. Rank 0 shows a progress
+            # bar; other ranks run the same steps silently.
+            pb_ctx = (
+                progress_bar.TrainProgressBar(
                     current_epoch=epoch + 1,
                     fold=fold,
                     epochs=self.config["training"]["epochs"],
                     train_steps=fold_data["steps_per_epoch"],
-                ) as pb:
-                    for _ in range(fold_data["steps_per_epoch"]):
-                        # Get a batch of training data.
-                        batch = train_loader.next()[0]
-
-                        # Compute loss and perform training step.
-                        loss = self.training_step(state=state, data=batch)
-
-                        # Update the global step in the state.
-                        state["global_step"] += 1
-
-                        # Detach and aggregate across all ranks (mean).
-                        with torch.no_grad():
-                            loss_det = loss.detach()
-                            if use_ddp:
-                                dist.all_reduce(loss_det, op=dist.ReduceOp.SUM)
-                                mean_loss = (loss_det / world_size).item()
-                            else:
-                                mean_loss = loss_det.item()
-
-                            # Check for NaN/Inf on rank 0
-                            if not np.isfinite(mean_loss):
-                                self.console.print(
-                                    "[bold red]Stopping training: Detected NaN"
-                                    "or inf loss value![/bold red]\n"
-                                )
-                                stop_training[0] = 1
-
-                        # Update running average of training loss.
-                        train_mean_loss = running_train_loss(mean_loss)
-
-                        # Update progress bar.
-                        pb.update(
-                            loss=train_mean_loss,
-                            lr=state["optimizer"].param_groups[0]["lr"]
-                        )
-            else:
-                # For all other ranks, just perform the training step.
+                )
+                if rank == 0
+                else contextlib.nullcontext()
+            )
+            with pb_ctx as pb:
                 for _ in range(fold_data["steps_per_epoch"]):
                     # Get a batch of training data.
                     batch = train_loader.next()[0]
@@ -622,11 +595,31 @@ class BaseTrainer(ABC):
                     # Update the global step in the state.
                     state["global_step"] += 1
 
-                    # Aggregate training losses across ranks.
-                    if use_ddp:
-                        with torch.no_grad():
-                            loss_det = loss.detach()
+                    # Detach and aggregate across all ranks (mean).
+                    with torch.no_grad():
+                        loss_det = loss.detach()
+                        if use_ddp:
                             dist.all_reduce(loss_det, op=dist.ReduceOp.SUM)
+                            mean_loss = (loss_det / world_size).item()
+                        else:
+                            mean_loss = loss_det.item()
+
+                    # Check for NaN/Inf and flag for early exit.
+                    if not np.isfinite(mean_loss):
+                        if rank == 0:
+                            self.console.print(
+                                "[bold red]Stopping training: Detected NaN"
+                                "or inf loss value![/bold red]\n"
+                            )
+                        stop_training[0] = 1
+
+                    # Update running average and progress bar (rank 0 only).
+                    if rank == 0:
+                        train_mean_loss = running_train_loss(mean_loss)
+                        pb.update(
+                            loss=train_mean_loss,
+                            lr=state["optimizer"].param_groups[0]["lr"]
+                        )
 
             # Broadcast stop flag so all ranks exit together if needed.
             if use_ddp:
@@ -644,36 +637,40 @@ class BaseTrainer(ABC):
             if use_ddp:
                 dist.barrier()
 
-            # Start validation phase.
+            # Run the validation steps for this epoch. Rank 0 shows a progress
+            # bar and tracks best loss; other ranks run silently.
             state["model"].eval()
             with torch.no_grad():
-                if rank == 0:
-                    with progress_bar.ValidationProgressBar(val_steps) as pbv:
-                        for _ in range(val_steps):
-                            # Get a batch of validation data.
-                            batch = val_loader.next()[0]
+                pbv_ctx = (
+                    progress_bar.ValidationProgressBar(val_steps)
+                    if rank == 0
+                    else contextlib.nullcontext()
+                )
+                with pbv_ctx as pbv:
+                    for _ in range(val_steps):
+                        # Get a batch of validation data.
+                        batch = val_loader.next()[0]
 
-                            # Compute validation loss.
-                            val_loss = self.validation_step(
-                                state=state, data=batch
-                            )
+                        # Compute validation loss.
+                        val_loss = self.validation_step(
+                            state=state, data=batch
+                        )
 
-                            # Aggregate mean across ranks.
-                            val_det = val_loss.detach()
-                            if use_ddp:
-                                dist.all_reduce(val_det, op=dist.ReduceOp.SUM)
-                                mean_val = (val_det / world_size).item()
-                            else:
-                                mean_val = val_det.item()
+                        # Aggregate mean across ranks.
+                        val_det = val_loss.detach()
+                        if use_ddp:
+                            dist.all_reduce(val_det, op=dist.ReduceOp.SUM)
+                            mean_val = (val_det / world_size).item()
+                        else:
+                            mean_val = val_det.item()
 
-                            # Update running average of validation loss.
+                        # Update running average and progress bar (rank 0 only).
+                        if rank == 0:
                             val_mean_loss = running_val_loss(mean_val)
-
-                            # Update progress bar.
                             pbv.update(loss=val_mean_loss)
 
-                    # Log training and validation losses. Check if the
-                    # validation loss is the best so far.
+                # Check if validation loss improved and save model (rank 0 only).
+                if rank == 0:
                     if val_mean_loss < state["best_val_loss"]:
                         self.console.print(
                             "[bold green]Validation loss IMPROVED from "
@@ -684,8 +681,8 @@ class BaseTrainer(ABC):
                         # Update the best validation loss.
                         state["best_val_loss"] = val_mean_loss
 
-                        # Save the model.
-                        # Modify so we can load cleanly in non-DDP contexts.
+                        # Save the model. Unwrap DDP so it loads cleanly in
+                        # non-DDP contexts.
                         to_save = (
                             state["model"].module
                             if hasattr(state["model"], "module")
@@ -696,21 +693,6 @@ class BaseTrainer(ABC):
                         self.console.print(
                             "Validation loss did not improve.\n"
                         )
-                else:
-                    # For all other ranks, just perform the validation step.
-                    for _ in range(val_steps):
-                        # Get a batch of validation data.
-                        batch = val_loader.next()[0]
-
-                        # Compute validation loss.
-                        val_loss = self.validation_step(
-                            state=state, data=batch
-                        )
-
-                        # Aggregate validation losses across ranks.
-                        if use_ddp:
-                            val_det = val_loss.detach()
-                            dist.all_reduce(val_det, op=dist.ReduceOp.SUM)
 
             # Reset the dataloaders for the next epoch.
             train_loader.reset()

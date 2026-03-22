@@ -1,6 +1,5 @@
 """Registry for optimizers used in training."""
-from typing import Callable, Dict, List
-from collections import OrderedDict
+from typing import Callable, Dict, Iterable, List
 import torch
 from torch.optim import Optimizer
 
@@ -9,7 +8,7 @@ from mist.training.optimizers.optimizer_constants import OptimizerConstants
 
 
 def _adam_optimizer(
-    params: OrderedDict,
+    params: Iterable,
     learning_rate: float,
     weight_decay: float,
     eps: float,
@@ -21,7 +20,7 @@ def _adam_optimizer(
 
 
 def _adamw_optimizer(
-    params: OrderedDict,
+    params: Iterable,
     learning_rate: float,
     weight_decay: float,
     eps:float,
@@ -33,7 +32,7 @@ def _adamw_optimizer(
 
 
 def _sgd_optimizer(
-    params: OrderedDict,
+    params: Iterable,
     learning_rate: float,
     weight_decay: float,
     eps: float, # pylint:disable=unused-argument
@@ -55,7 +54,7 @@ OPTIMIZER_REGISTRY: Dict[str, Callable[..., Optimizer]] = {
 }
 
 
-def get_optimizer(name: str, params: OrderedDict, **kwargs) -> Optimizer:
+def get_optimizer(name: str, params: Iterable, **kwargs) -> Optimizer:
     """Factory function for optimizers.
 
     Args:

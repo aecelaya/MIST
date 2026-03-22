@@ -1,11 +1,10 @@
 """Utility functions for MIST trainers."""
 from pathlib import Path
 from typing import List, Sequence, Union
-from torch import nn
 
 
-class RunningMean(nn.Module):
-    """Simple moving average module for loss tracking.
+class RunningMean:
+    """Simple moving average for loss tracking.
 
     This class tracks the mean of a series of values (e.g., loss values) over
     time. It is reset after each epoch.
@@ -15,11 +14,10 @@ class RunningMean(nn.Module):
         total: Sum of values added.
     """
     def __init__(self):
-        super().__init__()
         self.count = 0
         self.total = 0
 
-    def forward(self, loss: float) -> float:
+    def __call__(self, loss: float) -> float:
         """Update the mean with a new loss value."""
         self.total += loss
         self.count += 1
@@ -37,7 +35,6 @@ class RunningMean(nn.Module):
 
 def sanity_check_fold_data(
     fold: int,
-    use_dtms: bool,
     train_images: Sequence[Union[str, Path]],
     train_labels: Sequence[Union[str, Path]],
     val_images: Sequence[Union[str, Path]],
@@ -51,19 +48,19 @@ def sanity_check_fold_data(
       - 1:1 pairing (counts) within train and within val.
       - No duplicates within each set.
       - No train/val leakage (images and labels).
-      - If DTMs are used, they exist, match train count, and have no duplicates.
+      - If train_dtms is provided, they exist, match train count, have no
+        duplicates, and their file stems align with train_images.
       - Filenames (stems) align across modalities (img/label and optionally DTM).
 
     Args:
         fold: The fold number being checked.
-        use_dtms: Whether DTM data is being used.
         train_images: List of training image paths.
         train_labels: List of training label paths.
         val_images: List of validation image paths.
         val_labels: List of validation label paths.
-        train_dtms: List of training DTM paths. 
+        train_dtms: List of training DTM paths, or None if not using DTMs.
 
-    Raises: 
+    Raises:
         ValueError: If any of the checks fail, providing details on the issue.
     """
     def _normalize(paths: Sequence[Union[str, Path]]) -> List[str]:
@@ -138,12 +135,8 @@ def sanity_check_fold_data(
             f"Fold {fold} image/label stem mismatch in validation set."
         )
 
-    # If using DTMs, ensure they align with training images.
-    if use_dtms:
-        if tr_dtm is None:
-            raise ValueError(
-                f"Fold {fold}: use_dtms=True but train_dtms is None."
-            )
+    # If DTMs are provided, ensure they align with training images.
+    if tr_dtm is not None:
         if len(tr_dtm) != n_tr_img:
             raise ValueError(
                 f"Fold {fold} mismatch: train_dtms ({len(tr_dtm)}) "

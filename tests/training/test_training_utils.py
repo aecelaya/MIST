@@ -76,17 +76,15 @@ def test_happy_path_no_dtms(tmp_path):
     tr_lbl = _make_paths(tmp_path, "labels/train", train_ids)
     va_img = _make_paths(tmp_path, "images/val", val_ids)
     va_lbl = _make_paths(tmp_path, "labels/val", val_ids)
-    dtms = None # Ignored because use_dtms=False.
 
     # Should not raise
     tu.sanity_check_fold_data(
         fold=0,
-        use_dtms=False,
         train_images=tr_img,
         train_labels=tr_lbl,
         val_images=va_img,
         val_labels=va_lbl,
-        train_dtms=dtms,
+        train_dtms=None,
     )
 
 
@@ -103,7 +101,6 @@ def test_happy_path_with_dtms(tmp_path):
     # Should not raise
     tu.sanity_check_fold_data(
         fold=1,
-        use_dtms=True,
         train_images=tr_img,
         train_labels=tr_lbl,
         val_images=va_img,
@@ -125,7 +122,7 @@ def test_raises_on_empty_split(tmp_path):
     with pytest.raises(ValueError, match="empty data"):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=False,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -145,7 +142,7 @@ def test_raises_on_count_mismatch_train(tmp_path):
     with pytest.raises(ValueError, match="train_images .* != train_labels"):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=False,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -171,7 +168,7 @@ def test_raises_on_duplicates_in_train_images(tmp_path):
     with pytest.raises(ValueError, match="duplicate entries in train_images"):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=False,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -193,7 +190,7 @@ def test_raises_on_train_val_image_leakage(tmp_path):
     with pytest.raises(ValueError, match="overlap in images"):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=False,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -214,7 +211,7 @@ def test_raises_on_label_stem_mismatch(tmp_path):
     with pytest.raises(ValueError, match="image/label stem mismatch.*training"):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=False,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -223,26 +220,22 @@ def test_raises_on_label_stem_mismatch(tmp_path):
         )
 
 
-def test_use_dtms_true_but_none(tmp_path):
-    """Test that use_dtms=True but train_dtms=None raises error."""
+def test_none_dtms_skips_dtm_checks(tmp_path):
+    """Test that train_dtms=None skips DTM checks entirely."""
     tr_img = _make_paths(tmp_path, "images/train", ["p1"])
     tr_lbl = _make_paths(tmp_path, "labels/train", ["p1"])
     va_img = _make_paths(tmp_path, "images/val", ["p2"])
     va_lbl = _make_paths(tmp_path, "labels/val", ["p2"])
 
-    # Pass None for train_dtms, expect failure when use_dtms=True.
-    with pytest.raises(
-        ValueError, match="use_dtms=True but train_dtms is None"
-    ):
-        tu.sanity_check_fold_data(
-            fold=0,
-            use_dtms=True,
-            train_images=tr_img,
-            train_labels=tr_lbl,
-            val_images=va_img,
-            val_labels=va_lbl,
-            train_dtms=None
-        )
+    # Should not raise — DTM checks are skipped when train_dtms is None.
+    tu.sanity_check_fold_data(
+        fold=0,
+        train_images=tr_img,
+        train_labels=tr_lbl,
+        val_images=va_img,
+        val_labels=va_lbl,
+        train_dtms=None,
+    )
 
 
 def test_raises_on_dtm_count_mismatch(tmp_path):
@@ -258,7 +251,7 @@ def test_raises_on_dtm_count_mismatch(tmp_path):
     with pytest.raises(ValueError, match="train_dtms .* != train_images"):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=True,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -289,7 +282,7 @@ def test_raises_on_dtm_duplicates(tmp_path):
     with pytest.raises(ValueError, match="duplicate entries in DTMs"):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=True,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -310,7 +303,7 @@ def test_raises_on_dtm_stem_mismatch(tmp_path):
     with pytest.raises(ValueError, match="image/DTM stem mismatch"):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=True,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -337,7 +330,7 @@ def test_raises_on_val_image_label_count_mismatch(tmp_path):
     ):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=False,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -358,7 +351,7 @@ def test_raises_on_duplicate_train_labels(tmp_path):
     with pytest.raises(ValueError, match="duplicate entries in train_labels"):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=False,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -379,7 +372,7 @@ def test_raises_on_duplicate_val_images(tmp_path):
     with pytest.raises(ValueError, match="duplicate entries in val_images"):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=False,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -400,7 +393,7 @@ def test_raises_on_duplicate_val_labels(tmp_path: Path):
     with pytest.raises(ValueError, match="duplicate entries in val_labels"):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=False,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -427,7 +420,7 @@ def test_raises_on_label_overlap(tmp_path):
     with pytest.raises(ValueError, match=r"train/val overlap in labels"):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=False,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -454,7 +447,7 @@ def test_raises_on_validation_stem_mismatch(tmp_path):
     ):
         tu.sanity_check_fold_data(
             fold=0,
-            use_dtms=False,
+    
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,

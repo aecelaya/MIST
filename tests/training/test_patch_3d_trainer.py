@@ -336,6 +336,7 @@ def test_training_step_criterion_optimizer_and_scaler(
         "composite_loss_weighting": None,
         "epoch": 0,
         "global_step": 0,
+        "alpha": 0.5,
     }
 
     batch = {
@@ -431,7 +432,7 @@ def test_training_step_sequence_enforcement(
     state = {
         "model": model, "optimizer": opt, "scaler": scaler,
         "loss_function": fake_criterion, "composite_loss_weighting": None,
-        "epoch": 0
+        "epoch": 0, "alpha": 0.5,
     }
     batch = {"image": torch.randn(1, 4), "label": torch.randn(1, 4)}
 
