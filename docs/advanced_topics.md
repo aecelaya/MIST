@@ -670,6 +670,17 @@ The `--composite-loss-weighting` CLI flag accepts the schedule name and
 automatically writes the full default parameter set to `config.json`. Fine-tune
 the parameters afterward by editing `config.json` directly.
 
+!!! note "`init_pause` — holding the start value before decay begins"
+    For `linear` and `cosine` schedules, `init_pause` (default: `5`) sets the
+    number of epochs during which $\alpha$ is held at `start_val` before any
+    decay occurs. Decay then proceeds over the remaining epochs.
+
+    This is useful when the boundary or topology term needs a few epochs of
+    stable region-loss supervision before it starts receiving more weight. For
+    `cldice`, for example, keeping `start_val: 1.0` for 5 epochs ensures the
+    network learns a reasonable shape before the skeleton term becomes active.
+    Set `init_pause: 0` to begin decay immediately from epoch 0.
+
 ### Examples
 
 Run the full pipeline with the generalized surface loss and a constant alpha:
