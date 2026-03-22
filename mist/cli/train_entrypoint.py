@@ -130,6 +130,14 @@ def train_entry(argv: Optional[List[str]] = None) -> None:
     # Validate artifacts from analyze + preprocess
     results_dir, has_test_paths = _ensure_required_artifacts(ns)
 
+    # --resume and --overwrite are mutually exclusive.
+    if getattr(ns, "resume", False) and getattr(ns, "overwrite", False):
+        raise ValueError(
+            "--resume and --overwrite are mutually exclusive. "
+            "Use --resume to continue an interrupted run, or "
+            "--overwrite to start a fresh run."
+        )
+
     # Avoid accidental overwrite of an existing results.csv.
     results_csv = results_dir / "results.csv"
     if results_csv.exists() and not getattr(ns, "overwrite", False):

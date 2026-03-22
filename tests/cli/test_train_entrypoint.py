@@ -41,6 +41,7 @@ def _patch_minimal_cli(monkeypatch) -> None:
         parser.add_argument("--gpus", nargs="+", type=int, default=[-1])
         parser.add_argument("--num-workers-evaluate", type=int, default=1)
         parser.add_argument("--overwrite", action="store_true")
+        parser.add_argument("--resume", action="store_true")
 
     monkeypatch.setattr(entry.argmod, "ArgParser", _mk_parser, raising=True)
     monkeypatch.setattr(
@@ -266,6 +267,29 @@ def test_set_visible_devices_invalid_indices(monkeypatch):
 # =============================================================================
 # Tests for train_entry — integration behavior.
 # =============================================================================
+
+
+def test_train_entry_resume_and_overwrite_are_mutually_exclusive(
+    tmp_path, monkeypatch
+):
+    """It raises ValueError when both --resume and --overwrite are passed."""
+    _patch_minimal_cli(monkeypatch)
+
+    results_dir = tmp_path / "results"
+    numpy_dir = tmp_path / "numpy"
+    results_dir.mkdir()
+    numpy_dir.mkdir()
+    _write_required_files(results_dir, include_test=False)
+    _ensure_numpy_dirs(numpy_dir)
+
+    argv = [
+        "--results", str(results_dir),
+        "--numpy", str(numpy_dir),
+        "--resume",
+        "--overwrite",
+    ]
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        entry.train_entry(argv)
 
 
 def test_train_entry_blocks_existing_results_csv_without_overwrite(

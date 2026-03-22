@@ -146,6 +146,7 @@ def add_train_args(parser: ArgParser) -> None:
     g.add_argument("--l2-penalty", type=positive_float, help="L2 penalty (weight decay).")
     g.add_argument("--folds", nargs="+", type=int, help="Specify which folds to run.")
     g.add_argument("--val-percent", type=float_0_1, help="Percent of training set to use for validation (0.0-1.0).")
+    g.add_argument("--resume", action="store_true", default=False, help="Resume training from the latest checkpoint.")
 
     # Evaluation workers.
     g.add_argument(

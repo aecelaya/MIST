@@ -230,6 +230,8 @@ the choice of patch size determined by the analysis pipeline.
 - `--val-percent`: Specify a percentage of the training data to set aside as a
 validation set. If not specified, the we use the entire held out fold as a
 a validation set during training.
+- `--resume`: Resume training from the latest checkpoint. See
+  [Resuming training](#resuming-training) for details.
 
 ### Example
 
@@ -250,6 +252,42 @@ write the predictions to `./results/predictions/train/raw`, and then evaluate
 the results with the metrics specified in the `evaluation` entry of the
 configuration file. The computed metrics will be saved in
 `./results/results.csv`.
+
+### Resuming training
+
+If a training run is interrupted (e.g., due to a preempted job, out-of-memory
+error, or system crash), it can be resumed from the last completed epoch using
+the `--resume` flag.
+
+```console
+mist_train --numpy /path/to/preprocessed/data \
+           --results /path/to/results \
+           --resume
+```
+
+MIST saves a checkpoint at the end of every completed epoch to
+`results/checkpoints/fold_{fold}_checkpoint.pt`. The checkpoint stores the
+full training state: model weights, optimizer state, learning rate scheduler
+state, AMP scaler state, epoch index, global step, and best validation loss.
+
+On resume:
+
+- **Interrupted folds** are continued from the epoch after the last completed
+  one. All training state is restored exactly, including the learning rate
+  schedule.
+- **Completed folds** (where the saved epoch equals the final epoch) are
+  skipped automatically.
+- **Missing checkpoints** (e.g., a fold that never started) fall back to
+  training from scratch with a warning.
+
+!!! warning
+    `--resume` and `--overwrite` are mutually exclusive. Passing both will
+    raise an error.
+
+!!! note
+    Checkpoints are written atomically — a temporary file is written first
+    and then renamed into place, so a crash during the save itself will never
+    leave a corrupted checkpoint on disk.
 
 ## Inference
 

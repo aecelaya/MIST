@@ -48,6 +48,8 @@ class BaseTrainer(ABC):
         self.numpy_dir = Path(self.mist_args.numpy).expanduser().resolve()
         self.models_dir = self.results_dir / "models"
         self.logs_dir = self.results_dir / "logs"
+        self.checkpoints_dir = self.results_dir / "checkpoints"
+        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
         # Required files.
         paths_csv = self.results_dir / "train_paths.csv"
@@ -495,6 +497,83 @@ class BaseTrainer(ABC):
             "alpha": 0.5,
         }
 
+    def _checkpoint_path(self, fold: int) -> Path:
+        """Return the checkpoint path for a given fold."""
+        return self.checkpoints_dir / f"fold_{fold}_checkpoint.pt"
+
+    def save_checkpoint(self, fold: int, state: Dict[str, Any]) -> None:
+        """Save a training checkpoint for the given fold (rank 0 only).
+
+        Saves the current model weights, optimizer, LR scheduler, and scaler
+        states alongside training bookkeeping (epoch, global step, best
+        validation loss) so that training can be resumed exactly from this
+        point.
+
+        Args:
+            fold: The fold index being trained.
+            state: The current training state dictionary.
+        """
+        model = state["model"]
+        unwrapped = model.module if hasattr(model, "module") else model
+        scaler = state["scaler"]
+        checkpoint = {
+            "fold": fold,
+            "epoch": state["epoch"],
+            "global_step": state["global_step"],
+            "best_val_loss": state["best_val_loss"],
+            "model_state_dict": unwrapped.state_dict(),
+            "optimizer_state_dict": state["optimizer"].state_dict(),
+            "lr_scheduler_state_dict": state["lr_scheduler"].state_dict(),
+            "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
+        }
+        # Write to a temp file then atomically rename so a mid-write SIGKILL
+        # never leaves a corrupted checkpoint on disk.
+        path = self._checkpoint_path(fold)
+        tmp = path.with_suffix(".tmp")
+        torch.save(checkpoint, tmp)
+        tmp.rename(path)
+
+    def load_checkpoint(self, fold: int, state: Dict[str, Any]) -> bool:
+        """Load a training checkpoint into state (all ranks).
+
+        Restores model weights, optimizer, LR scheduler, and scaler states
+        from the latest checkpoint for the given fold. If no checkpoint exists,
+        returns False and leaves state unchanged.
+
+        Args:
+            fold: The fold index being trained.
+            state: The training state dictionary to restore into.
+
+        Returns:
+            True if a checkpoint was loaded, False if none was found.
+        """
+        path = self._checkpoint_path(fold)
+        if not path.exists():
+            return False
+
+        checkpoint = torch.load(path, weights_only=False)
+
+        # Restore model weights (unwrap DDP before loading).
+        model = state["model"]
+        unwrapped = model.module if hasattr(model, "module") else model
+        unwrapped.load_state_dict(checkpoint["model_state_dict"])
+
+        # Restore optimizer and scheduler states.
+        state["optimizer"].load_state_dict(checkpoint["optimizer_state_dict"])
+        state["lr_scheduler"].load_state_dict(checkpoint["lr_scheduler_state_dict"])
+
+        # Restore scaler state if AMP is enabled.
+        if state["scaler"] is not None and checkpoint["scaler_state_dict"] is not None:
+            state["scaler"].load_state_dict(checkpoint["scaler_state_dict"])
+
+        # Restore bookkeeping — epoch is incremented so the loop starts on the
+        # next unfinished epoch.
+        state["epoch"] = checkpoint["epoch"] + 1
+        state["global_step"] = checkpoint["global_step"]
+        state["best_val_loss"] = checkpoint["best_val_loss"]
+
+        return True
+
     def setup(self, rank: int, world_size: int) -> None:
         """Initialize the process group for distributed training."""
         if dist.is_initialized() or world_size == 1:
@@ -537,6 +616,21 @@ class BaseTrainer(ABC):
 
         # Build components for the fold.
         state = self.build_components(rank=rank, world_size=world_size)
+
+        # Resume from checkpoint if requested.
+        if getattr(self.mist_args, "resume", False):
+            loaded = self.load_checkpoint(fold, state)
+            if rank == 0:
+                if loaded:
+                    self.console.print(
+                        f"[bold]Resuming fold {fold} from epoch "
+                        f"{state['epoch']}[/bold]\n"
+                    )
+                else:
+                    self.console.print(
+                        f"[yellow]No checkpoint found for fold {fold}, "
+                        f"starting from scratch.[/yellow]\n"
+                    )
 
         # Build data loaders for the fold.
         train_loader, val_loader = self.build_dataloaders(
@@ -711,6 +805,10 @@ class BaseTrainer(ABC):
                 running_train_loss.reset_states()
                 running_val_loss.reset_states()
 
+            # Save checkpoint after every epoch (rank 0 only).
+            if rank == 0:
+                self.save_checkpoint(fold, state)
+
             # Wait for all processes to finish before starting the next epoch.
             if use_ddp:
                 dist.barrier()
@@ -729,6 +827,19 @@ class BaseTrainer(ABC):
             self.console.print("\n[bold]Starting training[/bold]\n")
 
         for fold in self.config["training"]["folds"]:
+            # Skip folds that are already complete when resuming.
+            if getattr(self.mist_args, "resume", False):
+                path = self._checkpoint_path(fold)
+                if path.exists():
+                    checkpoint = torch.load(path, weights_only=False)
+                    if checkpoint["epoch"] >= self.config["training"]["epochs"] - 1:
+                        if rank == 0:
+                            self.console.print(
+                                f"[bold]Fold {fold} already complete, "
+                                f"skipping.[/bold]\n"
+                            )
+                        continue
+
             # Train the model for the current fold.
             self.train_fold(fold=fold, rank=rank, world_size=world_size)
 

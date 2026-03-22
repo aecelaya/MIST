@@ -19,6 +19,11 @@ from mist.training.trainers import base_trainer as bt
 # Setup base trainer for tests.
 BaseTrainer = bt.BaseTrainer
 
+# Capture real implementations before any autouse fixtures patch them.
+_real_torch_save = torch.save
+_real_torch_load = torch.load
+_real_save_checkpoint = bt.BaseTrainer.save_checkpoint
+
 
 class DummyIter:
     """DALI-style loader with .next()[0] and .reset()."""
@@ -271,6 +276,7 @@ def mist_args(tmp_pipeline):
         learning_rate=None,
         lr_scheduler=None,
         val_percent=None,
+        resume=False,
     )
 
 
@@ -323,6 +329,14 @@ def patch_registries(monkeypatch):
             """Dummy step method that does nothing."""
             pass
 
+        def state_dict(self):
+            """Return empty state dict."""
+            return {}
+
+        def load_state_dict(self, state):
+            """Load state dict (no-op)."""
+            pass
+
     monkeypatch.setattr(
         bt, "get_lr_scheduler", lambda name, optimizer, epochs: DummyScheduler()
     )
@@ -338,6 +352,9 @@ def patch_ddp_and_tb_and_save(monkeypatch):
         bt.progress_bar, "ValidationProgressBar", DummyProgressCtx
     )
     monkeypatch.setattr(torch, "save", lambda *a, **k: None)
+    monkeypatch.setattr(
+        bt.BaseTrainer, "save_checkpoint", lambda *a, **k: None
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -948,6 +965,161 @@ def test_set_seed_swallows_dist_errors(tmp_pipeline, mist_args, monkeypatch):
 
     # Verify we proceeded past the except: env var was set.
     assert os.environ["PYTHONHASHSEED"] == "123"
+
+
+def test_save_and_load_checkpoint_roundtrip(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """save_checkpoint followed by load_checkpoint restores state exactly."""
+    # Use real torch.save/load for this test.
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+
+    # Mutate state to non-default values to verify restoration.
+    state["epoch"] = 3
+    state["global_step"] = 150
+    state["best_val_loss"] = 0.42
+
+    trainer.save_checkpoint(fold=0, state=state)
+    assert trainer._checkpoint_path(0).exists()
+    # Temp file must not linger after a successful save.
+    assert not trainer._checkpoint_path(0).with_suffix(".tmp").exists()
+
+    # Build a fresh state and load into it.
+    fresh_state = trainer.build_components(rank=0, world_size=1)
+    loaded = trainer.load_checkpoint(fold=0, state=fresh_state)
+
+    assert loaded is True
+    # Epoch is incremented by 1 so the training loop resumes on the next epoch.
+    assert fresh_state["epoch"] == 4
+    assert fresh_state["global_step"] == 150
+    assert fresh_state["best_val_loss"] == pytest.approx(0.42)
+
+
+def test_load_checkpoint_returns_false_when_missing(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """load_checkpoint returns False and leaves state unchanged when no file."""
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+    state["best_val_loss"] = 1.23
+
+    loaded = trainer.load_checkpoint(fold=0, state=state)
+
+    assert loaded is False
+    assert state["best_val_loss"] == pytest.approx(1.23)
+
+
+def test_train_fold_saves_checkpoint_each_epoch(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """train_fold should call save_checkpoint once per completed epoch."""
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    trainer = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=0.5)
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+
+    assert trainer._checkpoint_path(0).exists()
+    checkpoint = torch.load(trainer._checkpoint_path(0), weights_only=False)
+    total_epochs = trainer.config["training"]["epochs"]
+    # After one epoch (epoch index 0), saved epoch should be 0.
+    assert checkpoint["epoch"] == total_epochs - 1
+    assert checkpoint["fold"] == 0
+
+
+def test_resume_loads_checkpoint_and_prints_message(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """With --resume and an existing checkpoint, train_fold loads it and prints."""
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    # First run: train and save a checkpoint.
+    trainer = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=0.5)
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+    assert trainer._checkpoint_path(0).exists()
+
+    # Second run: resume=True.
+    mist_args.resume = True
+    mist_args.epochs = 3
+    results, _ = tmp_pipeline
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["epochs"] = 3
+    cfg_path.write_text(json.dumps(cfg))
+
+    trainer2 = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=0.5)
+    # Share the same checkpoints dir so the checkpoint is found.
+    trainer2.checkpoints_dir = trainer.checkpoints_dir
+
+    out = []
+    monkeypatch.setattr(trainer2.console, "print", lambda msg: out.append(str(msg)))
+    trainer2.train_fold(fold=0, rank=0, world_size=1)
+
+    assert any("Resuming fold 0" in s for s in out)
+
+
+def test_resume_warns_when_no_checkpoint(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """With --resume but no checkpoint, train_fold warns and starts fresh."""
+    mist_args.resume = True
+    trainer = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=0.5)
+
+    out = []
+    monkeypatch.setattr(trainer.console, "print", lambda msg: out.append(str(msg)))
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+
+    assert any("No checkpoint found" in s for s in out)
+
+
+def test_run_cross_validation_skips_completed_fold(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """With --resume, completed folds (epoch >= epochs-1) are skipped."""
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    results, _ = tmp_pipeline
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["folds"] = [0, 1]
+    cfg_path.write_text(json.dumps(cfg))
+
+    # First run: train fold 0 to completion and save checkpoint.
+    trainer = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=0.5)
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+
+    # Second run: resume=True, both folds requested.
+    mist_args.resume = True
+    trainer2 = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=0.5)
+    trainer2.checkpoints_dir = trainer.checkpoints_dir
+
+    out = []
+    monkeypatch.setattr(trainer2.console, "print", lambda msg: out.append(str(msg)))
+
+    called_folds = []
+    original_train_fold = trainer2.train_fold
+
+    def spy_train_fold(fold, rank, world_size):
+        called_folds.append(fold)
+        original_train_fold(fold=fold, rank=rank, world_size=world_size)
+
+    monkeypatch.setattr(trainer2, "train_fold", spy_train_fold)
+    trainer2.run_cross_validation(rank=0, world_size=1)
+
+    # Fold 0 was completed so it should be skipped; fold 1 should run.
+    assert 0 not in called_folds
+    assert 1 in called_folds
+    assert any("already complete" in s for s in out)
 
 
 def test_validation_rank0_ddp_allreduce_and_mean(

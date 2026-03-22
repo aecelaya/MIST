@@ -318,6 +318,7 @@ def test_add_train_args_defaults_and_basic_parse(patched_registries):
     assert ns.l2_penalty is None
     assert ns.folds is None
     assert ns.overwrite is False
+    assert ns.resume is False
 
 
 def test_add_train_args_full_parse_success(patched_registries):
@@ -341,6 +342,7 @@ def test_add_train_args_full_parse_success(patched_registries):
         "--l2-penalty", "0.0005",
         "--folds", "0", "2", "4",
         "--overwrite",
+        "--resume",
     ]
     ns = parser.parse_args(argv)
 
@@ -359,6 +361,7 @@ def test_add_train_args_full_parse_success(patched_registries):
     assert ns.l2_penalty == pytest.approx(0.0005)
     assert ns.folds == [0, 2, 4]
     assert ns.overwrite is True
+    assert ns.resume is True
 
 
 def test_add_train_args_enforces_choices(patched_registries):
