@@ -977,7 +977,7 @@ def test_preprocess_example_full_flow_no_skip_with_crop_and_dtm(monkeypatch):
 
 
 def test_preprocess_example_skip_true_no_resample_no_normalize(monkeypatch):
-    """Skip path avoids resampling and normalization."""
+    """skip=True is a pure pass-through: no reorient, resample, or normalize."""
     cfg = {
         "dataset_info": {"labels": [0, 1], "modality": "mri"},
         "spatial_config": {
@@ -1003,14 +1003,16 @@ def test_preprocess_example_skip_true_no_resample_no_normalize(monkeypatch):
         pp.ants, "image_read", lambda _p: next(seq), raising=True
     )
     monkeypatch.setattr(
-        pp.ants, "reorient_image2", lambda im, _ori: im, raising=True
+        pp.ants,
+        "reorient_image2",
+        lambda *_a, **_k: pytest.fail("reorient_image2 must not be called when skip=True."),
+        raising=True,
     )
-    monkeypatch.setattr(pp.pc, "RAI_ANTS_DIRECTION", (1.0,) * 9, raising=True)
     monkeypatch.setattr(
-        pp, "resample_image", lambda *_a, **_k: pytest.fail("Unexpected.")
+        pp, "resample_image", lambda *_a, **_k: pytest.fail("resample_image must not be called when skip=True.")
     )
     monkeypatch.setattr(
-        pp, "window_and_normalize", lambda *_a, **_k: pytest.fail("Unexpected.")
+        pp, "window_and_normalize", lambda *_a, **_k: pytest.fail("window_and_normalize must not be called when skip=True.")
     )
 
     out = pp.preprocess_example(
@@ -1019,10 +1021,11 @@ def test_preprocess_example_skip_true_no_resample_no_normalize(monkeypatch):
     assert out["image"].shape == (2, 2, 2, 1)
     assert out["mask"].shape == (2, 2, 2, 1)
     assert out["dtm"] is None
+    assert out["fg_bbox"] is None
 
 
 def test_preprocess_example_crop_requires_bbox_error(monkeypatch):
-    """Cropping without bbox raises ValueError."""
+    """skip=False + crop=True + get_fg_mask_bbox returns None raises ValueError."""
     cfg = {
         "dataset_info": {"labels": [0, 1], "modality": "ct"},
         "spatial_config": {
@@ -1030,7 +1033,7 @@ def test_preprocess_example_crop_requires_bbox_error(monkeypatch):
             "patch_size": [64, 64, 64],
         },
         "preprocessing": {
-            "skip": True,
+            "skip": False,
             "crop_to_foreground": True,
             "compute_dtms": False,
             "normalize_dtms": False,
@@ -1053,17 +1056,63 @@ def test_preprocess_example_crop_requires_bbox_error(monkeypatch):
         lambda _im: None,
         raising=True,
     )
-    monkeypatch.setattr(
-        pp.ants, "reorient_image2", lambda im, _ori: im, raising=True
-    )
-    monkeypatch.setattr(
-        pp.pc, "RAI_ANTS_DIRECTION", (1.0,) * 9, raising=True
-    )
 
     with pytest.raises(ValueError, match="Foreground bounding box is required"):
         pp.preprocess_example(
             cfg, image_paths_list=["img.nii.gz"], mask_path=None, fg_bbox=None
         )
+
+
+def test_preprocess_example_skip_true_crop_flag_ignored(monkeypatch):
+    """skip=True ignores crop_to_foreground: no crop, no reorient, fg_bbox=None."""
+    cfg = {
+        "dataset_info": {"labels": [0, 1], "modality": "ct"},
+        "spatial_config": {
+            "target_spacing": (1.0, 1.0, 1.0),
+            "patch_size": [64, 64, 64],
+        },
+        "preprocessing": {
+            "skip": True,
+            "crop_to_foreground": True,
+            "compute_dtms": False,
+            "normalize_dtms": False,
+            "normalize_with_nonzero_mask": False,
+            "ct_normalization": {
+                "window_min": -100,
+                "window_max": 100,
+                "z_score_mean": 0.0,
+                "z_score_std": 1.0,
+            },
+        },
+    }
+
+    monkeypatch.setattr(
+        pp.ants, "image_read", lambda _p: _DummyAntsImage(), raising=True
+    )
+    monkeypatch.setattr(
+        pp.ants,
+        "reorient_image2",
+        lambda *_a, **_k: pytest.fail("reorient_image2 must not be called when skip=True."),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        pp.preprocessing_utils,
+        "get_fg_mask_bbox",
+        lambda *_a, **_k: pytest.fail("get_fg_mask_bbox must not be called when skip=True."),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        pp.preprocessing_utils,
+        "crop_to_fg",
+        lambda *_a, **_k: pytest.fail("crop_to_fg must not be called when skip=True."),
+        raising=True,
+    )
+
+    out = pp.preprocess_example(
+        cfg, image_paths_list=["img.nii.gz"], mask_path=None, fg_bbox=None
+    )
+    assert out["fg_bbox"] is None
+    assert out["image"].shape == (2, 2, 2, 1)
 
 
 def test_preprocess_example_inference_mode_sets_mask_and_dtm_none(monkeypatch):
@@ -1075,7 +1124,10 @@ def test_preprocess_example_inference_mode_sets_mask_and_dtm_none(monkeypatch):
         raising=True,
     )
     monkeypatch.setattr(
-        pp.ants, "reorient_image2", lambda img, _orient: img, raising=True
+        pp.ants,
+        "reorient_image2",
+        lambda *_a, **_k: pytest.fail("reorient_image2 must not be called when skip=True."),
+        raising=True,
     )
 
     def _no_compute_dtm(*_a, **_k):

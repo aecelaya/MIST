@@ -11,12 +11,20 @@ from mist.inference.ensemblers.ensembler_registry import register_ensembler
 class MeanEnsembler(AbstractEnsembler):
     """Simple averaging ensembler over softmax outputs."""
     def combine(self, predictions: List[torch.Tensor]) -> torch.Tensor:
-        """Overrides the combine method to average predictions."""
+        """Average a list of predictions element-wise.
+
+        Args:
+            predictions: List of soft prediction tensors, each of shape
+                (1, C, D, H, W).
+
+        Returns:
+            Element-wise mean tensor of shape (1, C, D, H, W).
+        """
         if not predictions:
             raise ValueError("MeanEnsembler requires at least one prediction.")
 
-        stacked = torch.stack(predictions, dim=0)     # Shape: (N, C, D, H, W)
-        mean_prediction = torch.mean(stacked, dim=0)  # Shape: (C, D, H, W)
+        stacked = torch.stack(predictions, dim=0)     # Shape: (N, 1, C, D, H, W)
+        mean_prediction = torch.mean(stacked, dim=0)  # Shape: (1, C, D, H, W)
         return mean_prediction
 
     def __repr__(self):

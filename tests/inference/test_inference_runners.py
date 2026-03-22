@@ -308,6 +308,48 @@ def test_predict_single_example_with_crop_and_remap(
     assert out.astype_arg == "uint8"
 
 
+@patch("mist.inference.inference_utils.back_to_original_space")
+def test_predict_single_example_skip_true_bypasses_spatial_restore(
+    mock_back_to_original_space,
+    mock_mist_config,
+    monkeypatch,
+):
+    """When skip=True, back_to_original_space is NOT called.
+
+    skip=True means images were read as-is with no spatial transforms.
+    The prediction is already in the original image's voxel space, so we
+    copy the original header directly via new_image_like — no reorient,
+    no resample, no back_to_original_space.
+    """
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["model"]["params"]["out_channels"] = 2
+    cfg["preprocessing"]["skip"] = True
+    cfg["preprocessing"]["crop_to_foreground"] = False
+    cfg["dataset_info"]["labels"] = [0, 1]
+
+    monkeypatch.setattr(
+        ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False
+    )
+
+    pre_img = torch.randn(1, 1, 2, 2, 2)
+    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+
+    out = ir.predict_single_example(
+        preprocessed_image=pre_img,
+        original_ants_image=orig_ants,
+        mist_configuration=cfg,
+        predictor=_predictor_logits_two_class,
+        foreground_bounding_box=None,
+    )
+
+    # back_to_original_space must NOT be called when skip=True.
+    mock_back_to_original_space.assert_not_called()
+
+    # new_image_like must have been called to copy the original header.
+    assert orig_ants.new_like_last_data is not None
+    assert out.astype_arg == "uint8"
+
+
 # ==================
 # test_on_fold tests
 # ==================

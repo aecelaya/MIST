@@ -5,9 +5,10 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Type, TypeVar, Callable
 import torch
 
-# Type-safe registry for transform classes
+# Registry for transform classes. Stores classes; instances are created on
+# demand by get_transform() to avoid shared mutable state.
 T = TypeVar("T", bound="AbstractTransform")
-TTA_TRANSFORM_REGISTRY: Dict[str, AbstractTransform] = {}
+TTA_TRANSFORM_REGISTRY: Dict[str, Type["AbstractTransform"]] = {}
 
 
 def register_transform(name: str) -> Callable[[Type[T]], Type[T]]:
@@ -17,7 +18,7 @@ def register_transform(name: str) -> Callable[[Type[T]], Type[T]]:
             raise TypeError(f"{cls.__name__} must subclass AbstractTransform.")
         if name in TTA_TRANSFORM_REGISTRY:
             raise KeyError(f"Transform '{name}' is already registered.")
-        TTA_TRANSFORM_REGISTRY[name] = cls() # Register the instantiated class.
+        TTA_TRANSFORM_REGISTRY[name] = cls  # Register the class, not an instance.
         return cls
     return decorator
 
@@ -27,14 +28,14 @@ def list_transforms() -> List[str]:
     return list(TTA_TRANSFORM_REGISTRY.keys())
 
 
-def get_transform(name: str) -> AbstractTransform:
-    """Retrieve an instantiated TTA transform by name."""
+def get_transform(name: str) -> "AbstractTransform":
+    """Retrieve a fresh instance of a registered TTA transform by name."""
     if name not in TTA_TRANSFORM_REGISTRY:
         raise KeyError(
             f"TTA transform '{name}' is not registered. "
             f"Available: [{', '.join(list_transforms())}]."
         )
-    return TTA_TRANSFORM_REGISTRY[name]
+    return TTA_TRANSFORM_REGISTRY[name]()
 
 
 class AbstractTransform(ABC):

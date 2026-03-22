@@ -331,11 +331,10 @@ def preprocess_example(
     """Preprocessing function for a single example.
 
     If config['preprocessing']['skip'] is True:
-      - Reorient images/mask to RAI
-      - (Optionally) crop to foreground (for efficiency)
-      - NO resampling
-      - NO windowing/normalization
-      - (Optionally) compute DTMs if requested
+      - Images (and mask) are read as-is and converted directly to numpy.
+      - NO reorientation, NO cropping, NO resampling, NO normalization.
+      - fg_bbox in the returned dict is always None.
+      - (Optionally) compute DTMs if requested and in training mode.
 
     Else:
       - Reorient to RAI
@@ -352,14 +351,15 @@ def preprocess_example(
         config: Dictionary with information from config.json.
         image_paths_list: List containing paths to images for the example.
         mask_path: Path to segmentation mask. Pass None for inference.
-        fg_bbox: Information about the bounding box for the foreground.
+        fg_bbox: Foreground bounding box. Used only when skip=False and
+            crop_to_foreground=True. Ignored when skip=True.
     Returns:
         preprocessed_output: Dictionary containing the following keys:
             image: Preprocessed image(s) as a numpy array.
             mask: Segmentation mask as one-hot encoded numpy array, or None
                 in inference mode.
-            fg_bbox: Foreground bounding box is None is given as the fg_bbox
-                input and the config file calls for its use.
+            fg_bbox: Foreground bounding box, or None if skip=True or no
+                cropping was performed.
             dtm: DTM(s) as a numpy array, or None in inference mode.
     """
     # Set the training flag based on the presence of a mask.
@@ -373,47 +373,48 @@ def preprocess_example(
     normalize_dtms = config["preprocessing"]["normalize_dtms"]
     labels = config["dataset_info"]["labels"]
 
-    # Read all images (and mask if training).
+    # Read all images.
     images = []
     for i, image_path in enumerate(image_paths_list):
         # Load image as ants image.
         image_i = ants.image_read(image_path)
 
-        # Get foreground mask if necessary.
-        if i == 0 and crop and fg_bbox is None:
-            fg_bbox = preprocessing_utils.get_fg_mask_bbox(image_i)
+        if not skip:
+            # Get foreground mask if necessary.
+            if i == 0 and crop and fg_bbox is None:
+                fg_bbox = preprocessing_utils.get_fg_mask_bbox(image_i)
 
-        # If cropping is requested, but the foreground bounding box is not
-        # provided, raise an error. Otherwise, crop the image to the
-        # foreground bounding box.
-        if crop:
-            if fg_bbox is None:
-                raise ValueError(
-                    "Foreground bounding box is required for cropping, but "
-                    "none was provided."
-                )
-            image_i = preprocessing_utils.crop_to_fg(image_i, fg_bbox)
+            # If cropping is requested, but the foreground bounding box is not
+            # provided, raise an error. Otherwise, crop the image to the
+            # foreground bounding box.
+            if crop:
+                if fg_bbox is None:
+                    raise ValueError(
+                        "Foreground bounding box is required for cropping, but "
+                        "none was provided."
+                    )
+                image_i = preprocessing_utils.crop_to_fg(image_i, fg_bbox)
 
-        # Put all images into standard space.
-        image_i = ants.reorient_image2(image_i, "RAI")
-        image_i.set_direction(pc.RAI_ANTS_DIRECTION)
-        if not skip and not np.allclose(image_i.spacing, target_spacing):
-            image_i = resample_image(image_i, target_spacing=target_spacing)
+            # Put image into standard space.
+            image_i = ants.reorient_image2(image_i, "RAI")
+            image_i.set_direction(pc.RAI_ANTS_DIRECTION)
+            if not np.allclose(image_i.spacing, target_spacing):
+                image_i = resample_image(image_i, target_spacing=target_spacing)
+
         images.append(image_i)
 
     if training:
         # Read mask if we are in training mode.
         mask = ants.image_read(mask_path)
 
-        # Crop to foreground. We don't need to check if fg_bbox is None
-        # because we already checked it above.
-        if crop:
-            mask = preprocessing_utils.crop_to_fg(mask, fg_bbox)
-
-        # Put mask into standard space.
-        mask = ants.reorient_image2(mask, "RAI")
-        mask.set_direction(pc.RAI_ANTS_DIRECTION)
         if not skip:
+            # Crop to foreground.
+            if crop:
+                mask = preprocessing_utils.crop_to_fg(mask, fg_bbox)
+
+            # Put mask into standard space.
+            mask = ants.reorient_image2(mask, "RAI")
+            mask.set_direction(pc.RAI_ANTS_DIRECTION)
             mask = resample_mask(
                 mask, labels=labels, target_spacing=target_spacing
             )
@@ -431,23 +432,22 @@ def preprocess_example(
         mask = None
         dtm = None
 
-    # Get dimensions of image in standard space.
+    # Build the image array from all channels.
     image = np.zeros((*images[0].shape, len(images)), dtype=np.float32)
     for i, image_i in enumerate(images):
         if not skip:
             # Apply windowing and normalization if not skipping preprocessing.
             image[..., i] = window_and_normalize(image_i.numpy(), config)
         else:
-            # Otherwise, just convert to numpy.
+            # skip=True: pure pass-through, just convert to numpy.
             image[..., i] = image_i.numpy()
 
     # Cast image to float32 for consistency.
-    # This is important for training models that expect float32 inputs.
     image = image.astype(np.float32)
     return {
         "image": image,
         "mask": mask,
-        "fg_bbox": fg_bbox,
+        "fg_bbox": fg_bbox if not skip else None,
         "dtm": dtm,
     }
 

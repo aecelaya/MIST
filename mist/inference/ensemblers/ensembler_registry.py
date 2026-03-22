@@ -4,9 +4,10 @@ from typing import Dict, Type, List, TypeVar, Callable
 # MIST imports.
 from mist.inference.ensemblers.base import AbstractEnsembler
 
-# Global registry for ensemblers.
+# Global registry for ensemblers. Stores classes; instances are created on
+# demand by get_ensembler() to avoid shared mutable state.
 T = TypeVar("T", bound=AbstractEnsembler)
-ENSEMBLER_REGISTRY: Dict[str, AbstractEnsembler] = {}
+ENSEMBLER_REGISTRY: Dict[str, Type[AbstractEnsembler]] = {}
 
 
 def register_ensembler(name: str) -> Callable[[Type[T]], Type[T]]:
@@ -18,7 +19,7 @@ def register_ensembler(name: str) -> Callable[[Type[T]], Type[T]]:
             )
         if name in ENSEMBLER_REGISTRY:
             raise KeyError(f"Ensembler '{name}' is already registered.")
-        ENSEMBLER_REGISTRY[name] = cls()  # Register an instance of the class.
+        ENSEMBLER_REGISTRY[name] = cls  # Register the class, not an instance.
         return cls
     return decorator
 
@@ -29,10 +30,10 @@ def list_ensemblers() -> List[str]:
 
 
 def get_ensembler(name: str) -> AbstractEnsembler:
-    """Retrieve a registered ensembler class by name."""
+    """Retrieve a fresh instance of a registered ensembler by name."""
     if name not in ENSEMBLER_REGISTRY:
         raise KeyError(
             f"Ensembler '{name}' is not registered. "
             f"Available: [{', '.join(list_ensemblers())}]"
         )
-    return ENSEMBLER_REGISTRY[name]
+    return ENSEMBLER_REGISTRY[name]()

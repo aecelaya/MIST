@@ -6,6 +6,7 @@ import torch
 from mist.inference.inferers.base import AbstractInferer
 from mist.inference.ensemblers.base import AbstractEnsembler
 from mist.inference.tta.transforms import AbstractTransform
+from mist.inference.inference_utils import get_default_device
 
 
 class Predictor:
@@ -33,9 +34,7 @@ class Predictor:
         self.inferer = inferer
         self.ensembler = ensembler
         self.tta_transforms = tta_transforms
-        self.device = device or (
-            torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        )
+        self.device = device or get_default_device()
 
     def __call__(self, image: torch.Tensor) -> torch.Tensor:
         """Call the predictor like a function."""

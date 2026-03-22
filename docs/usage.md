@@ -169,10 +169,11 @@ into NumPy format.
 - `--overwrite`: Overwrite previous preprocessing output.
 
 !!!note
-  The `--no-preprocess` flag does not completely turn off all of the
-  preprocessing steps. With this flag, the preprocessing pipeline will still
-  reorient the images to RAI, crop to the foreground (if called for by the
-  analysis pipeline), and compute DTMs (if called for by the user).
+  The `--no-preprocess` flag is a true pass-through: images are read as-is and
+  converted directly to NumPy arrays with no spatial transforms applied
+  (no reorientation, no cropping, no resampling, no normalization). Use this
+  flag when your images are already fully preprocessed externally and stored
+  as NIfTI files. DTMs are still computed if `--compute-dtms` is passed.
 
 ### Example
 

@@ -61,30 +61,40 @@ def predict_single_example(
     prediction = prediction.squeeze(dim=ic.BATCH_AXIS)
     prediction = prediction.to(torch.float32).cpu().numpy()
 
-    # Ensure bounding box is defined if cropping was used.
-    if (
-        mist_configuration["preprocessing"]["crop_to_foreground"]
-        and foreground_bounding_box is None
-    ):
-        foreground_bounding_box = preprocessing_utils.get_fg_mask_bbox(
-            original_ants_image
+    if mist_configuration["preprocessing"]["skip"]:
+        # skip=True: images were read as-is with no spatial transforms applied.
+        # The prediction is already in the original image's voxel space, so
+        # just copy the original header directly — no reorient or resample.
+        prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # ANTs stubs don't annotate new_image_like's return type.
+    else:
+        # Ensure bounding box is defined if cropping was used.
+        if (
+            mist_configuration["preprocessing"]["crop_to_foreground"]
+            and foreground_bounding_box is None
+        ):
+            foreground_bounding_box = preprocessing_utils.get_fg_mask_bbox(
+                original_ants_image
+            )
+
+        prediction_spacing = tuple(
+            mist_configuration["spatial_config"]["target_spacing"]
         )
 
-    # Restore original spacing, orientation, and header.
-    prediction = inference_utils.back_to_original_space(
-        raw_prediction=prediction,
-        original_ants_image=original_ants_image,
-        target_spacing=mist_configuration["spatial_config"]["target_spacing"],
-        training_labels=training_labels,
-        foreground_bounding_box=foreground_bounding_box,
-    )
+        # Restore original spacing, orientation, and header.
+        prediction = inference_utils.back_to_original_space(
+            raw_prediction=prediction,
+            original_ants_image=original_ants_image,
+            target_spacing=prediction_spacing,
+            training_labels=training_labels,
+            foreground_bounding_box=foreground_bounding_box,
+        )
 
     # Remap labels to match original dataset.
     if training_labels != original_labels:
         prediction = inference_utils.remap_mask_labels(
             prediction.numpy(), original_labels
         )
-        prediction = original_ants_image.new_image_like(data=prediction) # type: ignore
+        prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # ANTs stubs don't annotate new_image_like's return type.
     return prediction.astype("uint8")
 
 
@@ -112,7 +122,7 @@ def test_on_fold(
         RuntimeError or ValueError: If prediction fails during execution.
     """
     # Set device to CPU or GPU.
-    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    device = device or inference_utils.get_default_device()
 
     # Extract the results directory from the MIST arguments.
     results_dir = os.path.join(mist_args.results)
@@ -288,7 +298,7 @@ def infer_from_dataframe(
         RuntimeError or ValueError: If inference or postprocessing fails.
     """
     # Set device to CPU or GPU.
-    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    device = device or inference_utils.get_default_device()
 
     # Load models from the specified directory.
     models_list = inference_utils.load_test_time_models(
@@ -369,8 +379,8 @@ def infer_from_dataframe(
 
                 # Convert the preprocessed image to a PyTorch tensor and move it
                 # to the device.
-                preprocessed_image = np.transpose( # type: ignore
-                    preprocessed_example["image"], # type: ignore
+                preprocessed_image = np.transpose(
+                    preprocessed_example["image"],  # type: ignore[index]  # preprocess_example returns Dict[str, Any]; value type is not narrowed.
                     axes=ic.NUMPY_TO_TORCH_TRANSPOSE_AXES
                 )
                 preprocessed_image = np.expand_dims(
@@ -387,7 +397,7 @@ def infer_from_dataframe(
                     original_ants_image=anchor_image,
                     mist_configuration=mist_configuration,
                     predictor=predictor,
-                    foreground_bounding_box=preprocessed_example["fg_bbox"], # type: ignore
+                    foreground_bounding_box=preprocessed_example["fg_bbox"],  # type: ignore[index]  # preprocess_example returns Dict[str, Any]; value type is not narrowed.
                 )
 
                 # Apply postprocessing if a strategy is provided.
@@ -417,7 +427,7 @@ def infer_from_dataframe(
     # warning messages, print them. Otherwise, print a success message.
     if error_messages:
         console.print(
-            rich.text.Text( # type: ignore
+            rich.text.Text(  # type: ignore[attr-defined]  # Rich's Text is valid but not fully covered by stubs in all versions.
                 "Inference completed with the following messages:",
                 style="bold underline"
             )

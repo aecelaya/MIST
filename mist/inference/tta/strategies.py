@@ -12,9 +12,10 @@ from typing import List, Dict, Type, Any, TypeVar, Callable
 # MIST imports.
 from mist.inference.tta.transforms import AbstractTransform, get_transform
 
-# Strategy registry now holds classes, not instances
+# Registry for strategy classes. Stores classes; instances are created on
+# demand by get_strategy() to avoid shared mutable state.
 T = TypeVar("T", bound="TTAStrategy")
-TTA_STRATEGY_REGISTRY: Dict[str, TTAStrategy] = {}
+TTA_STRATEGY_REGISTRY: Dict[str, Type["TTAStrategy"]] = {}
 
 
 def register_strategy(name: str) -> Callable[[Type[T]], Type[T]]:
@@ -24,7 +25,7 @@ def register_strategy(name: str) -> Callable[[Type[T]], Type[T]]:
             raise TypeError(f"{cls.__name__} must inherit from TTAStrategy.")
         if name in TTA_STRATEGY_REGISTRY:
             raise KeyError(f"Strategy '{name}' is already registered.")
-        TTA_STRATEGY_REGISTRY[name] = cls() # Register an instance of the class.
+        TTA_STRATEGY_REGISTRY[name] = cls  # Register the class, not an instance.
         return cls
     return decorator
 
@@ -34,14 +35,14 @@ def list_strategies() -> List[str]:
     return list(TTA_STRATEGY_REGISTRY.keys())
 
 
-def get_strategy(name: str) -> TTAStrategy:
-    """Retrieve a registered TTA strategy."""
+def get_strategy(name: str) -> "TTAStrategy":
+    """Retrieve a fresh instance of a registered TTA strategy by name."""
     if name not in TTA_STRATEGY_REGISTRY:
         raise KeyError(
             f"TTA strategy '{name}' is not registered. "
             f"Available: [{', '.join(list_strategies())}]."
         )
-    return TTA_STRATEGY_REGISTRY[name]
+    return TTA_STRATEGY_REGISTRY[name]()
 
 
 class TTAStrategy(ABC):

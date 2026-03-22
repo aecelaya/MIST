@@ -17,6 +17,11 @@ from mist.inference.inference_constants import InferenceConstants as ic
 from mist.models import model_loader
 
 
+def get_default_device() -> str:
+    """Return the default inference device (CUDA if available, else CPU)."""
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def decrop_from_fg(
     ants_image: ants.core.ants_image.ANTsImage,
     fg_bbox: Dict[str, int],
@@ -30,6 +35,10 @@ def decrop_from_fg(
     Returns:
         Decropped ANTs image object.
     """
+    # The bounding box indices are inclusive, so the right padding along each
+    # axis is: og_size - end - 1. Equivalently: (og_size - end) - 1. The -1
+    # accounts for the fact that `x_end` is the last included voxel index,
+    # not a one-past-the-end pointer.
     padding = [
         (
             np.max([0, fg_bbox["x_start"]]),
@@ -127,7 +136,7 @@ def back_to_original_space(
     # Copy header from original image onto the prediction so they match. This
     # will take care of other details in the header like the origin and the
     # image bounding box.
-    prediction = original_ants_image.new_image_like(prediction.numpy()) # type: ignore
+    prediction = original_ants_image.new_image_like(prediction.numpy())  # type: ignore[no-any-return]  # ANTs stubs don't annotate new_image_like's return type.
     return prediction
 
 
@@ -159,7 +168,7 @@ def load_test_time_models(
         ValueError: If no model checkpoint files are found.
     """
     # Set the device if not provided.
-    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    device = device or get_default_device()
 
     # Ensure the models directory and config file exist.
     models_path = Path(models_dir)
