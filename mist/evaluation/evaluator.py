@@ -12,7 +12,7 @@ from mist.analyze_data import analyzer_utils
 from mist.evaluation import evaluation_utils
 from mist.metrics.metrics_registry import get_metric
 from mist.utils import progress_bar
-from mist.utils.console import print_warning, print_success
+from mist.utils.console import print_warning, print_success, print_error
 
 
 class Evaluator:
@@ -430,6 +430,12 @@ class Evaluator:
 
         # Save to disk.
         self.results_dataframe.to_csv(self.output_csv_path, index=False)
-        print_success(
-            f"Evaluation complete. Results saved to {self.output_csv_path}"
-        )
+        if self.results_dataframe.empty:
+            print_error(
+                "Evaluation produced no results. All patients failed. "
+                f"Empty CSV saved to {self.output_csv_path}"
+            )
+        else:
+            print_success(
+                f"Evaluation complete. Results saved to {self.output_csv_path}"
+            )

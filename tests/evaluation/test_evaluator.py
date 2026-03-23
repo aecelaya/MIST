@@ -682,6 +682,9 @@ class TestEvaluatorRun:
         evaluator.run()
         assert Path(evaluator.output_csv_path).exists()
         assert any("CRITICAL FAILURE" in m for m in printed)
+        # When all patients fail, an error is printed instead of a success msg.
+        assert any("All patients failed" in m for m in printed)
+        assert not any("\u2713" in m for m in printed)
 
     def test_multiple_patients_all_results_in_csv(
         self, tmp_path, monkeypatch, _patch_run_env

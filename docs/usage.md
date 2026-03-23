@@ -391,6 +391,9 @@ predictions to postprocess.
 sequence of postprocessing steps to apply.
 - `--num-workers-postprocess` *(optional)*: Number of parallel workers for
 postprocessing. Defaults to `1`.
+- `--num-workers-evaluate` *(optional)*: Number of parallel workers for
+evaluating postprocessed predictions. Only used when `--paths-csv` and
+`--eval-config` are provided. Defaults to `1`.
 - `--paths-csv` *(optional)*: CSV with `id` and `mask` columns containing
 patient IDs and paths to ground truth masks. When provided alongside
 `--eval-config`, evaluation is automatically run on the postprocessed

@@ -45,14 +45,16 @@ def validate_mask(
 
         mask_np = ants.image_read(str(mask_path)).numpy()
 
-        # Check dtype is integer or boolean — floats suggest a probability map.
+        # Reject only if the mask contains fractional values, which indicates a
+        # probability map rather than a label mask. Integer-valued floats
+        # (e.g., float32 masks from BraTS or FSL) are accepted.
         if not (
             np.issubdtype(mask_np.dtype, np.integer)
             or np.issubdtype(mask_np.dtype, np.bool_)
-        ):
+        ) and not np.all(mask_np == np.floor(mask_np)):
             return (
-                f"{mask_type} has dtype '{mask_np.dtype}'. Expected an "
-                "integer or boolean dtype."
+                f"{mask_type} has dtype '{mask_np.dtype}' with non-integer "
+                "values. Expected a label mask, not a probability map."
             )
 
         # Collect all valid labels from the evaluation config (background

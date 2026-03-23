@@ -45,6 +45,14 @@ def _parse_postprocess_args(
         "--num-workers-postprocess", type=positive_int, default=1,
         help="Number of parallel workers for postprocessing.",
     )
+    p.arg(
+        "--num-workers-evaluate", type=positive_int, default=1,
+        help=(
+            "Number of parallel workers for evaluating postprocessed "
+            "predictions. Only used when --paths-csv and --eval-config are "
+            "provided."
+        ),
+    )
 
     # Optional evaluation arguments.
     p.arg(
@@ -139,6 +147,7 @@ def _run_evaluation_after_postprocess(
     ns: argparse.Namespace,
     output_dir: Path,
     predictions_dir: Path,
+    num_workers: int = 1,
 ) -> None:
     """Run evaluation on the postprocessed predictions.
 
@@ -167,7 +176,7 @@ def _run_evaluation_after_postprocess(
         evaluation_config=eval_config,
         output_csv_path=output_dir / "postprocess_results.csv",
     )
-    evaluator.run()
+    evaluator.run(max_workers=num_workers)
 
 
 def run_postprocess(ns: argparse.Namespace) -> None:
@@ -185,7 +194,10 @@ def run_postprocess(ns: argparse.Namespace) -> None:
     )
 
     if ns.paths_csv is not None:
-        _run_evaluation_after_postprocess(ns, output_dir, predictions_dir)
+        _run_evaluation_after_postprocess(
+            ns, output_dir, predictions_dir,
+            num_workers=ns.num_workers_evaluate,
+        )
 
 
 def postprocess_entry(argv: Optional[List[str]] = None) -> None:

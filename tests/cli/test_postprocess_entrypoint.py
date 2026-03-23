@@ -27,6 +27,18 @@ def test_parse_postprocess_args_ok(tmp_path):
     assert ns.postprocess_strategy == str(strat)
     assert ns.paths_csv is None
     assert ns.eval_config is None
+    assert ns.num_workers_evaluate == 1
+
+
+def test_parse_postprocess_args_num_workers_evaluate(tmp_path):
+    """--num-workers-evaluate is parsed correctly."""
+    ns = entry._parse_postprocess_args([
+        "--base-predictions", str(tmp_path / "preds"),
+        "--output", str(tmp_path / "out"),
+        "--postprocess-strategy", str(tmp_path / "post.json"),
+        "--num-workers-evaluate", "4",
+    ])
+    assert ns.num_workers_evaluate == 4
 
 
 def test_parse_postprocess_args_with_eval_args(tmp_path):
@@ -262,14 +274,18 @@ def test_run_evaluation_after_postprocess_invokes_evaluator(tmp_path, monkeypatc
             captured["config"] = evaluation_config
             captured["csv"] = output_csv_path
 
-        def run(self):
+        def run(self, max_workers=1):
             captured["ran"] = True
+            captured["max_workers"] = max_workers
 
     monkeypatch.setattr(entry, "Evaluator", _EvalStub, raising=True)
 
-    entry._run_evaluation_after_postprocess(ns, output_dir, predictions_dir)
+    entry._run_evaluation_after_postprocess(
+        ns, output_dir, predictions_dir, num_workers=3
+    )
 
     assert captured["ran"] is True
+    assert captured["max_workers"] == 3
     assert "prediction" in captured["df"].columns
     assert captured["config"] == {
         "Tumor": {"labels": [1], "metrics": {"dice": {}}}
@@ -292,6 +308,7 @@ def test_run_postprocess_creates_expected_output_structure(tmp_path, monkeypatch
         output=str(out),
         postprocess_strategy=str(strat),
         num_workers_postprocess=1,
+        num_workers_evaluate=1,
         paths_csv=None,
         eval_config=None,
     )
@@ -321,6 +338,7 @@ def test_run_postprocess_passes_predictions_dir_to_postprocessor(
         output=str(out),
         postprocess_strategy=str(strat),
         num_workers_postprocess=2,
+        num_workers_evaluate=1,
         paths_csv=None,
         eval_config=None,
     )
@@ -357,6 +375,7 @@ def test_run_postprocess_with_eval_runs_evaluation(tmp_path, monkeypatch):
         output=str(out),
         postprocess_strategy=str(strat),
         num_workers_postprocess=1,
+        num_workers_evaluate=2,
         paths_csv=str(paths_csv),
         eval_config=str(eval_cfg),
     )
@@ -367,9 +386,10 @@ def test_run_postprocess_with_eval_runs_evaluation(tmp_path, monkeypatch):
 
     eval_called = {}
 
-    def _fake_eval(ns_arg, output_dir_arg, predictions_dir_arg):
+    def _fake_eval(ns_arg, output_dir_arg, predictions_dir_arg, num_workers=1):
         eval_called["output_dir"] = output_dir_arg
         eval_called["predictions_dir"] = predictions_dir_arg
+        eval_called["num_workers"] = num_workers
 
     monkeypatch.setattr(entry, "Postprocessor", _PPStub, raising=True)
     monkeypatch.setattr(
@@ -380,6 +400,7 @@ def test_run_postprocess_with_eval_runs_evaluation(tmp_path, monkeypatch):
 
     assert eval_called["output_dir"] == out.resolve()
     assert eval_called["predictions_dir"] == out.resolve() / "predictions"
+    assert eval_called["num_workers"] == 2
 
 
 def test_run_postprocess_invalid_eval_args_raises(tmp_path):
@@ -393,6 +414,7 @@ def test_run_postprocess_invalid_eval_args_raises(tmp_path):
         output=str(out),
         postprocess_strategy=str(strat),
         num_workers_postprocess=1,
+        num_workers_evaluate=1,
         paths_csv="paths.csv",
         eval_config=None,
     )

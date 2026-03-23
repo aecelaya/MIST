@@ -94,7 +94,7 @@ def predict_single_example(
         prediction = inference_utils.remap_mask_labels(
             prediction.numpy(), original_labels
         )
-        prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # ANTs stubs don't annotate new_image_like's return type.
+        prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]
     return prediction.astype("uint8")
 
 

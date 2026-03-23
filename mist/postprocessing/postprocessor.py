@@ -55,7 +55,7 @@ def _postprocess_single_file(
     messages = []
 
     for transform_name, per_label_flag, label_group, kwargs in zip(
-        transforms, apply_to_labels, per_label, transform_kwargs
+        transforms, per_label, apply_to_labels, transform_kwargs
     ):
         try:
             transform_fn = get_transform(transform_name)

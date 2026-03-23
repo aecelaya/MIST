@@ -83,8 +83,10 @@ class TestValidateMask:
         assert result is not None
         assert "not a 3D image" in result
 
-    def test_float_dtype_returns_error(self, monkeypatch, tmp_path):
-        """Float dtype returns a dtype-related error string."""
+    def test_float_dtype_with_fractional_values_returns_error(
+        self, monkeypatch, tmp_path
+    ):
+        """Float dtype with non-integer values (probability map) returns error."""
         path = tmp_path / "mask.nii.gz"
         path.touch()
         arr = np.array([[[0.5, 1.0]]], dtype=np.float32)
@@ -97,6 +99,22 @@ class TestValidateMask:
         result = evaluation_utils.validate_mask(path, _make_eval_config())
         assert result is not None
         assert "dtype" in result
+        assert "non-integer" in result
+
+    def test_float_dtype_with_integer_values_returns_none(
+        self, monkeypatch, tmp_path
+    ):
+        """Float32 mask with only integer-valued labels (e.g. BraTS) is accepted."""
+        path = tmp_path / "mask.nii.gz"
+        path.touch()
+        arr = np.array([[[0.0, 1.0], [1.0, 0.0]]], dtype=np.float32)
+        monkeypatch.setattr(
+            ants, "image_header_info", lambda _: self._header(3)
+        )
+        monkeypatch.setattr(
+            ants, "image_read", lambda _: _FakeImage(arr)
+        )
+        assert evaluation_utils.validate_mask(path, _make_eval_config()) is None
 
     def test_unexpected_labels_returns_error(self, monkeypatch, tmp_path):
         """Labels not in the config produce an 'unexpected labels' error."""

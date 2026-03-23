@@ -330,6 +330,41 @@ def test_postprocess_single_file_transform_error_returns_message(
     assert output_path.exists()
 
 
+def test_postprocess_single_file_per_label_and_labels_not_swapped(tmp_path):
+    """Regression: per_label and apply_to_labels must not be swapped in the
+    zip call inside _postprocess_single_file.
+
+    If they are swapped, the transform receives per_label=[1,2,3] (truthy)
+    and labels_list=False, causing 'bool object is not iterable'.
+    """
+    arr = np.zeros((10, 10, 10), dtype=np.uint8)
+    arr[2:5, 2:5, 2:5] = 1
+    arr[6:8, 6:8, 6:8] = 2
+    img = ants.from_numpy(arr.astype(np.float32))
+    input_path = tmp_path / "p1.nii.gz"
+    output_path = tmp_path / "out" / "p1.nii.gz"
+    output_path.parent.mkdir()
+    ants.image_write(img, str(input_path))
+
+    # Two-step strategy: grouped (per_label=False) then per-label (per_label=True).
+    # If the zip order in _postprocess_single_file is wrong, the first step will
+    # receive labels_list=False and raise 'bool object is not iterable'.
+    messages = pp_mod._postprocess_single_file(
+        input_path=input_path,
+        output_path=output_path,
+        transforms=["get_top_k_connected_components", "remove_small_objects"],
+        apply_to_labels=[[1, 2], [1, 2]],
+        per_label=[False, True],
+        transform_kwargs=[
+            {"top_k_connected_components": 1, "apply_morphological_cleaning": False},
+            {"small_object_threshold": 1},
+        ],
+    )
+
+    assert messages == [], f"Unexpected errors: {messages}"
+    assert output_path.exists()
+
+
 # ---------------------------------------------------------------------------
 # run
 # ---------------------------------------------------------------------------
