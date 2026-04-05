@@ -259,6 +259,64 @@ def _largest_multiple_of_32_leq(value: float, minimum: int = 32) -> int:
     return max(snapped, minimum)
 
 
+def _snap_lr_to_nnunet_compatible(
+    lr_patch: int,
+    low_res_axis: int,
+    median_ip: int,
+    median_lr: int,
+    min_lr: int,
+    target_spacing: list[float],
+) -> int:
+    """Snap lr_patch to a value compatible with the nnUNet decoder.
+
+    ConvTranspose3d upsamples by the exact stride factor. If the encoder
+    halved a dimension from an odd value (e.g. 9 → 4), the decoder produces
+    8 rather than 9, causing a skip-connection size mismatch at runtime.
+
+    This function queries the nnUNet architecture planner with a trial patch
+    to find the cumulative stride on the low-res axis (z_divisor), then snaps
+    lr_patch up to the nearest compatible multiple ≤ median_lr. If snapping
+    up would exceed median_lr, it snaps down instead.
+
+    Args:
+        lr_patch: Initial low-res axis patch size (from budget calculation).
+        low_res_axis: Index of the low-resolution axis (0, 1, or 2).
+        median_ip: Median image size on the in-plane axes.
+        median_lr: Median image size on the low-res axis.
+        min_lr: Minimum allowed patch size on the low-res axis.
+        target_spacing: Target voxel spacing in mm, [x, y, z].
+
+    Returns:
+        Snapped lr_patch that is divisible by z_divisor.
+    """
+    # Local import to avoid a top-level circular dependency between the
+    # analyze_data and models packages.
+    from mist.models.nnunet.nnunet_utils import get_unet_params
+
+    trial = [median_ip, median_ip, median_ip]
+    trial[low_res_axis] = lr_patch
+    _, strides, _ = get_unet_params(trial, target_spacing)
+
+    # Compute the product of all strides > 1 on the low-res axis.
+    # strides[0] is always [1,1,1] (the input block); skip it.
+    z_divisor = 1
+    for s in strides[1:]:
+        if s[low_res_axis] > 1:
+            z_divisor *= s[low_res_axis]
+
+    if z_divisor <= 1:
+        return lr_patch
+
+    # Prefer snapping up (preserves more coverage along the low-res axis).
+    snapped_up = ((lr_patch + z_divisor - 1) // z_divisor) * z_divisor
+    if snapped_up <= median_lr:
+        return snapped_up
+
+    # Fall back to snapping down if snapping up would exceed the median.
+    snapped_down = (lr_patch // z_divisor) * z_divisor
+    return max(snapped_down, min_lr)
+
+
 def get_best_patch_size(
     median_resampled_size: list[int],
     target_spacing: list[float],
@@ -274,8 +332,11 @@ def get_best_patch_size(
     The low-resolution axis is identified as the axis with the largest spacing.
     Its patch size is chosen as the largest value that leaves the full voxel
     budget available for the in-plane axes (clamped to
-    MIN_LOW_RES_AXIS_PATCH_SIZE … median_lr). Both in-plane axes receive the
-    same patch size (largest multiple of 32 that fits within the budget).
+    MIN_LOW_RES_AXIS_PATCH_SIZE … median_lr), then snapped to the nearest
+    multiple of the nnUNet cumulative stride on that axis so the decoder can
+    reconstruct without skip-connection size mismatches. Both in-plane axes
+    receive the same patch size (largest multiple of 32 that fits within the
+    budget).
 
     **3D isotropic mode** (all other cases):
     A physically isotropic target patch extent in mm is computed from the
@@ -311,8 +372,16 @@ def get_best_patch_size(
         min_lr = min(constants.MIN_LOW_RES_AXIS_PATCH_SIZE, median_lr)
         lr_patch = int(np.clip(budget / (median_ip ** 2), min_lr, median_lr))
 
+        # Snap to the nearest multiple of the nnUNet cumulative low-res stride
+        # so the decoder skip connections always match in spatial size.
+        lr_patch = _snap_lr_to_nnunet_compatible(
+            lr_patch, low_res_axis, median_ip, median_lr, min_lr, target_spacing
+        )
+
         # In-plane: both axes get the same patch (largest multiple of 32).
         # Round to nearest int first to avoid floating-point under-snap.
+        # Recompute with the (possibly adjusted) lr_patch so the budget split
+        # stays consistent.
         ip_patch = _largest_multiple_of_32_leq(
             int(round(np.sqrt(budget / lr_patch)))
         )

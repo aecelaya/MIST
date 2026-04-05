@@ -478,6 +478,166 @@ class TestGetVoxelBudget:
 
 
 # ---------------------------------------------------------------------------
+# _snap_lr_to_nnunet_compatible
+# ---------------------------------------------------------------------------
+
+class TestSnapLrToNnunetCompatible:
+    """Unit tests for analyzer_utils._snap_lr_to_nnunet_compatible.
+
+    get_unet_params is mocked so that each test fully controls the cumulative
+    z_divisor without depending on the real nnUNet architecture planner.
+    """
+
+    @staticmethod
+    def _make_strides(z_divisor: int, low_res_axis: int) -> list:
+        """Build a minimal strides list that yields the desired z_divisor.
+
+        strides[0] is always [1,1,1] (the input block that the function skips).
+        Subsequent entries each contribute a factor-of-2 stride on the low-res
+        axis until the cumulative product equals z_divisor.
+        """
+        strides = [[1, 1, 1]]
+        remaining = z_divisor
+        while remaining > 1:
+            factor = 2 if remaining % 2 == 0 else remaining
+            s = [1, 1, 1]
+            s[low_res_axis] = factor
+            strides.append(s)
+            remaining //= factor
+        return strides
+
+    def _patch_get_unet_params(self, monkeypatch, z_divisor, low_res_axis):
+        import mist.models.nnunet.nnunet_utils as nnunet_utils_module
+        strides = self._make_strides(z_divisor, low_res_axis)
+        monkeypatch.setattr(
+            nnunet_utils_module,
+            "get_unet_params",
+            lambda patch_size, spacing: (None, strides, None),
+        )
+
+    # Parametrized cases:
+    # (lr_patch, z_divisor, low_res_axis, median_ip, median_lr, min_lr,
+    #  expected, test_id)
+    @pytest.mark.parametrize(
+        "lr_patch,z_divisor,low_res_axis,median_ip,median_lr,min_lr,expected",
+        [
+            # --- Already compatible (no change needed) ---
+            pytest.param(8, 2, 2, 512, 40, 5, 8, id="already_compat_z2"),
+            pytest.param(10, 2, 2, 512, 40, 5, 10, id="already_compat_z2_10"),
+            pytest.param(20, 4, 2, 512, 20, 5, 20, id="already_compat_z4"),
+            pytest.param(16, 8, 2, 512, 40, 5, 16, id="already_compat_z8"),
+            # --- z_divisor=1: function returns lr_patch unchanged ---
+            pytest.param(7, 1, 2, 512, 40, 5, 7, id="zdiv1_no_snap"),
+            pytest.param(13, 1, 2, 512, 20, 5, 13, id="zdiv1_no_snap_odd"),
+            # --- z_divisor=2: snap up ---
+            pytest.param(7, 2, 2, 512, 40, 5, 8, id="zdiv2_snap_up_7"),
+            pytest.param(9, 2, 2, 512, 40, 5, 10, id="zdiv2_snap_up_9"),
+            pytest.param(11, 2, 2, 512, 40, 5, 12, id="zdiv2_snap_up_11"),
+            # --- z_divisor=4: snap up (prostate-bug regime) ---
+            pytest.param(18, 4, 2, 512, 20, 5, 20, id="zdiv4_snap_up_prostate"),
+            pytest.param(17, 4, 2, 512, 20, 5, 20, id="zdiv4_snap_up_17"),
+            pytest.param(15, 4, 2, 512, 20, 5, 16, id="zdiv4_snap_up_15"),
+            pytest.param(13, 4, 2, 512, 20, 5, 16, id="zdiv4_snap_up_13"),
+            # --- z_divisor=4: snap up exceeds median_lr → snap down ---
+            pytest.param(18, 4, 2, 512, 19, 5, 16, id="zdiv4_snap_down_18"),
+            pytest.param(14, 4, 2, 512, 15, 5, 12, id="zdiv4_snap_down_14"),
+            # --- z_divisor=8 ---
+            pytest.param(6, 8, 2, 512, 20, 5, 8, id="zdiv8_snap_up_6"),
+            pytest.param(10, 8, 2, 512, 20, 5, 16, id="zdiv8_snap_up_10"),
+            pytest.param(18, 8, 2, 512, 23, 5, 16, id="zdiv8_snap_down_18"),
+            # --- min_lr floor protection ---
+            pytest.param(3, 4, 2, 512, 20, 3, 4, id="min_lr_floor_snap_up"),
+            pytest.param(3, 4, 2, 512, 3, 3, 3, id="min_lr_floor_snap_down"),
+            # --- low_res_axis variety ---
+            pytest.param(7, 2, 0, 512, 40, 5, 8, id="axis0_snap_up"),
+            pytest.param(7, 2, 1, 512, 40, 5, 8, id="axis1_snap_up"),
+        ],
+    )
+    def test_snapping_logic(
+        self,
+        monkeypatch,
+        lr_patch,
+        z_divisor,
+        low_res_axis,
+        median_ip,
+        median_lr,
+        min_lr,
+        expected,
+    ):
+        """Snapping logic is correct across the full parameter space."""
+        self._patch_get_unet_params(monkeypatch, z_divisor, low_res_axis)
+
+        # Build a target_spacing whose argmax equals low_res_axis.
+        spacing = [0.8, 0.8, 0.8]
+        spacing[low_res_axis] = 3.0
+
+        result = au._snap_lr_to_nnunet_compatible(
+            lr_patch=lr_patch,
+            low_res_axis=low_res_axis,
+            median_ip=median_ip,
+            median_lr=median_lr,
+            min_lr=min_lr,
+            target_spacing=spacing,
+        )
+        assert result == expected
+
+    def test_result_always_divisible_by_z_divisor(self, monkeypatch):
+        """For any input, the returned value is divisible by z_divisor (or at
+        least as large as min_lr when the image is too small to allow it)."""
+        low_res_axis = 2
+        spacing = [0.8, 0.8, 3.0]
+        cases = [
+            # (lr_patch, z_divisor, median_ip, median_lr, min_lr)
+            (18, 4, 320, 20, 5),
+            (7, 2, 512, 40, 5),
+            (10, 8, 512, 32, 5),
+            (5, 4, 512, 12, 5),
+        ]
+        for lr_patch, z_divisor, median_ip, median_lr, min_lr in cases:
+            self._patch_get_unet_params(monkeypatch, z_divisor, low_res_axis)
+            result = au._snap_lr_to_nnunet_compatible(
+                lr_patch=lr_patch,
+                low_res_axis=low_res_axis,
+                median_ip=median_ip,
+                median_lr=median_lr,
+                min_lr=min_lr,
+                target_spacing=spacing,
+            )
+            # Result is either divisible by z_divisor or equals min_lr
+            # (when snapping down would go below min_lr).
+            assert result % z_divisor == 0 or result == min_lr, (
+                f"lr_patch={lr_patch}, z_divisor={z_divisor}: "
+                f"result={result} not divisible and not min_lr"
+            )
+
+    def test_snap_never_exceeds_median_lr(self, monkeypatch):
+        """The returned patch is always ≤ median_lr for valid (clamped) inputs.
+
+        get_best_patch_size always clips lr_patch to [min_lr, median_lr] before
+        calling this helper, so we only test that contract-valid range.
+        """
+        low_res_axis = 2
+        spacing = [0.8, 0.8, 3.0]
+        median_lr = 20
+        for lr_patch in range(1, median_lr + 1):
+            for z_divisor in [2, 4, 8]:
+                self._patch_get_unet_params(monkeypatch, z_divisor, low_res_axis)
+                median_lr = 20
+                result = au._snap_lr_to_nnunet_compatible(
+                    lr_patch=lr_patch,
+                    low_res_axis=low_res_axis,
+                    median_ip=512,
+                    median_lr=median_lr,
+                    min_lr=1,
+                    target_spacing=spacing,
+                )
+                assert result <= median_lr, (
+                    f"lr_patch={lr_patch}, z_divisor={z_divisor}: "
+                    f"result={result} exceeds median_lr={median_lr}"
+                )
+
+
+# ---------------------------------------------------------------------------
 # get_best_patch_size
 # ---------------------------------------------------------------------------
 
@@ -568,6 +728,87 @@ class TestGetBestPatchSize:
         result = au.get_best_patch_size([64, 64, 10], [0.8, 0.8, 3.0])
         for ax in (0, 1):
             assert result[ax] <= 64
+
+    # --- nnUNet compatibility snapping ---
+
+    def test_quasi_2d_prostate_lr_snapped_up_to_nnunet_compatible(
+        self, monkeypatch
+    ):
+        """Prostate-like dataset: lr_raw=18 is not divisible by z_divisor=4.
+
+        Budget is pinned so that budget/320^2 = 18 exactly, reproducing the
+        real failure mode reported against a 320x320x20 prostate dataset with
+        spacing [0.625, 0.625, 3.6].  The nnUNet planner assigns two z-stride-2
+        stages → z_divisor=4.  Snapping 18 up to 20 (nearest mult-4 ≤ median_lr)
+        fixes the decoder skip-connection mismatch.
+        """
+        # budget = 18 * 320^2 → lr_raw = 18 exactly.
+        monkeypatch.setattr(
+            au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 18 * 320 ** 2
+        )
+        result = au.get_best_patch_size(
+            [320, 320, 20], [0.625, 0.625, 3.6]
+        )
+        # z must be snapped from 18 → 20 (divisible by 4, ≤ median_lr=20).
+        assert result[2] == 20
+        # In-plane recomputed with lr_patch=20: snap(sqrt(18*320^2/20))=288.
+        assert result[0] == result[1] == 288
+
+    def test_quasi_2d_snap_down_when_snap_up_exceeds_median_lr(
+        self, monkeypatch
+    ):
+        """When snapping up exceeds median_lr, the patch snaps down instead.
+
+        median_lr=19, z_divisor=4.  Snapping 18 up → 20 > 19, so we snap
+        down to 16 instead.
+        """
+        monkeypatch.setattr(
+            au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 18 * 320 ** 2
+        )
+        result = au.get_best_patch_size(
+            [320, 320, 19], [0.625, 0.625, 3.6]
+        )
+        # snapped_up=20 > median_lr=19 → snapped_down=16.
+        assert result[2] == 16
+
+    def test_quasi_2d_result_divisible_by_nnunet_z_divisor(self, monkeypatch):
+        """The low-res axis of the returned patch is always nnUNet-compatible.
+
+        For each realistic scenario, verify that the result patch size on the
+        low-res axis is exactly divisible by the cumulative nnUNet z-stride.
+        """
+        from mist.models.nnunet.nnunet_utils import get_unet_params
+
+        # budget = 18 * 320^2 triggers the prostate-like regime.
+        monkeypatch.setattr(
+            au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 18 * 320 ** 2
+        )
+        scenarios = [
+            # (median, spacing)
+            ([320, 320, 20], [0.625, 0.625, 3.6]),   # prostate
+            ([512, 512, 40], [0.8, 0.8, 3.0]),        # thick-slice CT
+            ([512, 512,  8], [0.8, 0.8, 3.0]),        # very thin z
+            ([ 40, 512, 512], [3.0, 0.8, 0.8]),       # low-res on axis 0
+            ([512,  40, 512], [0.8, 3.0, 0.8]),       # low-res on axis 1
+        ]
+        for median, spacing in scenarios:
+            result = au.get_best_patch_size(median, spacing)
+            low_res_axis = spacing.index(max(spacing))
+            median_ip = max(median[i] for i in range(3) if i != low_res_axis)
+            lr = result[low_res_axis]
+
+            trial = [median_ip, median_ip, median_ip]
+            trial[low_res_axis] = lr
+            _, strides, _ = get_unet_params(trial, spacing)
+            z_divisor = 1
+            for s in strides[1:]:
+                if s[low_res_axis] > 1:
+                    z_divisor *= s[low_res_axis]
+
+            assert lr % z_divisor == 0, (
+                f"median={median}, spacing={spacing}: "
+                f"lr_patch={lr} not divisible by z_divisor={z_divisor}"
+            )
 
     def test_larger_batch_size_yields_smaller_patch(self, monkeypatch):
         """Doubling batch size from 2 → 4 halves the budget and shrinks patch."""

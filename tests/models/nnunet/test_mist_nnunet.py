@@ -78,3 +78,56 @@ def test_nnunet_forward_with_deep_supervision(base_kwargs):
     assert "prediction" in output
     assert "deep_supervision" in output
     assert isinstance(output["deep_supervision"], list)
+
+
+# ---------------------------------------------------------------------------
+# Quasi-2D forward-pass regression: prostate snapping fix
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "patch_size,spacing,should_succeed",
+    [
+        # Snapped patch (20 is divisible by z_divisor=4) — must not crash.
+        pytest.param(
+            [320, 320, 20], [0.625, 0.625, 3.6], True,
+            id="prostate_snapped_z20_ok",
+        ),
+        # Un-snapped patch (18 is NOT divisible by z_divisor=4) — must crash.
+        pytest.param(
+            [320, 320, 18], [0.625, 0.625, 3.6], False,
+            id="prostate_unsnapped_z18_crashes",
+        ),
+    ],
+)
+def test_quasi_2d_forward_pass_nnunet_compatibility(
+    patch_size, spacing, should_succeed
+):
+    """Regression: quasi-2D patches that are not divisible by the cumulative
+    nnUNet z-stride cause a decoder skip-connection size mismatch at runtime.
+
+    The prostate dataset (spacing 0.625×0.625×3.6) triggers two z-stride-2
+    stages (z_divisor=4).  A raw budget-derived lr_patch=18 (not divisible by
+    4) causes ConvTranspose3d to produce 8 instead of 9 voxels, breaking the
+    skip connection in the decoder.  lr_patch=20 (the snapped value returned
+    by get_best_patch_size) must pass through without error.
+    """
+    model = NNUNet(
+        in_channels=1,
+        out_channels=2,
+        patch_size=patch_size,
+        target_spacing=spacing,
+        use_residual_blocks=False,
+        use_deep_supervision=False,
+        use_pocket_model=True,  # pocket keeps memory low in CI
+    )
+    model.eval()
+    x = torch.randn(1, 1, *patch_size)
+
+    if should_succeed:
+        with torch.no_grad():
+            out = model(x)
+        assert out.shape == (1, 2, *patch_size)
+    else:
+        with pytest.raises((RuntimeError, AssertionError)):
+            with torch.no_grad():
+                model(x)
