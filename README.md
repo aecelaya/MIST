@@ -101,7 +101,7 @@ Change the architecture in `config.json` or pass `--model <key>` at the command 
 | clDice | `cldice` | Composite |
 | Boundary Loss | `bl` | Composite |
 | Generalized Surface Loss | `gsl` | Composite |
-| Hausdorff Distance Optimal Set | `hdos` | Composite |
+| Hausdorff Distance One-Sided | `hdos` | Composite |
 | Volumetric SDDL | `volumetric_sddl` | Composite |
 | Vessel SDDL | `vessel_sddl` | Composite |
 
