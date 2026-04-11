@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import copy
 import os
+import sys
 import pytest
 import torch
 import numpy as np
@@ -235,7 +236,9 @@ def fold_runner(mock_mist_config, monkeypatch, tmp_path):
     monkeypatch.setattr(ir, "get_ensembler", MagicMock(return_value=SimpleNamespace(name="ensembler")))
     monkeypatch.setattr(ir, "get_inferer", MagicMock(return_value=lambda **_: SimpleNamespace(name="inferer")))
     monkeypatch.setattr(ir.model_loader, "load_model_from_config", MagicMock(return_value=_DummyModel()))
-    monkeypatch.setattr(ir.dali_loader, "get_test_dataset", mock_get_test_dataset)
+    mock_dali_module = MagicMock()
+    mock_dali_module.get_test_dataset = mock_get_test_dataset
+    monkeypatch.setitem(sys.modules, "mist.data_loading.dali_loader", mock_dali_module)
     monkeypatch.setattr(ir.io, "read_json_file", mock_read_json)
     monkeypatch.setattr(ir, "ic", SimpleNamespace(PATIENT_DF_IGNORED_COLUMNS={"id", "fold"}))
     monkeypatch.setattr(
