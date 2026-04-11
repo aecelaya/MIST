@@ -36,13 +36,19 @@ pip install -e .             # inference only
 **1. Prepare a dataset JSON** describing your data:
 ```json
 {
-    "task":        "segmentation",
+    "task":        "brats2023",
     "modality":    "mr",
-    "train-data":  "/path/to/train",
-    "test-data":   "/path/to/test",
-    "mask":        "/path/to/masks",
-    "images":      {"t1": "t1.nii.gz", "t2": "t2.nii.gz"},
-    "labels":      [0, 1, 2]
+    "train-data":  "/full/path/to/raw/data/train",
+    "test-data":   "/full/path/to/raw/data/validation",
+    "mask":        ["seg.nii.gz"],
+    "images":      {"t1": ["t1n.nii.gz"],
+                    "t2": ["t2w.nii.gz"],
+                    "tc": ["t1c.nii.gz"],
+                    "fl": ["t2f.nii.gz"]},
+    "labels":      [0, 1, 2, 3],
+    "final_classes": {"WT": [1, 2, 3],
+                      "TC": [1, 3],
+                      "ET": [3]}
 }
 ```
 
