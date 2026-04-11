@@ -62,7 +62,7 @@ class LinearScheduler(AlphaScheduler):
     Attributes:
         start_val: The initial alpha value.
         end_val: The final alpha value.
-        init_pause: The number of epochs to wait before decaying.
+        init_pause: The last epoch index (0-based) that still returns start_val.
         decay_duration: The number of epochs over which the decay occurs.
     """
 
@@ -77,8 +77,10 @@ class LinearScheduler(AlphaScheduler):
 
         Args:
             num_epochs: The total number of training epochs.
-            init_pause: The number of epochs to hold the start value.
-                Defaults to 5.
+            init_pause: The last 0-based epoch index that still uses start_val.
+                Epochs 0 through init_pause inclusive return start_val, so
+                decay begins at epoch init_pause + 1. Defaults to 5, meaning
+                the first 6 epochs (0–5) hold start_val.
             start_val: The starting alpha value. Defaults to 1.0.
             end_val: The target alpha value after decay. Defaults to 0.0.
         """
@@ -116,7 +118,7 @@ class CosineScheduler(AlphaScheduler):
     Attributes:
         start_val: The initial alpha value.
         end_val: The final alpha value.
-        init_pause: The number of epochs to wait before decaying.
+        init_pause: The last epoch index (0-based) that still returns start_val.
         decay_duration: The number of epochs over which the decay occurs.
     """
 
@@ -131,8 +133,10 @@ class CosineScheduler(AlphaScheduler):
 
         Args:
             num_epochs: The total number of training epochs.
-            init_pause: The number of epochs to hold the start value.
-                Defaults to 5.
+            init_pause: The last 0-based epoch index that still uses start_val.
+                Epochs 0 through init_pause inclusive return start_val, so
+                decay begins at epoch init_pause + 1. Defaults to 5, meaning
+                the first 6 epochs (0–5) hold start_val.
             start_val: The starting alpha value. Defaults to 1.0.
             end_val: The target alpha value after decay. Defaults to 0.0.
         """

@@ -29,6 +29,44 @@ from mist.preprocessing import preprocessing_utils
 from mist.training import training_utils
 
 
+def _build_predictor(
+    mist_configuration: Dict[str, Any],
+    models: List,
+    device: Union[str, torch.device],
+) -> Predictor:
+    """Build a Predictor from a MIST configuration dict.
+
+    Reads inferer, ensembler, and TTA settings from the configuration and
+    constructs a ready-to-use Predictor instance.
+
+    Args:
+        mist_configuration: MIST configuration dictionary.
+        models: List of loaded model callables to ensemble.
+        device: Device to run inference on.
+
+    Returns:
+        A configured Predictor instance.
+    """
+    inferer_name = mist_configuration["inference"]["inferer"]["name"]
+    inferer_params = {**mist_configuration["inference"]["inferer"]["params"]}
+    ensembler_strategy = mist_configuration["inference"]["ensemble"]["strategy"]
+    tta_enabled = mist_configuration["inference"]["tta"]["enabled"]
+    tta_strategy = mist_configuration["inference"]["tta"]["strategy"]
+
+    inferer_params["patch_size"] = mist_configuration["spatial_config"]["patch_size"]
+    inferer_params["device"] = device
+    inferer = get_inferer(inferer_name)(**inferer_params)
+    ensembler = get_ensembler(ensembler_strategy)
+    tta_transforms = get_strategy(tta_strategy if tta_enabled else "none")()
+    return Predictor(
+        models=models,
+        inferer=inferer,
+        ensembler=ensembler,
+        tta_transforms=tta_transforms,
+        device=device,
+    )
+
+
 def predict_single_example(
     preprocessed_image: torch.Tensor,
     original_ants_image: ants.core.ants_image.ANTsImage,
@@ -162,31 +200,7 @@ def test_on_fold(
     model.to(device)
 
     # Create Predictor instance.
-    # Inferer, ensembler, and TTA transforms are set up for sliding window
-    # inference. This is the default mode of operation for MIST, but future
-    # versions may allow for other modes.
-    inferer_name = config["inference"]["inferer"]["name"]
-    inferer_params = {**config["inference"]["inferer"]["params"]}
-    ensembler_strategy = config["inference"]["ensemble"]["strategy"]
-    tta_enabled = config["inference"]["tta"]["enabled"]
-    tta_strategy = config["inference"]["tta"]["strategy"]
-
-    # Inject patch_size from spatial_config and device before constructing.
-    inferer_params["patch_size"] = config["spatial_config"]["patch_size"]
-    inferer_params["device"] = device
-    inferer = get_inferer(inferer_name)(**inferer_params)
-    ensembler = get_ensembler(ensembler_strategy)
-    if tta_enabled:
-        tta_transforms = get_strategy(tta_strategy)()
-    else:
-        tta_transforms = get_strategy("none")()
-    predictor = Predictor(
-        models=[model],
-        inferer=inferer,
-        ensembler=ensembler,
-        tta_transforms=tta_transforms,
-        device=device,
-    )
+    predictor = _build_predictor(config, models=[model], device=device)
 
     # Create output directory.
     output_directory = os.path.join(results_dir, "predictions", "train", "raw")
@@ -308,32 +322,8 @@ def infer_from_dataframe(
     )
 
     # Set up the predictor for inference.
-    # Inferer, ensembler, and TTA transforms are set up for sliding window
-    # inference. This is the default mode of operation for MIST, but future
-    # versions may allow for other modes.
-    inferer_name = mist_configuration["inference"]["inferer"]["name"]
-    inferer_params = {**mist_configuration["inference"]["inferer"]["params"]}
-    ensembler_strategy = mist_configuration["inference"]["ensemble"]["strategy"]
-    tta_enabled = mist_configuration["inference"]["tta"]["enabled"]
-    tta_strategy = mist_configuration["inference"]["tta"]["strategy"]
-
-    # Inject patch_size from spatial_config and device before constructing.
-    inferer_params["patch_size"] = (
-        mist_configuration["spatial_config"]["patch_size"]
-    )
-    inferer_params["device"] = device
-    inferer = get_inferer(inferer_name)(**inferer_params)
-    ensembler = get_ensembler(ensembler_strategy)
-    if tta_enabled:
-        tta_transforms = get_strategy(tta_strategy)()
-    else:
-        tta_transforms = get_strategy("none")()
-    predictor = Predictor(
-        models=models_list,
-        inferer=inferer,
-        ensembler=ensembler,
-        tta_transforms=tta_transforms,
-        device=device,
+    predictor = _build_predictor(
+        mist_configuration, models=models_list, device=device
     )
 
     # If a postprocess strategy file is provided, check if it exists and

@@ -114,6 +114,10 @@ class Patch3DTrainer(BaseTrainer):
         label = batch["label"]
         dtm = batch.get("dtm", None)
 
+        max_norm = self.config["training"].get(
+            "grad_clip_norm", constants.GRAD_CLIP_VALUE
+        )
+
         optimizer.zero_grad()
         if scaler is not None:
             with torch.autocast(device_type="cuda", dtype=torch.float16):
@@ -130,12 +134,7 @@ class Patch3DTrainer(BaseTrainer):
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(
-                model.parameters(),
-                max_norm=self.config["training"].get(
-                    "grad_clip_norm", constants.GRAD_CLIP_VALUE
-                )
-            )
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
             scaler.step(optimizer)
             scaler.update()
         else:
@@ -151,12 +150,7 @@ class Patch3DTrainer(BaseTrainer):
             )
 
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(
-                model.parameters(),
-                max_norm=self.config["training"].get(
-                    "grad_clip_norm", constants.GRAD_CLIP_VALUE
-                )
-            )
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
             optimizer.step()
         return loss
 
