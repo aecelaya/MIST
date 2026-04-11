@@ -51,34 +51,36 @@ the following structure:
 
 ```text
 results/
-    logs/
-    models/
-    predictions/
+    checkpoints/                (fold checkpoints for --resume)
+    logs/                       (TensorBoard logs)
+    models/                     (trained model weights)
+    predictions/                (cross-validation and test predictions)
     config.json
-    data_dump.json  (only with --data-dump)
-    data_dump.md    (only with --data-dump)
-    results.csv
-    train_paths.csv
-    evaluation_paths.csv
-    test_paths.csv (if a test set is specified in dataset.json)
     fg_bboxes.csv
+    train_paths.csv
+    test_paths.csv              (only if test-data is set in dataset JSON)
+    evaluation_paths.csv
+    results.csv
+    data_dump.json              (only with --data-dump)
+    data_dump.md                (only with --data-dump)
 ```
 
 ### Breakdown of outputs
 
 | File/Directory         | Description                                                                 |
 |------------------------|-----------------------------------------------------------------------------|
+| `checkpoints/`         | Per-fold training checkpoints used by `--resume` to continue interrupted runs. |
 | `logs/`                | TensorBoard logs for each fold.                                             |
-| `models/`              | Trained PyTorch models for each fold.                                       |
-| `predictions/`         | Predictions from cross validation and test set (if specified).              |
-| `config.json`          | Dataset configuration (target spacing, normalization, patch size, etc.).    |
-| `data_dump.json`       | Full structured dataset statistics (machine-readable). Only produced when `--data-dump` is passed to `mist_analyze`. |
-| `data_dump.md`         | Narrativized dataset summary optimized for review and LLM consumption. Only produced when `--data-dump` is passed to `mist_analyze`. |
-| `results.csv`          | Evaluation results from five-fold cross validation.                         |
-| `train_paths.csv`      | CSV with `id`, `fold`, and paths to images/masks for training.              |
-| `evaluation_paths.csv` | CSV with `id`, `mask`, and `prediction` paths for evaluation.               |
-| `test_paths.csv`       | Same as `train_paths.csv`, but for test set (no `fold` column).             |
-| `fg_bboxes.csv`        | Bounding box information for the foreground region of each image.           |
+| `models/`              | Trained PyTorch model weights for each fold (`fold_0.pt`, `fold_1.pt`, …). |
+| `predictions/`         | Cross-validation predictions and test-set predictions (if a test set was provided). |
+| `config.json`          | Full pipeline configuration (target spacing, normalization, patch size, model, loss, etc.). Required by all downstream commands. |
+| `fg_bboxes.csv`        | Foreground bounding box for each training image, used to restore predictions to original space. |
+| `train_paths.csv`      | Paths to training images/masks with assigned fold numbers.                  |
+| `test_paths.csv`       | Paths to test images/masks. Only produced when `test-data` is set in the dataset JSON. |
+| `evaluation_paths.csv` | Ground truth and prediction paths used for cross-validation evaluation.     |
+| `results.csv`          | Per-patient and aggregate evaluation metrics from cross-validation.         |
+| `data_dump.json`       | Structured dataset statistics (machine-readable). Only produced with `--data-dump`. |
+| `data_dump.md`         | Narrative dataset summary. Only produced with `--data-dump`.                |
 
 ## Analysis
 
