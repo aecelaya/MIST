@@ -138,9 +138,10 @@ Full documentation, including configuration reference and advanced topics, is at
 * March 2026 — **Better training defaults** — AdamW optimizer and gradient clipping
   are now the defaults, with the clipping threshold exposed via `grad_clip_norm`
   in `config.json`.
-* September 2025 — [MIST takes 3rd place (repeat) in BraTS 2025 adult glioma challenge @ MICCAI 2025](https://www.synapse.org/Synapse:syn64153130/wiki/633062)
-* November 2024 — MedNeXt models (small, base, medium, large) added to MIST
-* October 2024 — [MIST takes 3rd place in BraTS 2024 adult glioma challenge @ MICCAI 2024](https://www.synapse.org/Synapse:syn53708249/wiki/630150)
+* September 2025 — **[BraTS 2025 adult glioma challenge @ MICCAI 2025](https://www.synapse.org/Synapse:syn64153130/wiki/633062)** — MIST takes 3rd place (repeat).
+* November 2024 — **MedNeXt models** — small, base, medium, and large variants
+  added (`mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`).
+* October 2024 — **[BraTS 2024 adult glioma challenge @ MICCAI 2024](https://www.synapse.org/Synapse:syn53708249/wiki/630150)** — MIST takes 3rd place.
 
 ## Citation
 
