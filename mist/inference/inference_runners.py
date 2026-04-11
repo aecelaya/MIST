@@ -19,6 +19,14 @@ from mist.inference import inference_utils
 from mist.inference.inference_constants import InferenceConstants as ic
 from mist.inference.predictor import Predictor
 from mist.models import model_loader
+
+# DALI is a training-only dependency (nvidia-dali-cuda120). Guard the import
+# so that inference_runners can be imported on CPU-only machines where only
+# mist_predict is needed.
+try:
+    from mist.data_loading import dali_loader
+except ImportError:
+    dali_loader = None  # type: ignore[assignment]
 from mist.inference.ensemblers.ensembler_registry import get_ensembler
 from mist.inference.tta.strategies import get_strategy
 from mist.inference.inferers.inferer_registry import get_inferer
@@ -186,9 +194,11 @@ def test_on_fold(
     )
 
     # Get DALI loader for streaming preprocessed numpy files.
-    # Import here so that DALI (a training-only dependency) is not required
-    # when running mist_predict, which uses infer_from_dataframe instead.
-    from mist.data_loading import dali_loader  # noqa: PLC0415
+    if dali_loader is None:
+        raise RuntimeError(
+            "NVIDIA DALI is required for test_on_fold. "
+            "Install with: pip install 'mist-medical[train]'"
+        )
     test_loader = dali_loader.get_test_dataset(
         image_paths=test_image_paths,
         seed=config["training"]["seed"],
