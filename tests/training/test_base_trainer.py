@@ -4,7 +4,6 @@ import os
 import math
 import pickle
 import rich
-from io import StringIO
 from mist.utils import console as console_mod
 from pathlib import Path
 from types import SimpleNamespace
@@ -1465,3 +1464,54 @@ def test_load_checkpoint_restores_scaler_state(
     assert loaded is True
     assert len(scaler_loads) == 1
     assert scaler_loads[0] == {"scale": 65536.0}
+
+
+# =============================================
+# Coverage gap: alpha TensorBoard logging (line 934)
+# =============================================
+
+def test_train_fold_logs_alpha_for_composite_loss(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """train_fold logs 'alpha' to TensorBoard when composite_loss_weighting is set.
+
+    This covers the ``if state["composite_loss_weighting"] is not None`` branch
+    in the TensorBoard logging block (base_trainer.py line 933-936).
+    """
+    results, _ = tmp_pipeline
+
+    # Set the config to use a composite loss with a weighting schedule.
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["loss"]["name"] = "cldice"
+    cfg["training"]["loss"]["composite_loss_weighting"] = {
+        "name": "constant",
+        "params": {"value": 0.7},
+    }
+    cfg_path.write_text(json.dumps(cfg))
+
+    # Stub get_alpha_scheduler to return a simple callable — no real scheduler
+    # needed; we just need state["composite_loss_weighting"] to be non-None.
+    monkeypatch.setattr(bt, "get_alpha_scheduler", lambda name, num_epochs, **kw: lambda epoch: 0.7)
+
+    # Capture the SummaryWriter used during training.
+    created_writers = []
+
+    class CapturingWriter(DummySummaryWriter):
+        def __init__(self, log_dir):
+            super().__init__(log_dir)
+            created_writers.append(self)
+
+    monkeypatch.setattr(bt, "SummaryWriter", CapturingWriter)
+
+    trainer = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=0.5)
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+
+    assert created_writers, "SummaryWriter was not instantiated"
+    writer = created_writers[-1]
+
+    alpha_entries = [e for e in writer.scalars if e[0] == "alpha"]
+    assert alpha_entries, "'alpha' was never logged to TensorBoard"
+    # Each logged alpha value should be the fixed 0.7 returned by the stub.
+    for _, value, _ in alpha_entries:
+        assert value == pytest.approx(0.7)
