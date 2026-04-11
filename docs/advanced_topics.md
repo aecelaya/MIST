@@ -1259,6 +1259,9 @@ and parameters — there is no requirement to evaluate every class the same way.
 | 95th percentile Hausdorff distance | `haus95` | none |
 | Average surface distance | `avg_surf` | none |
 | Surface Dice | `surf_dice` | `tolerance` (mm, default: `1.0`) |
+| BraTS-style lesion-wise Dice | `lesion_wise_dice` | see [lesion-wise parameters](usage.md#lesion-wise-metric-parameters) |
+| BraTS-style lesion-wise HD95 | `lesion_wise_haus95` | see [lesion-wise parameters](usage.md#lesion-wise-metric-parameters) |
+| BraTS-style lesion-wise surface Dice | `lesion_wise_surf_dice` | see [lesion-wise parameters](usage.md#lesion-wise-metric-parameters) |
 
 ### Example: different metrics per class
 

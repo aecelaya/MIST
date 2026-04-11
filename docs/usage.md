@@ -213,10 +213,15 @@ the following arguments:
 
 **Hardware:**
 
-- `--gpus`: Integer GPU IDs to use (e.g., `0 1 2`). The special value `-1`
-  selects all available GPUs automatically. *(default: `-1`)*
 - `--num-workers-evaluate`: Number of parallel workers for the post-training
   evaluation step. *(default: `1`)*
+
+!!! note
+    MIST uses all GPUs visible to the process. To restrict which GPUs are used,
+    set `CUDA_VISIBLE_DEVICES` before running MIST (e.g.,
+    `CUDA_VISIBLE_DEVICES=0,1 mist_train ...`). On HPC clusters, the job
+    scheduler sets this automatically. See
+    [Multi-GPU training](advanced_topics.md#multi-gpu-training) for details.
 
 **Model:**
 
@@ -256,8 +261,8 @@ the following arguments:
 
 - `--pretrained-weights`: Path to a pretrained checkpoint to initialize the
   encoder from. Accepts a single fold checkpoint or the output of
-  `mist_average_weights`. See [Transfer learning](#transfer-learning) in the
-  [advanced topics](advanced_topics.md#transfer-learning) for details.
+  `mist_average_weights`. See
+  [Transfer learning](advanced_topics.md#transfer-learning) for details.
 - `--pretrained-config`: Path to the source model's `config.json`. Required
   when `--pretrained-weights` is set — used to validate encoder compatibility
   between source and target models.

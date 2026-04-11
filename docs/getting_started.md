@@ -82,7 +82,7 @@ following key-value pairs.
 | ```mask``` | List containing identifying strings for the segmentation mask (ground truth) files. |
 | ```images``` | Dictionary where each key is an image type (i.e., T1, T2, CT, etc.) and each value  is a list containing identifying strings for that image type. |
 | ```labels``` | List of labels in dataset (starting with 0). |
-| ```final_classes``` | Dictionary where each key is the name of the final segmentation class  (i.e., WT, ET, TC for BraTS) and each value is a list of the labels in that class. |
+| ```final_classes``` | *(optional)* Dictionary where each key is the name of the final segmentation class (i.e., WT, ET, TC for BraTS) and each value is a list of the labels in that class. If omitted, each label is evaluated as its own class. |
 
 Here is an example for the BraTS 2023 dataset using absolute paths.
 
