@@ -3,13 +3,13 @@ from typing import Any, Dict, Optional, Tuple, List, Union
 from collections.abc import Callable
 from pathlib import Path
 import os
+
 import ants
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import torch
 
-# MIST imports.
 from mist.analyze_data import analyzer_utils
 from mist.preprocessing import preprocess
 from mist.inference.inference_constants import InferenceConstants as ic
@@ -135,7 +135,8 @@ def back_to_original_space(
     # Copy header from original image onto the prediction so they match. This
     # will take care of other details in the header like the origin and the
     # image bounding box.
-    prediction = original_ants_image.new_image_like(prediction.numpy())  # type: ignore[no-any-return]  # ANTs stubs don't annotate new_image_like's return type.
+    # ANTs stubs don't annotate new_image_like's return type.
+    prediction = original_ants_image.new_image_like(prediction.numpy())  # type: ignore[no-any-return]
     return prediction
 
 

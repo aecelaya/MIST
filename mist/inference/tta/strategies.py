@@ -9,7 +9,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import List, Dict, Type, Any, TypeVar, Callable
 
-# MIST imports.
 from mist.inference.tta.transforms import AbstractTransform, get_transform
 
 # Registry for strategy classes. Stores classes; instances are created on
@@ -25,7 +24,7 @@ def register_strategy(name: str) -> Callable[[Type[T]], Type[T]]:
             raise TypeError(f"{cls.__name__} must inherit from TTAStrategy.")
         if name in TTA_STRATEGY_REGISTRY:
             raise KeyError(f"Strategy '{name}' is already registered.")
-        TTA_STRATEGY_REGISTRY[name] = cls  # Register the class, not an instance.
+        TTA_STRATEGY_REGISTRY[name] = cls  # Register class, not an instance
         return cls
     return decorator
 

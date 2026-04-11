@@ -1,7 +1,6 @@
 """Registry for ensembling strategies in MIST."""
 from typing import Dict, Type, List, TypeVar, Callable
 
-# MIST imports.
 from mist.inference.ensemblers.base import AbstractEnsembler
 
 # Global registry for ensemblers. Stores classes; instances are created on
@@ -19,7 +18,7 @@ def register_ensembler(name: str) -> Callable[[Type[T]], Type[T]]:
             )
         if name in ENSEMBLER_REGISTRY:
             raise KeyError(f"Ensembler '{name}' is already registered.")
-        ENSEMBLER_REGISTRY[name] = cls  # Register the class, not an instance.
+        ENSEMBLER_REGISTRY[name] = cls  # Register the class, not an instance
         return cls
     return decorator
 

@@ -83,7 +83,8 @@ class SlidingWindowInferer(AbstractInferer):
             prediction: Softmax prediction tensor of shape (1, C, D, H, W).
         """
         # Run MONAI's sliding window inference.
-        prediction = monai.inferers.sliding_window_inference(  # type: ignore[attr-defined]  # MONAI stubs don't fully annotate sliding_window_inference.
+        # MONAI stubs don't fully annotate sliding_window_inference.
+        prediction = monai.inferers.sliding_window_inference(  # type: ignore[attr-defined]
             inputs=image,
             roi_size=self.patch_size,
             sw_batch_size=ic.SLIDING_WINDOW_BATCH_SIZE,

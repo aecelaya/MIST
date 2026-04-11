@@ -1,7 +1,6 @@
 """Registry for inference strategies in MIST."""
 from typing import Dict, Type, List, Callable, TypeVar
 
-# MIST imports.
 from mist.inference.inferers.base import AbstractInferer
 
 # Global registry for inferers.
@@ -18,7 +17,7 @@ def register_inferer(name: str) -> Callable[[Type[T]], Type[T]]:
             )
         if name in INFERER_REGISTRY:
             raise KeyError(f"Inferer '{name}' is already registered.")
-        INFERER_REGISTRY[name] = cls  # Register the class, not an instance.
+        INFERER_REGISTRY[name] = cls  # Register the class, not an instance
         return cls
     return decorator
 

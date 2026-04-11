@@ -1,8 +1,8 @@
 """Predictor class to chain together inference, TTA, and ensembling."""
 from typing import Callable, List, Optional, Union
+
 import torch
 
-# MIST imports.
 from mist.inference.inferers.base import AbstractInferer
 from mist.inference.ensemblers.base import AbstractEnsembler
 from mist.inference.tta.transforms import AbstractTransform
@@ -10,7 +10,23 @@ from mist.inference.inference_utils import get_default_device
 
 
 class Predictor:
-    """Performs inference with test time augmentation and ensembling."""
+    """Performs inference with test time augmentation and ensembling.
+
+    This class orchestrates the entire inference pipeline, including applying
+    TTA transforms, running inference with multiple models, and ensembling the
+    predictions.
+
+    Attributes:
+        models: List of PyTorch models to use for inference.
+        inferer: An instance of a subclass of AbstractInferer to run inference.
+        ensembler: An instance of a subclass of AbstractEnsembler to aggregate
+            outputs.
+        tta_transforms: List of TTA transforms to apply. Predefined lists of
+            transforms are available as TTA strategies in the
+            mist.inference.tta.strategies module.
+        device: Torch device to use for inference. If None, defaults to CUDA if
+            available, otherwise CPU.
+    """
     def __init__(
         self,
         models: List[Callable[[torch.Tensor], torch.Tensor]],

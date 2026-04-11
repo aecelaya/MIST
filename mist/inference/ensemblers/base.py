@@ -1,6 +1,7 @@
 """Abstract base class for all prediction ensemblers in MIST."""
 from abc import ABC, abstractmethod
 from typing import List, Any
+
 import torch
 
 

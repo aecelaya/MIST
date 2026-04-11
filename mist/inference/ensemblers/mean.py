@@ -1,8 +1,8 @@
 """Mean-based softmax ensembler for MIST inference."""
 from typing import List
+
 import torch
 
-# MIST imports.
 from mist.inference.ensemblers.base import AbstractEnsembler
 from mist.inference.ensemblers.ensembler_registry import register_ensembler
 
@@ -23,7 +23,7 @@ class MeanEnsembler(AbstractEnsembler):
         if not predictions:
             raise ValueError("MeanEnsembler requires at least one prediction.")
 
-        stacked = torch.stack(predictions, dim=0)     # Shape: (N, 1, C, D, H, W)
+        stacked = torch.stack(predictions, dim=0)  # Shape: (N, 1, C, D, H, W)
         mean_prediction = torch.mean(stacked, dim=0)  # Shape: (1, C, D, H, W)
         return mean_prediction
 

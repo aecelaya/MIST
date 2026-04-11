@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Type, TypeVar, Callable
+
 import torch
 
 # Registry for transform classes. Stores classes; instances are created on
@@ -18,7 +19,7 @@ def register_transform(name: str) -> Callable[[Type[T]], Type[T]]:
             raise TypeError(f"{cls.__name__} must subclass AbstractTransform.")
         if name in TTA_TRANSFORM_REGISTRY:
             raise KeyError(f"Transform '{name}' is already registered.")
-        TTA_TRANSFORM_REGISTRY[name] = cls  # Register the class, not an instance.
+        TTA_TRANSFORM_REGISTRY[name] = cls  # Register class, not an instance
         return cls
     return decorator
 
