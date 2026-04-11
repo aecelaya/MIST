@@ -144,15 +144,6 @@ def add_train_args(parser: ArgParser) -> None:
     g.add_argument("--results", type=str, help="Path to output of MIST pipeline.")
     g.add_argument("--numpy", type=str, help="Path to save preprocessed NumPy data.")
 
-    # Hardware.
-    g.add_argument(
-        "--gpus",
-        nargs="+",
-        default=[-1],
-        type=int,
-        help="IDs of GPUs to use; use -1 for all GPUs.",
-    )
-
     # Model.
     g.add_argument(
         "--model",

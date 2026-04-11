@@ -2,7 +2,6 @@
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
 from typing import List, Optional, Tuple
-import os
 import argparse
 import pandas as pd
 import torch
@@ -94,32 +93,6 @@ def _create_train_dirs(results_dir: Path, has_test_paths: bool) -> None:
         test_pred_dir.mkdir(parents=True, exist_ok=True)
 
 
-def _set_visible_devices(mist_arguments: argparse.Namespace) -> None:
-    """Set visible CUDA devices from CLI args; return number of GPUs."""
-    # Total available GPUs.
-    total = torch.cuda.device_count()
-    if total == 0:
-        raise RuntimeError(
-            "No CUDA devices found; training requires at least one GPU."
-        )
-
-    gpus = getattr(mist_arguments, "gpus", None)
-
-    # None / [] / [-1]  -> all GPUs.
-    if gpus is None or len(gpus) == 0 or (len(gpus) == 1 and gpus[0] == -1):
-        visible_devices = ",".join(str(i) for i in range(total))
-    else:
-        # Minimal validation: indices must be within 0..total-1.
-        invalid = [i for i in gpus if i < 0 or i >= total]
-        if invalid:
-            raise ValueError(
-                f"Requested GPU index/indices out of range {invalid}; "
-                f"available indices are 0..{total - 1}."
-            )
-        visible_devices = ",".join(str(i) for i in gpus)
-
-    os.environ["CUDA_VISIBLE_DEVICES"] = visible_devices
-
 
 def train_entry(argv: Optional[List[str]] = None) -> None:
     """Entrypoint for the training command."""
@@ -145,9 +118,6 @@ def train_entry(argv: Optional[List[str]] = None) -> None:
         )
 
     _create_train_dirs(results_dir, has_test_paths)
-
-    # Set the visible GPUs (None -> use all GPUs)
-    _set_visible_devices(ns)
 
     # Train
     trainer = Patch3DTrainer(ns)

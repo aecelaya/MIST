@@ -76,7 +76,6 @@ def run_all_entry(argv: Optional[List[str]] = None) -> None:
     ]
     train_keys = [
         "results", "numpy",
-        "gpus",
         "model", "patch_size",
         "loss", "composite_loss_weighting",
         "epochs", "batch_size_per_gpu", "learning_rate",

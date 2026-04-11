@@ -35,7 +35,6 @@ def _patch_minimal_cli(monkeypatch) -> None:
     def _add_train_args(parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--results", type=str)
         parser.add_argument("--numpy", type=str)
-        parser.add_argument("--gpus", nargs="+", type=int)
         parser.add_argument("--model", type=str)
         parser.add_argument("--patch-size", nargs=3, type=int)
         parser.add_argument("--loss", type=str)
@@ -71,19 +70,17 @@ def test_ns_to_argv_includes_scalars_bools_lists_and_converts_dashes():
         data="ds.json",
         nfolds=5,
         overwrite=True,             # Boolean True included.
-        gpus=[0, 1],                # List flattened.
         patch_size=(32, 32, 32),    # Tuple flattened.
         model="mednext",
     )
     keys = [
-        "data", "nfolds", "overwrite", "gpus", "patch_size", "model"
+        "data", "nfolds", "overwrite", "patch_size", "model"
     ]
     out = entry._ns_to_argv(ns, keys)
     assert out == [
         "--data", "ds.json",
         "--nfolds", "5",
         "--overwrite",
-        "--gpus", "0", "1",
         "--patch-size", "32", "32", "32",
         "--model", "mednext",
     ]
@@ -134,7 +131,6 @@ def test_parse_run_all_args_explicit_values(monkeypatch, tmp_path):
             "--numpy", str(npy),
             "--nfolds", "3",
             "--overwrite",
-            "--gpus", "0", "1",
             "--epochs", "10",
             "--batch-size-per-gpu", "2",
         ]
@@ -144,7 +140,6 @@ def test_parse_run_all_args_explicit_values(monkeypatch, tmp_path):
     assert ns.numpy == str(npy)
     assert ns.nfolds == 3
     assert ns.overwrite is True
-    assert ns.gpus == [0, 1]
     assert ns.epochs == 10
     assert ns.batch_size_per_gpu == 2
 
@@ -184,7 +179,6 @@ def test_run_all_entry_forwards_subsets_correctly(monkeypatch, tmp_path):
         "--no-preprocess",
         "--compute-dtms",
         # Train.
-        "--gpus", "0", "1",
         "--model", "mednext",
         "--patch-size", "48", "64", "32",
         "--loss", "dice",
@@ -207,7 +201,6 @@ def test_run_all_entry_forwards_subsets_correctly(monkeypatch, tmp_path):
     ]
     train_keys = [
         "results", "numpy",
-        "gpus",
         "model", "patch_size",
         "loss", "composite_loss_weighting",
         "epochs", "batch_size_per_gpu", "learning_rate",
@@ -273,7 +266,6 @@ def test_run_all_entry_handles_false_flags_and_empty_lists(monkeypatch):
     ]
     train_keys = [
         "results", "numpy",
-        "gpus",
         "model", "patch_size",
         "loss", "composite_loss_weighting",
         "epochs", "batch_size_per_gpu", "learning_rate",

@@ -2,7 +2,6 @@
 from typing import List, Tuple
 import argparse
 import json
-import os
 from pathlib import Path
 import pandas as pd
 import pytest
@@ -216,53 +215,6 @@ def test_create_train_dirs_makes_structure(tmp_path, has_test_paths):
         assert (tmp_path / "predictions" / "test").is_dir()
     else:
         assert not (tmp_path / "predictions" / "test").exists()
-
-
-# =============================================================================
-# Tests for _set_visible_devices.
-# =============================================================================
-
-
-def test_set_visible_devices_no_gpus_raises(monkeypatch):
-    """It raises a RuntimeError when torch reports 0 GPUs."""
-    monkeypatch.setattr(
-        entry.torch.cuda, "device_count", lambda: 0, raising=True
-    )
-    with pytest.raises(RuntimeError):
-        entry._set_visible_devices(
-            argparse.Namespace(gpus=[-1])
-        )
-
-
-@pytest.mark.parametrize("cli_gpus", [None, [], [-1]])
-def test_set_visible_devices_all_gpus(monkeypatch, cli_gpus):
-    """It sets CUDA_VISIBLE_DEVICES to all indices for None/[]/[-1]."""
-    monkeypatch.setattr(
-        entry.torch.cuda, "device_count", lambda: 3, raising=True
-    )
-    ns = argparse.Namespace(gpus=cli_gpus)
-    entry._set_visible_devices(ns)
-    assert os.environ.get("CUDA_VISIBLE_DEVICES") == "0,1,2"
-
-
-def test_set_visible_devices_specific_indices(monkeypatch):
-    """It sets CUDA_VISIBLE_DEVICES to the requested indices."""
-    monkeypatch.setattr(
-        entry.torch.cuda, "device_count", lambda: 4, raising=True
-    )
-    ns = argparse.Namespace(gpus=[1, 3])
-    entry._set_visible_devices(ns)
-    assert os.environ.get("CUDA_VISIBLE_DEVICES") == "1,3"
-
-
-def test_set_visible_devices_invalid_indices(monkeypatch):
-    """It raises ValueError when indices are out of range."""
-    monkeypatch.setattr(
-        entry.torch.cuda, "device_count", lambda: 2, raising=True
-    )
-    ns = argparse.Namespace(gpus=[3])
-    with pytest.raises(ValueError):
-        entry._set_visible_devices(ns)
 
 
 # =============================================================================

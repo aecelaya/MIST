@@ -305,7 +305,6 @@ def test_add_train_args_defaults_and_basic_parse(patched_registries):
     ns = parser.parse_args([])
     assert ns.results is None
     assert ns.numpy is None
-    assert ns.gpus == [-1]
     assert ns.model is None
     assert ns.patch_size is None
     assert ns.loss is None
@@ -330,7 +329,6 @@ def test_add_train_args_full_parse_success(patched_registries):
     argv = [
         "--results", "out",
         "--numpy", "npdir",
-        "--gpus", "0", "1",
         "--model", "mednext",
         "--patch-size", "32", "64", "48",
         "--loss", "dice",
@@ -350,7 +348,6 @@ def test_add_train_args_full_parse_success(patched_registries):
 
     assert ns.results == "out"
     assert ns.numpy == "npdir"
-    assert ns.gpus == [0, 1]
     assert ns.model == "mednext"
     assert ns.patch_size == [32, 64, 48]
     assert ns.loss == "dice"
