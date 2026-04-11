@@ -31,7 +31,6 @@ def get_dataset_size_gb(paths_df: pd.DataFrame) -> float:
     return round(total_bytes / 1e9, 4)
 
 
-
 def compute_shape_descriptors(coords_mm: np.ndarray) -> Dict[str, Any]:
     """Compute PCA-based shape descriptors from a set of 3D coordinates.
 

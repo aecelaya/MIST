@@ -8,6 +8,7 @@ from rich.progress import (
 )
 import numpy as np
 
+
 class TrainProgressBar(Progress):
     """Progress bar for training loop with loss and learning rate tracking."""
     def __init__(self, current_epoch, fold, epochs, train_steps):

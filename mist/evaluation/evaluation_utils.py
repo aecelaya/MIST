@@ -188,7 +188,7 @@ def initialize_results_dataframe(
     """Initialize results dataframe from the evaluation configuration.
 
     Args:
-        evaluation_config: Nested dictionary mapping class names to their 
+        evaluation_config: Nested dictionary mapping class names to their
             labels and metrics configurations.
 
     Returns:
@@ -213,7 +213,7 @@ def compute_results_stats(results_df: pd.DataFrame) -> pd.DataFrame:
             patient.
 
     Returns:
-        results_df: Updated results dataframe with statistics added at the 
+        results_df: Updated results dataframe with statistics added at the
             bottom five rows.
     """
     stats_labels = [

@@ -393,7 +393,6 @@ def infer_from_dataframe(
                 preprocessed_image = preprocessed_image.to(torch.float32)
                 preprocessed_image = preprocessed_image.to(device)
 
-
                 # Perform prediction and restoration to original space.
                 prediction = predict_single_example(
                     preprocessed_image=preprocessed_image,

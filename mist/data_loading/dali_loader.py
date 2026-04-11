@@ -216,7 +216,6 @@ class TrainPipeline(GenericPipeline):
             self.use_brightness = use_brightness
             self.use_contrast = use_contrast
 
-
     def load_data(self):
         """Load the image, label, and DTM data from the input readers."""
         image = self.input_images(name="image_reader")
@@ -440,7 +439,7 @@ class TrainPipeline(GenericPipeline):
         Next, the pipeline applies a series of random augmentations to the image
         including zooming, flips, adding noise, blurring, adjusting brightness,
         and changing contrast. The final image, label, and DTM data are then
-        transposed to CDHW format for PyTorch compatibility. 
+        transposed to CDHW format for PyTorch compatibility.
         """
         # Load images, labels, and possibly DTMs. Apply biased cropping to the
         # image, label, and DTM data. Transfer the cropped patches to the GPU.
@@ -621,7 +620,7 @@ def get_training_dataset(
         dali_iter: A DALI iterator for training data loading.
 
     Raises:
-        AssertionError: If the input data is invalid or missing. 
+        AssertionError: If the input data is invalid or missing.
     """
     # Check that inputs are valid.
     utils.validate_train_and_eval_inputs(image_paths, label_paths, dtm_paths)

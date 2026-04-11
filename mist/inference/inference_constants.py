@@ -2,6 +2,7 @@
 from typing import FrozenSet
 import dataclasses
 
+
 @dataclasses.dataclass(frozen=True)
 class InferenceConstants:
     """Dataclass containing constants for MIST inference modules."""

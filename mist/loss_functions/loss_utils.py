@@ -24,7 +24,7 @@ def get_one_hot(y_true: torch.Tensor, n_classes: int) -> torch.Tensor:
 
 class SoftSkeletonize(nn.Module):
     """Soft skeletonization of a binary mask.
-    
+
     Iteratively erodes and opens the image to isolate the centerline.
     """
     def __init__(self, num_iter=40):

@@ -417,7 +417,7 @@ def compute_surface_overlap_at_tolerance(
     computed by correctly taking the area of each surface element into account.
 
     Args:
-        surface_distances: dict with "distances_gt_to_pred", 
+        surface_distances: dict with "distances_gt_to_pred",
         "distances_pred_to_gt" "surfel_areas_gt", "surfel_areas_pred" created by
         compute_surface_distances().
         tolerance_mm: a float value. The tolerance in mm.
@@ -457,7 +457,7 @@ def compute_surface_dice_at_tolerance(
     overlap).
 
     Args:
-        surface_distances: dict with "distances_gt_to_pred", 
+        surface_distances: dict with "distances_gt_to_pred",
         "distances_pred_to_gt", "surfel_areas_gt", "surfel_areas_pred" created
         by compute_surface_distances().
         tolerance_mm: a float value. The tolerance in mm.

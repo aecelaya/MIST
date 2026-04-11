@@ -283,6 +283,7 @@ _NEIGHBOUR_CODE_TO_NORMALS = [
 ]
 # pylint: enable=line-too-long
 
+
 def create_table_neighbour_code_to_surface_area(
         spacing_mm: Tuple[float, float, float],
 ) -> npt.NDArray[np.float64]:

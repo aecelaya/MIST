@@ -30,7 +30,7 @@ class MGNet(MISTModel):
     2. **Horizontal Logic (Nearest Encoder):** Every rising node (decoder)
         receives a skip connection from the *nearest* available encoder node at
         the same resolution level to its left.
-    3. **Diagonal Logic (Neighbor Peak):** A decoder node receives an additional 
+    3. **Diagonal Logic (Neighbor Peak):** A decoder node receives an additional
        input from its immediate left neighbor *only if* that neighbor was a
        local maxima (a "Peak" of a spike).
 
@@ -43,7 +43,7 @@ class MGNet(MISTModel):
         bottleneck_layer_idx: The index of the deepest layer (num_layers - 1).
         num_aux_heads: The number of deep supervision heads (if enabled).
         filters_per_layer: The number of feature channels at each depth.
-        spike_height_schedule: The sequence defining the height of intermediate 
+        spike_height_schedule: The sequence defining the height of intermediate
             spikes (V-cycles) in the grid.
         main_encoder: The initial contracting path module list.
         spikes: The intermediate up/down V-cycles module list.
@@ -270,15 +270,15 @@ class MGNet(MISTModel):
         Generates the recursive V-cycle pattern for W-Net topology.
 
         The sequence is constructed by creating a full pyramid up to max_height
-        and interleaving it with height-1 spikes to maintain high-frequency 
+        and interleaving it with height-1 spikes to maintain high-frequency
         gradients (e.g., [1, 2, 1, 3, 1...]).
 
         Args:
-            max_height: The maximum height (depth from bottleneck) the W-Net 
+            max_height: The maximum height (depth from bottleneck) the W-Net
                 should reach.
 
         Returns:
-            A sequence of integers representing the height of each intermediate 
+            A sequence of integers representing the height of each intermediate
             spike.
         """
         if max_height <= 1:
@@ -368,7 +368,7 @@ class MGNet(MISTModel):
 
     def _init_weights(self, module: nn.Module):
         """
-        Applies Kaiming He initialization to convolutional weights and handles 
+        Applies Kaiming He initialization to convolutional weights and handles
         InstanceNorm initialization.
 
         Args:

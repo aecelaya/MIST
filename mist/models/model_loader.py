@@ -270,7 +270,6 @@ def validate_mist_config_for_model_loading(config: Dict) -> None:
             )
 
 
-
 def load_model_from_config(
     weights_path: str,
     config: Dict,

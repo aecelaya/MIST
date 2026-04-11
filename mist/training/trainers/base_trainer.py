@@ -137,7 +137,7 @@ class BaseTrainer(ABC):
     def _set_seed(self, seed: int) -> None:
         """Seed Python, NumPy, and PyTorch RNGs (DDP-aware).
 
-        Uses the provided base `seed`, offset by the process rank so that each 
+        Uses the provided base `seed`, offset by the process rank so that each
         rank gets a distinct but reproducible RNG stream. Also sets
         PYTHONHASHSEED for consistent hashing across runs.
         """

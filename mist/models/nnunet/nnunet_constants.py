@@ -1,6 +1,7 @@
 """Constants for nnUNet."""
 import dataclasses
 
+
 @dataclasses.dataclass(frozen=True)
 class NNUnetConstants:
     """Data class storing constants for nnUNet."""

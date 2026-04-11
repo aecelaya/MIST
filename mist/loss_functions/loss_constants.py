@@ -11,6 +11,7 @@
 """Dataclass containing constants for MIST loss functions."""
 import dataclasses
 
+
 @dataclasses.dataclass(frozen=True)
 class LossConstants:
     """Dataclass containing constants for MIST loss functions."""

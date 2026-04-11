@@ -219,7 +219,7 @@ def validate_train_and_eval_inputs(
 ) -> None:
     """Validate that the input data is correct.
 
-    Ensures that images, labels, and optional DTM data are provided and that 
+    Ensures that images, labels, and optional DTM data are provided and that
     the lengths of the image, label, and DTM lists match.
 
     Args:
