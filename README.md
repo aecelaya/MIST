@@ -124,6 +124,20 @@ Full documentation, including configuration reference and advanced topics, is at
 
 ## What's New
 
+* April 2026 — **CPU inference support** — `mist_predict` now runs on any
+  machine, including Macs and laptops without an NVIDIA GPU. Install with
+  `pip install mist-medical` (no GPU required).
+* 2025 — **Resume training** — interrupted runs can be continued from the last
+  checkpoint with `--resume`, with atomic checkpointing to prevent corruption.
+* 2025 — **GPU-aware automatic patch size** — the analysis step now derives the
+  patch size from available GPU memory, so the default configuration is
+  hardware-appropriate without manual tuning.
+* 2025 — **Transfer learning** — initialize encoders from pretrained weights
+  with `--pretrained-weights`, and average model weights across folds with
+  `mist_average_weights`.
+* 2025 — **Better training defaults** — AdamW optimizer and gradient clipping
+  are now the defaults, with the clipping threshold exposed via `grad_clip_norm`
+  in `config.json`.
 * September 2025 — [MIST takes 3rd place (repeat) in BraTS 2025 adult glioma challenge @ MICCAI 2025](https://www.synapse.org/Synapse:syn64153130/wiki/633062)
 * November 2024 — MedNeXt models (small, base, medium, large) added to MIST
 * October 2024 — [MIST takes 3rd place in BraTS 2024 adult glioma challenge @ MICCAI 2024](https://www.synapse.org/Synapse:syn53708249/wiki/630150)
