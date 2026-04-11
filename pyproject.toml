@@ -42,11 +42,13 @@ dependencies = [
     "scipy",
     "scikit-learn",
     "scikit-image",
-    "nvidia-dali-cuda120",
     "tensorboard",
     "einops",
     "pytest",
 ]
+
+[project.optional-dependencies]
+train = ["nvidia-dali-cuda120"]
 
 [project.urls]
 homepage = "https://github.com/mist-medical/MIST"

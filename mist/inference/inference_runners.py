@@ -18,7 +18,6 @@ from mist.utils.console import print_section_header, print_error, print_success
 from mist.inference import inference_utils
 from mist.inference.inference_constants import InferenceConstants as ic
 from mist.inference.predictor import Predictor
-from mist.data_loading import dali_loader
 from mist.models import model_loader
 from mist.inference.ensemblers.ensembler_registry import get_ensembler
 from mist.inference.tta.strategies import get_strategy
@@ -187,6 +186,9 @@ def test_on_fold(
     )
 
     # Get DALI loader for streaming preprocessed numpy files.
+    # Import here so that DALI (a training-only dependency) is not required
+    # when running mist_predict, which uses infer_from_dataframe instead.
+    from mist.data_loading import dali_loader  # noqa: PLC0415
     test_loader = dali_loader.get_test_dataset(
         image_paths=test_image_paths,
         seed=config["training"]["seed"],
