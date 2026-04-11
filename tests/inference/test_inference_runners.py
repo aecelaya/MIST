@@ -4,7 +4,9 @@ from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 import copy
+import importlib
 import os
+import sys
 import pytest
 import torch
 import numpy as np
@@ -489,6 +491,55 @@ def test_predict_single_example_skip_true_bypasses_spatial_restore(
 # ==================
 # test_on_fold tests
 # ==================
+
+def test_test_on_fold_raises_if_dali_not_available(
+    monkeypatch, tmp_path, mock_mist_config
+):
+    """test_on_fold raises RuntimeError when dali_loader is None (DALI not installed)."""
+    results_dir, numpy_dir = _prep_dirs(tmp_path)
+    _make_train_df(0).to_csv(results_dir / "train_paths.csv", index=False)
+    _make_bbox_df().to_csv(results_dir / "fg_bboxes.csv", index=False)
+    (results_dir / "config.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(ir, "dali_loader", None)
+    monkeypatch.setattr(ir.io, "read_json_file", lambda _: copy.deepcopy(mock_mist_config))
+    monkeypatch.setattr(
+        training_utils, "get_npy_paths",
+        lambda data_dir, patient_ids: [
+            os.path.join(str(data_dir), f"{pid}.npy") for pid in patient_ids
+        ],
+    )
+
+    mist_args = SimpleNamespace(results=str(results_dir), numpy=str(numpy_dir))
+    with pytest.raises(RuntimeError, match="NVIDIA DALI is required"):
+        ir.test_on_fold(mist_args=mist_args, fold_number=0, device=torch.device("cpu"))
+
+
+def test_dali_import_error_sets_dali_loader_none():
+    """inference_runners.dali_loader is None when the DALI import fails."""
+    import mist.data_loading
+    import mist.inference.inference_runners as runners_mod
+
+    original_sys = sys.modules.get("mist.data_loading.dali_loader")
+    original_attr = getattr(mist.data_loading, "dali_loader", None)
+
+    try:
+        # Setting sys.modules entry to None causes ImportError on import.
+        sys.modules["mist.data_loading.dali_loader"] = None  # type: ignore[assignment]
+        if hasattr(mist.data_loading, "dali_loader"):
+            delattr(mist.data_loading, "dali_loader")
+        importlib.reload(runners_mod)
+        assert runners_mod.dali_loader is None
+    finally:
+        # Restore sys.modules and the package attribute.
+        if original_sys is None:
+            sys.modules.pop("mist.data_loading.dali_loader", None)
+        else:
+            sys.modules["mist.data_loading.dali_loader"] = original_sys
+        if original_attr is not None:
+            mist.data_loading.dali_loader = original_attr
+        importlib.reload(runners_mod)
+
 
 def test_test_on_fold_success_no_crop_tta_enabled(fold_runner, mock_mist_config):
     """One case, no cropping, TTA enabled — output written to correct path."""
