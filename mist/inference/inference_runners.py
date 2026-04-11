@@ -7,12 +7,12 @@ for fold-based evaluation and general test-time prediction from CSV input.
 import argparse
 import os
 from typing import Any, Dict, Optional, Union, List
+
 import ants
 import numpy as np
 import pandas as pd
 import torch
 
-# MIST imports.
 from mist.utils import progress_bar, io
 from mist.utils.console import print_section_header, print_error, print_success
 from mist.inference import inference_utils
@@ -65,7 +65,7 @@ def predict_single_example(
         # skip=True: images were read as-is with no spatial transforms applied.
         # The prediction is already in the original image's voxel space, so
         # just copy the original header directly — no reorient or resample.
-        prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # ANTs stubs don't annotate new_image_like's return type.
+        prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]
     else:
         # Ensure bounding box is defined if cropping was used.
         if (
@@ -94,7 +94,9 @@ def predict_single_example(
         prediction = inference_utils.remap_mask_labels(
             prediction.numpy(), original_labels
         )
-        prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]
+        prediction = (
+            original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]
+        )
     return prediction.astype("uint8")
 
 
@@ -316,7 +318,9 @@ def infer_from_dataframe(
     tta_strategy = mist_configuration["inference"]["tta"]["strategy"]
 
     # Inject patch_size from spatial_config and device before constructing.
-    inferer_params["patch_size"] = mist_configuration["spatial_config"]["patch_size"]
+    inferer_params["patch_size"] = (
+        mist_configuration["spatial_config"]["patch_size"]
+    )
     inferer_params["device"] = device
     inferer = get_inferer(inferer_name)(**inferer_params)
     ensembler = get_ensembler(ensembler_strategy)
@@ -377,7 +381,9 @@ def infer_from_dataframe(
                 # Convert the preprocessed image to a PyTorch tensor and move it
                 # to the device.
                 preprocessed_image = np.transpose(
-                    preprocessed_example["image"],  # type: ignore[index]  # preprocess_example returns Dict[str, Any]; value type is not narrowed.
+                    # preprocess_example returns Dict[str, Any]; value type is
+                    # not narrowed.
+                    preprocessed_example["image"],  # type: ignore[index]
                     axes=ic.NUMPY_TO_TORCH_TRANSPOSE_AXES
                 )
                 preprocessed_image = np.expand_dims(
@@ -394,7 +400,9 @@ def infer_from_dataframe(
                     original_ants_image=anchor_image,
                     mist_configuration=mist_configuration,
                     predictor=predictor,
-                    foreground_bounding_box=preprocessed_example["fg_bbox"],  # type: ignore[index]  # preprocess_example returns Dict[str, Any]; value type is not narrowed.
+                    # preprocess_example returns Dict[str, Any]; value type is
+                    # not narrowed.
+                    foreground_bounding_box=preprocessed_example["fg_bbox"],  # type: ignore[index]
                 )
 
                 # Apply postprocessing if a strategy is provided.
