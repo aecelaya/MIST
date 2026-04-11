@@ -6,22 +6,145 @@ Medical Imaging Segmentation Toolkit
 ![GitHub Repo stars](https://img.shields.io/github/stars/mist-medical/MIST?style=flat)
 ![Coverage](coverage.svg)
 
-## About
-The Medical Imaging Segmentation Toolkit (MIST) is a simple, scalable, and end-to-end 3D medical imaging segmentation 
-framework. MIST allows researchers to seamlessly train, evaluate, and deploy state-of-the-art deep learning models for 3D 
-medical imaging segmentation.
+MIST is a simple, scalable, end-to-end framework for 3D medical image
+segmentation. It handles everything from raw NIfTI files to trained models and
+evaluated predictions, with sensible defaults that work well out of the box and
+a configuration file for when you need more control.
 
-Please cite the following papers if you use this code for your work:
+## Installation
 
-[A. Celaya et al., "PocketNet: A Smaller Neural Network For Medical Image Analysis," in IEEE Transactions on Medical Imaging, doi: 10.1109/TMI.2022.3224873.](https://ieeexplore.ieee.org/document/9964128)
+**Training** (NVIDIA GPU required):
+```bash
+pip install "mist-medical[train]"
+```
 
-[A. Celaya et al. "MIST: A Simple and Scalable End-To-End 3D Medical Imaging Segmentation Framework," arXiv preprint arXiv:2407.21343](https://www.arxiv.org/abs/2407.21343)
+**Inference only** (CPU-compatible, works on Mac):
+```bash
+pip install mist-medical
+```
+
+**Development**:
+```bash
+git clone https://github.com/mist-medical/MIST.git
+cd MIST
+pip install -e ".[train]"   # full
+pip install -e .             # inference only
+```
+
+## Quick Start
+
+**1. Prepare a dataset JSON** describing your data:
+```json
+{
+    "task":        "segmentation",
+    "modality":    "mr",
+    "train-data":  "/path/to/train",
+    "test-data":   "/path/to/test",
+    "mask":        "/path/to/masks",
+    "images":      {"t1": "t1.nii.gz", "t2": "t2.nii.gz"},
+    "labels":      [0, 1, 2]
+}
+```
+
+**2. Run the full pipeline** (analyze → preprocess → train → evaluate):
+```bash
+mist_run_all --data dataset.json \
+             --numpy /path/to/numpy \
+             --results /path/to/results
+```
+
+**3. Run inference** on new data:
+```bash
+mist_predict --models-dir /path/to/results/models \
+             --config /path/to/results/config.json \
+             --paths-csv /path/to/test.csv \
+             --output /path/to/predictions
+```
+
+## Key Features
+
+- **Automatic configuration** — analysis step determines target spacing, patch
+  size, normalization, and foreground cropping from your data
+- **Five-fold cross-validation** by default, with custom fold assignment support
+- **Multi-GPU training** via PyTorch DDP; uses all visible GPUs automatically
+- **GPU-accelerated data loading** via NVIDIA DALI during training
+- **Sliding window inference** with configurable overlap and patch blending
+- **Test-time augmentation** and **multi-model ensembling** at inference
+- **Postprocessing** with learnable, per-class morphological strategies
+- **CPU inference** — `mist_predict` runs on any machine, including Macs
+
+## Supported Architectures
+
+| Model | Key |
+|---|---|
+| nnU-Net | `nnunet` |
+| nnU-Net Pocket | `nnunet-pocket` |
+| MedNeXt (small / base / medium / large) | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large` |
+| FMG-Net | `fmgnet` |
+| W-Net | `wnet` |
+| Swin UNETR (small / base / large) | `swinunetr-small`, `swinunetr-base`, `swinunetr-large` |
+
+Change the architecture in `config.json` or pass `--model <key>` at the command line.
+
+## Supported Loss Functions
+
+| Loss | Key | Notes |
+|---|---|---|
+| Dice | `dice` | |
+| Dice + Cross-Entropy | `dice_ce` | |
+| clDice | `cldice` | Composite |
+| Boundary Loss | `bl` | Composite |
+| Generalized Surface Loss | `gsl` | Composite |
+| Hausdorff Distance Optimal Set | `hdos` | Composite |
+| Volumetric SDDL | `volumetric_sddl` | Composite |
+| Vessel SDDL | `vessel_sddl` | Composite |
+
+Composite losses blend a region-based term with a boundary/distance term,
+weighted by a scheduled alpha. Schedules: `constant`, `linear`, `cosine`.
+
+## Pipeline Commands
+
+| Command | Description |
+|---|---|
+| `mist_run_all` | Run the full pipeline end-to-end |
+| `mist_analyze` | Analyze dataset and generate `config.json` |
+| `mist_preprocess` | Preprocess images into NumPy arrays |
+| `mist_train` | Train models |
+| `mist_predict` | Run inference on new data |
+| `mist_evaluate` | Evaluate predictions against ground truth |
+| `mist_postprocess` | Apply postprocessing strategies |
+| `mist_average_weights` | Average model weights across folds |
+| `mist_convert_msd` | Convert Medical Segmentation Decathlon datasets |
+| `mist_convert_csv` | Convert CSV-formatted datasets |
 
 ## Documentation
-Please see our Read the Docs page [**here**](https://mist-medical.readthedocs.io/).
+
+Full documentation, including configuration reference and advanced topics, is at
+[**mist-medical.readthedocs.io**](https://mist-medical.readthedocs.io/).
 
 ## What's New
-* September 2025 - [MIST takes 3rd place (repeat) in BraTS 2025 adult glioma challenge @ MICCAI 2025](https://www.synapse.org/Synapse:syn64153130/wiki/633062)
-* November 2024 - MedNeXt models (small, base, medium, and large) added to MIST.
-These models can be called with ```--model mednext-<small, base, medium, large>```.
-* October 2024 - [MIST takes 3rd place in BraTS 2024 adult glioma challenge @ MICCAI 2024!](https://www.synapse.org/Synapse:syn53708249/wiki/630150)
+
+* September 2025 — [MIST takes 3rd place (repeat) in BraTS 2025 adult glioma challenge @ MICCAI 2025](https://www.synapse.org/Synapse:syn64153130/wiki/633062)
+* November 2024 — MedNeXt models (small, base, medium, large) added to MIST
+* October 2024 — [MIST takes 3rd place in BraTS 2024 adult glioma challenge @ MICCAI 2024](https://www.synapse.org/Synapse:syn53708249/wiki/630150)
+
+## Citation
+
+If you use MIST in your work, please cite:
+
+```bibtex
+@article{celaya2024mist,
+  title   = {MIST: A Simple and Scalable End-To-End 3D Medical Imaging Segmentation Framework},
+  author  = {Celaya, Adrian and others},
+  journal = {arXiv preprint arXiv:2407.21343},
+  year    = {2024}
+}
+
+@article{celaya2022pocketnet,
+  title   = {PocketNet: A Smaller Neural Network For Medical Image Analysis},
+  author  = {Celaya, Adrian and others},
+  journal = {IEEE Transactions on Medical Imaging},
+  doi     = {10.1109/TMI.2022.3224873},
+  year    = {2022}
+}
+```
