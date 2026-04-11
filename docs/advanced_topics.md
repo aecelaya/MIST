@@ -1149,12 +1149,11 @@ foreground from background.
 ## Multi-GPU training
 
 MIST uses PyTorch's DistributedDataParallel (DDP) for multi-GPU data
-parallelism. By default, MIST will use all visible GPUs on a given system.
-However, you may specify which GPUs MIST uses for training with the `--gpus`
-flag for the `mist_run_all` and `mist_train` commands.
-
-For example, if your system has eight GPUs available, but you only want to
-use GPUs `0` and `5`, then run `mist_run_all <other arguments> --gpus 0 5`.
+parallelism. MIST will use all GPUs visible to the process. On HPC clusters
+(SLURM, LSF, PBS), the job scheduler controls which GPUs are visible via
+`CUDA_VISIBLE_DEVICES` — MIST respects that assignment automatically. On
+shared workstations, set `CUDA_VISIBLE_DEVICES` yourself before running MIST
+to restrict which GPUs are used.
 
 `training.hardware.master_port` is a TCP port number used by PyTorch's
 distributed training backend to coordinate the GPU worker processes during
