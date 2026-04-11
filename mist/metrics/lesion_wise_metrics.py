@@ -50,7 +50,9 @@ def compute_lesion_wise_metrics(
     spacing: Tuple[float, float, float],
     metrics: List[str],
     min_lesion_volume: float = LesionWiseMetricsConstants.MIN_LESION_VOLUME,
-    surface_dice_tolerance_mm: float = LesionWiseMetricsConstants.SURFACE_DICE_TOLERANCE_MM,
+    surface_dice_tolerance_mm: float = (
+        LesionWiseMetricsConstants.SURFACE_DICE_TOLERANCE_MM
+    ),
     dilation_iters: int = LesionWiseMetricsConstants.DILATION_ITERS,
     gt_consolidation_iters: int = LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS,
     reduction: str = "mean",

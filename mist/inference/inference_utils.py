@@ -10,7 +10,6 @@ import pandas as pd
 import torch
 
 # MIST imports.
-from mist.utils import io
 from mist.analyze_data import analyzer_utils
 from mist.preprocessing import preprocess
 from mist.inference.inference_constants import InferenceConstants as ic

@@ -3,7 +3,6 @@ from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Union, Dict
 import torch
-from torch import nn
 
 # MIST imports.
 from mist.models.base_model import MISTModel

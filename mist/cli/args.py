@@ -85,7 +85,7 @@ class ArgParser(ArgumentParser):
             **kwargs,
         )
 
-# pylint: disable=line-too-long
+
 def add_analyzer_args(parser: ArgParser) -> None:
     """Add arguments for the Analyzer class."""
     g = parser.add_argument_group("Analyzer")
@@ -98,9 +98,23 @@ def add_analyzer_args(parser: ArgParser) -> None:
         default=1,
         help="Number of parallel workers for dataset analysis.",
     )
-    parser.flag("--verify", help="Verify dataset integrity before analysis (checks headers, dimensions, etc.).")
-    parser.flag("--data-dump", help="Save a detailed data dump (data_dump.json and data_dump.md) alongside the configuration.")
-    parser.boolean_flag("--overwrite", default=False, help="Overwrite previous configuration/results.")
+    parser.flag(
+        "--verify",
+        help=(
+            "Verify dataset integrity before analysis "
+            "(checks headers, dimensions, etc.)."
+        ),
+    )
+    parser.flag(
+        "--data-dump",
+        help=(
+            "Save a detailed data dump (data_dump.json and data_dump.md) "
+            "alongside the configuration."
+        ),
+    )
+    parser.boolean_flag(
+        "--overwrite", default=False, help="Overwrite previous configuration/results.",
+    )
 
 
 def add_preprocess_args(parser: ArgParser) -> None:
@@ -114,9 +128,13 @@ def add_preprocess_args(parser: ArgParser) -> None:
         default=1,
         help="Number of parallel workers for preprocessing.",
     )
-    parser.boolean_flag("--no-preprocess", default=False, help="Turn off most preprocessing.")
+    parser.boolean_flag(
+        "--no-preprocess", default=False, help="Turn off most preprocessing.",
+    )
     parser.boolean_flag("--compute-dtms", default=False, help="Compute DTMs.")
-    parser.boolean_flag("--overwrite", default=False, help="Overwrite previous configuration/results.")
+    parser.boolean_flag(
+        "--overwrite", default=False, help="Overwrite previous configuration/results.",
+    )
 
 
 def add_train_args(parser: ArgParser) -> None:
@@ -127,27 +145,80 @@ def add_train_args(parser: ArgParser) -> None:
     g.add_argument("--numpy", type=str, help="Path to save preprocessed NumPy data.")
 
     # Hardware.
-    g.add_argument("--gpus", nargs="+", default=[-1], type=int, help="IDs of GPUs to use; use -1 for all GPUs.")
+    g.add_argument(
+        "--gpus",
+        nargs="+",
+        default=[-1],
+        type=int,
+        help="IDs of GPUs to use; use -1 for all GPUs.",
+    )
 
     # Model.
-    g.add_argument("--model", type=str, choices=list_registered_models(), help="Network architecture.")
-    g.add_argument("--patch-size", nargs=3, type=positive_int, metavar=("X", "Y", "Z"), help="Patch size as three ints: X Y Z.")
+    g.add_argument(
+        "--model",
+        type=str,
+        choices=list_registered_models(),
+        help="Network architecture.",
+    )
+    g.add_argument(
+        "--patch-size",
+        nargs=3,
+        type=positive_int,
+        metavar=("X", "Y", "Z"),
+        help="Patch size as three ints: X Y Z.",
+    )
 
     # Loss function.
-    g.add_argument("--loss", type=str, choices=list_registered_losses(), help="Loss function for training.")
-    g.add_argument("--composite-loss-weighting", type=str, choices=list_alpha_schedulers(), help="Weighting schedule for composite losses.")
+    g.add_argument(
+        "--loss",
+        type=str,
+        choices=list_registered_losses(),
+        help="Loss function for training.",
+    )
+    g.add_argument(
+        "--composite-loss-weighting",
+        type=str,
+        choices=list_alpha_schedulers(),
+        help="Weighting schedule for composite losses.",
+    )
 
     # Training loop.
     g.add_argument("--epochs", type=non_negative_int, help="Number of epochs per fold.")
-    g.add_argument("--batch-size-per-gpu", type=positive_int, help="Batch size per GPU/CPU worker.")
+    g.add_argument(
+        "--batch-size-per-gpu",
+        type=positive_int,
+        help="Batch size per GPU/CPU worker.",
+    )
     g.add_argument("--learning-rate", type=positive_float, help="Learning rate.")
-    g.add_argument("--lr-scheduler", type=str, choices=list_lr_schedulers(), help="Learning rate scheduler.")
-    g.add_argument("--warmup-epochs", type=non_negative_int, help="Number of linear warmup epochs before the main LR schedule.")
-    g.add_argument("--optimizer", type=str, choices=list_optimizers(), help="Optimizer to use.")
-    g.add_argument("--l2-penalty", type=positive_float, help="L2 penalty (weight decay).")
+    g.add_argument(
+        "--lr-scheduler",
+        type=str,
+        choices=list_lr_schedulers(),
+        help="Learning rate scheduler.",
+    )
+    g.add_argument(
+        "--warmup-epochs",
+        type=non_negative_int,
+        help="Number of linear warmup epochs before the main LR schedule.",
+    )
+    g.add_argument(
+        "--optimizer", type=str, choices=list_optimizers(), help="Optimizer to use.",
+    )
+    g.add_argument(
+        "--l2-penalty", type=positive_float, help="L2 penalty (weight decay).",
+    )
     g.add_argument("--folds", nargs="+", type=int, help="Specify which folds to run.")
-    g.add_argument("--val-percent", type=float_0_1, help="Percent of training set to use for validation (0.0-1.0).")
-    g.add_argument("--resume", action="store_true", default=False, help="Resume training from the latest checkpoint.")
+    g.add_argument(
+        "--val-percent",
+        type=float_0_1,
+        help="Percent of training set to use for validation (0.0-1.0).",
+    )
+    g.add_argument(
+        "--resume",
+        action="store_true",
+        default=False,
+        help="Resume training from the latest checkpoint.",
+    )
 
     # Evaluation workers.
     g.add_argument(
@@ -183,4 +254,6 @@ def add_train_args(parser: ArgParser) -> None:
     )
 
     # Overwrite.
-    parser.boolean_flag("--overwrite", default=False, help="Overwrite previous configuration/results.")
+    parser.boolean_flag(
+        "--overwrite", default=False, help="Overwrite previous configuration/results.",
+    )

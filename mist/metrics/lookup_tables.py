@@ -1,4 +1,5 @@
 """Modified lookup tables used by surface distance metrics."""
+# ruff: noqa: E501  — long lines are numerical data arrays; reformatting harms readability
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

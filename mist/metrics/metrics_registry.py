@@ -150,7 +150,8 @@ class LesionWiseDice(Metric):
                 "dilation_iters", LesionWiseMetricsConstants.DILATION_ITERS
             ),
             gt_consolidation_iters=kwargs.get(
-                "gt_consolidation_iters", LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS
+                "gt_consolidation_iters",
+                LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS,
             ),
         )
         return result.get("lesion_wise_dice", self.best)
@@ -177,7 +178,8 @@ class LesionWiseHausdorff95(Metric):
                 "dilation_iters", LesionWiseMetricsConstants.DILATION_ITERS
             ),
             gt_consolidation_iters=kwargs.get(
-                "gt_consolidation_iters", LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS
+                "gt_consolidation_iters",
+                LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS,
             ),
         )
         return result.get("lesion_wise_haus95", self.best)
@@ -204,7 +206,8 @@ class LesionWiseSurfaceDice(Metric):
                 "dilation_iters", LesionWiseMetricsConstants.DILATION_ITERS
             ),
             gt_consolidation_iters=kwargs.get(
-                "gt_consolidation_iters", LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS
+                "gt_consolidation_iters",
+                LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS,
             ),
             surface_dice_tolerance_mm=kwargs.get(
                 "tolerance", LesionWiseMetricsConstants.SURFACE_DICE_TOLERANCE_MM

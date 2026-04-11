@@ -187,7 +187,8 @@ def get_default_scheduler_config(name: str) -> Dict[str, Any]:
     Example::
 
         >>> get_default_scheduler_config("linear")
-        {"name": "linear", "params": {"init_pause": 5, "start_val": 1.0, "end_val": 0.0}}
+        {"name": "linear", "params": {
+            "init_pause": 5, "start_val": 1.0, "end_val": 0.0}}
     """
     if name not in ALPHA_SCHEDULER_REGISTRY:
         raise ValueError(

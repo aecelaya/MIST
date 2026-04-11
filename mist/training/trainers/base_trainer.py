@@ -533,12 +533,14 @@ class BaseTrainer(ABC):
                 model, pretrained_weights, strategy
             )
             if rank == 0:
+                n_loaded = len(transfer_summary["loaded"])
+                n_applied = len(transfer_summary["channel_strategy_applied"])
+                n_skipped = len(transfer_summary["skipped"])
                 print_info(
                     f"Pretrained encoder loaded from {pretrained_weights}\n"
-                    f"  Loaded:                   {len(transfer_summary['loaded'])} params\n"
-                    f"  Channel strategy applied: "
-                    f"{len(transfer_summary['channel_strategy_applied'])} params\n"
-                    f"  Skipped:                  {len(transfer_summary['skipped'])} params"
+                    f"  Loaded:                   {n_loaded} params\n"
+                    f"  Channel strategy applied: {n_applied} params\n"
+                    f"  Skipped:                  {n_skipped} params"
                 )
 
         use_ddp = world_size > 1
