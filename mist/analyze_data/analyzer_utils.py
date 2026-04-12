@@ -291,7 +291,7 @@ def _snap_lr_to_nnunet_compatible(
     """
     # Local import to avoid a top-level circular dependency between the
     # analyze_data and models packages.
-    from mist.models.nnunet.nnunet_utils import get_unet_params
+    from mist.models.nnunet.nnunet_utils import get_unet_params  # pylint: disable=import-outside-toplevel
 
     trial = [median_ip, median_ip, median_ip]
     trial[low_res_axis] = lr_patch
@@ -362,9 +362,12 @@ def get_best_patch_size(
     in_plane_axes = [i for i in range(3) if i != low_res_axis]
 
     if anisotropy_ratio > constants.MAX_DIVIDED_BY_MIN_SPACING_THRESHOLD:
-        # Quasi-2D: maximise in-plane resolution; keep low-res axis small.
+        # Quasi-2D: maximize in-plane resolution; keep low-res axis small.
+        # Use min() so the square in-plane patch fits both in-plane axes without
+        # requiring padding on the smaller one (using max() could select a patch
+        # larger than one of the axes).
         median_lr = median_resampled_size[low_res_axis]
-        median_ip = max(median_resampled_size[i] for i in in_plane_axes)
+        median_ip = min(median_resampled_size[i] for i in in_plane_axes)
 
         # Largest low-res patch that leaves the full budget for in-plane.
         # Enforce MIN_LOW_RES_AXIS_PATCH_SIZE unless the image itself is
@@ -379,13 +382,11 @@ def get_best_patch_size(
         )
 
         # In-plane: both axes get the same patch (largest multiple of 32).
-        # Round to nearest int first to avoid floating-point under-snap.
-        # Recompute with the (possibly adjusted) lr_patch so the budget split
-        # stays consistent.
-        ip_patch = _largest_multiple_of_32_leq(
-            int(round(np.sqrt(budget / lr_patch)))
-        )
-        ip_patch = min(ip_patch, median_ip)
+        # Clamp to median_ip before snapping so the snap-to-32 always operates
+        # on a value ≤ median_ip, guaranteeing the result is a valid multiple
+        # of 32 (min(512, 491) = 491 is not a multiple of 32).
+        ip_raw = min(int(round(np.sqrt(budget / lr_patch))), median_ip)
+        ip_patch = _largest_multiple_of_32_leq(ip_raw)
 
         patch = [ip_patch, ip_patch, ip_patch]
         patch[low_res_axis] = lr_patch
@@ -538,7 +539,7 @@ def build_base_config() -> dict[str, Any]:
             "optimizer": "adamw",
             "learning_rate": 0.001,
             "lr_scheduler": "cosine",
-            "warmup_epochs": 0,
+            "warmup_epochs": 20,
             "l2_penalty": 0.0001,
             "grad_clip_norm": 1.0,
             "amp": True,

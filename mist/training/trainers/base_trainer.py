@@ -536,11 +536,23 @@ class BaseTrainer(ABC):
                 n_loaded = len(transfer_summary["loaded"])
                 n_applied = len(transfer_summary["channel_strategy_applied"])
                 n_skipped = len(transfer_summary["skipped"])
+                transferred_keys = set(
+                    transfer_summary["loaded"]
+                    + transfer_summary["channel_strategy_applied"]
+                )
+                model_sd = model.state_dict()
+                loaded_scalars = sum(
+                    model_sd[k].numel() for k in transferred_keys
+                    if k in model_sd
+                )
                 print_info(
                     f"Pretrained encoder loaded from {pretrained_weights}\n"
-                    f"  Loaded:                   {n_loaded} params\n"
-                    f"  Channel strategy applied: {n_applied} params\n"
-                    f"  Skipped:                  {n_skipped} params"
+                    f"  Loaded:                   {n_loaded} tensors "
+                    f"({loaded_scalars:,} scalar parameters)\n"
+                    f"  Channel strategy applied: {n_applied} tensor(s) "
+                    f"(input conv adapted via '{strategy}')\n"
+                    f"  Skipped:                  {n_skipped} tensor(s) "
+                    f"(shape mismatch — kept random init)"
                 )
 
         use_ddp = world_size > 1
@@ -987,7 +999,12 @@ class BaseTrainer(ABC):
         """
         # Enable some performance optimizations.
         torch.set_float32_matmul_precision('high')
-        torch.backends.cudnn.conv.fp32_precision = 'tf32'
+        # torch.backends.cudnn.conv.fp32_precision was added in PyTorch 2.5;
+        # fall back to allow_tf32 which achieves the same effect on older builds.
+        if hasattr(torch.backends.cudnn, 'conv'):
+            torch.backends.cudnn.conv.fp32_precision = 'tf32'
+        else:
+            torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
 
         # Train model.

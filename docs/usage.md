@@ -244,7 +244,7 @@ the following arguments:
 - `--learning-rate`: Initial learning rate. *(default: `0.001`)*
 - `--lr-scheduler`: Learning rate scheduler *(default: `cosine`)*.
 - `--warmup-epochs`: Number of linear warmup epochs before the main LR
-  schedule begins. *(default: `0`)*
+  schedule begins. *(default: `20`)*
 - `--optimizer`: Optimizer *(default: `adamw`)*.
 - `--l2-penalty`: L2 penalty (weight decay). *(default: `0.0001`)*
 - `--folds`: Specify which folds to run. If not provided, all folds are trained.

@@ -27,14 +27,14 @@ def print_info(msg: str) -> None:
 
 def print_warning(msg: str) -> None:
     """Print a yellow warning message."""
-    console.print(f"[yellow]Warning: {msg}[/yellow]")
+    console.print(f"[yellow]Warning:[/yellow] {msg}")
 
 
 def print_error(msg: str) -> None:
     """Print a bold-red error message."""
-    console.print(f"[bold red]Error: {msg}[/bold red]")
+    console.print(f"[bold red]Error:[/bold red] {msg}")
 
 
 def print_success(msg: str) -> None:
     """Print a green success message."""
-    console.print(f"[green]\u2713 {msg}[/green]")
+    console.print(f"[green]\u2713[/green] {msg}")

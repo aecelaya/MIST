@@ -1,6 +1,7 @@
 """Tests for mist.analyze_data.analyze_utils."""
 from typing import Dict, Any, List, Tuple, Union
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,10 @@ import pytest
 
 # MIST imports.
 from mist.analyze_data import analyzer_utils as au
+from mist.analyze_data import analyzer_constants as constants
+
+_C = constants.AnalyzeConstants()
+_REF_BUDGET = _C.PATCH_BUDGET_REFERENCE_VOXELS  # 128^3 = 2,097,152
 
 
 def _make_header(
@@ -913,3 +918,455 @@ class TestBuildEvaluationConfig:
         """build_evaluation_config raises ValueError when absent."""
         with pytest.raises(ValueError, match="Missing 'final_classes'"):
             au.build_evaluation_config({})
+
+
+# ---------------------------------------------------------------------------
+# _largest_multiple_of_32_leq
+# ---------------------------------------------------------------------------
+
+class TestLargestMultipleOf32Leq:
+    """Tests for analyzer_utils._largest_multiple_of_32_leq."""
+
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            pytest.param(32,  32,  id="exact_32"),
+            pytest.param(64,  64,  id="exact_64"),
+            pytest.param(128, 128, id="exact_128"),
+            pytest.param(256, 256, id="exact_256"),
+            pytest.param(512, 512, id="exact_512"),
+        ],
+    )
+    def test_exact_multiples_unchanged(self, value, expected):
+        """Values that are already multiples of 32 are returned as-is."""
+        assert au._largest_multiple_of_32_leq(value) == expected
+
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            pytest.param(33,  32,  id="33_to_32"),
+            pytest.param(63,  32,  id="63_to_32"),
+            pytest.param(65,  64,  id="65_to_64"),
+            pytest.param(96,  96,  id="96_exact"),
+            pytest.param(100, 96,  id="100_to_96"),
+            pytest.param(127, 96,  id="127_to_96"),
+            pytest.param(480, 480, id="480_exact"),
+            pytest.param(491, 480, id="491_to_480"),  # the bug scenario
+            pytest.param(511, 480, id="511_to_480"),
+        ],
+    )
+    def test_non_multiples_snap_down(self, value, expected):
+        """Non-multiples snap down to the nearest multiple of 32."""
+        assert au._largest_multiple_of_32_leq(value) == expected
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(0,  id="zero"),
+            pytest.param(1,  id="one"),
+            pytest.param(20, id="twenty"),
+            pytest.param(31, id="thirty_one"),
+        ],
+    )
+    def test_below_minimum_returns_32(self, value):
+        """Values below 32 are floored to the default minimum of 32."""
+        assert au._largest_multiple_of_32_leq(value) == 32
+
+    def test_custom_minimum_respected(self):
+        """A custom minimum is returned when the snap result is smaller."""
+        assert au._largest_multiple_of_32_leq(10, minimum=64) == 64
+
+    def test_result_is_always_multiple_of_32(self):
+        """Output is always divisible by 32 for a wide range of inputs."""
+        for v in range(1, 600):
+            result = au._largest_multiple_of_32_leq(v)
+            assert result % 32 == 0, f"_largest_multiple_of_32_leq({v}) = {result}"
+
+    def test_result_never_exceeds_input(self):
+        """Output never exceeds the input value."""
+        for v in range(32, 600):
+            assert au._largest_multiple_of_32_leq(v) <= v
+
+
+# ---------------------------------------------------------------------------
+# _get_voxel_budget
+# ---------------------------------------------------------------------------
+
+class TestGetVoxelBudget:
+    """Tests for analyzer_utils._get_voxel_budget."""
+
+    def test_returns_reference_voxels_when_no_cuda(self, monkeypatch):
+        """Falls back to PATCH_BUDGET_DEFAULT_VOXELS when CUDA is unavailable."""
+        monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+        assert au._get_voxel_budget() == _C.PATCH_BUDGET_DEFAULT_VOXELS
+
+    def test_scales_inversely_with_batch_size(self, monkeypatch):
+        """Doubling batch_size halves the per-patch voxel budget (CUDA path)."""
+        class _FakeProps:
+            total_memory = _C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES  # 16 GB
+
+        monkeypatch.setattr("torch.cuda.is_available", lambda: True)
+        monkeypatch.setattr("torch.cuda.device_count", lambda: 1)
+        monkeypatch.setattr("torch.cuda.get_device_properties", lambda i: _FakeProps())
+
+        b1 = au._get_voxel_budget(batch_size_per_gpu=1)
+        b2 = au._get_voxel_budget(batch_size_per_gpu=2)
+        b4 = au._get_voxel_budget(batch_size_per_gpu=4)
+        assert b1 == b2 * 2
+        assert b2 == b4 * 2
+
+    def test_scales_with_gpu_memory(self, monkeypatch):
+        """Budget scales linearly with GPU memory relative to the 16 GB reference."""
+        import torch
+
+        class _FakeProps:
+            def __init__(self, mem):
+                self.total_memory = mem
+
+        monkeypatch.setattr("torch.cuda.is_available", lambda: True)
+        monkeypatch.setattr("torch.cuda.device_count", lambda: 1)
+
+        ref_mem = _C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES  # 16 GB
+        ref_vox = _C.PATCH_BUDGET_REFERENCE_VOXELS
+        ref_bs  = _C.PATCH_BUDGET_REFERENCE_BATCH_SIZE
+
+        monkeypatch.setattr(
+            "torch.cuda.get_device_properties",
+            lambda i: _FakeProps(ref_mem),
+        )
+        assert au._get_voxel_budget(ref_bs) == ref_vox
+
+        monkeypatch.setattr(
+            "torch.cuda.get_device_properties",
+            lambda i: _FakeProps(ref_mem * 2),
+        )
+        assert au._get_voxel_budget(ref_bs) == ref_vox * 2
+
+    def test_uses_minimum_gpu_memory_across_devices(self, monkeypatch):
+        """When multiple GPUs are present the smallest memory device is used."""
+        class _FakeProps:
+            def __init__(self, mem):
+                self.total_memory = mem
+
+        mems = [32 * (1024 ** 3), 16 * (1024 ** 3)]  # 32 GB and 16 GB
+        monkeypatch.setattr("torch.cuda.is_available", lambda: True)
+        monkeypatch.setattr("torch.cuda.device_count", lambda: 2)
+        monkeypatch.setattr(
+            "torch.cuda.get_device_properties",
+            lambda i: _FakeProps(mems[i]),
+        )
+        expected = int(
+            min(mems)
+            / _C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES
+            * _C.PATCH_BUDGET_REFERENCE_VOXELS
+            * _C.PATCH_BUDGET_REFERENCE_BATCH_SIZE
+            / 2
+        )
+        assert au._get_voxel_budget(batch_size_per_gpu=2) == expected
+
+
+# ---------------------------------------------------------------------------
+# get_best_patch_size — shared helpers
+# ---------------------------------------------------------------------------
+
+def _patch_budget(budget: int):
+    """Context manager: pin the voxel budget to a fixed value."""
+    return patch(
+        "mist.analyze_data.analyzer_utils._get_voxel_budget",
+        return_value=budget,
+    )
+
+def _patch_snap_identity():
+    """Context manager: make _snap_lr_to_nnunet_compatible a no-op."""
+    return patch(
+        "mist.analyze_data.analyzer_utils._snap_lr_to_nnunet_compatible",
+        side_effect=lambda lr, *_a, **_kw: lr,
+    )
+
+
+# ---------------------------------------------------------------------------
+# get_best_patch_size — invariants
+# ---------------------------------------------------------------------------
+
+def _is_quasi2d(spacing: list) -> bool:
+    """Return True if spacing triggers quasi-2D mode."""
+    return max(spacing) / min(spacing) > _C.MAX_DIVIDED_BY_MIN_SPACING_THRESHOLD
+
+
+def _low_res_axis(spacing: list) -> int:
+    """Return the index of the low-resolution axis."""
+    return int(np.argmax(spacing))
+
+
+class TestGetBestPatchSizeInvariants:
+    """Universal invariants that must hold for every get_best_patch_size call."""
+
+    # (median_resampled_size, target_spacing, budget) triples that exercise
+    # both quasi-2D and isotropic branches across a range of GPU sizes.
+    _CASES = [
+        # Quasi-2D cases (anisotropy > 3)
+        ([491, 404, 52],  [0.81, 0.81, 3.98],  _REF_BUDGET),   # reported bug
+        ([256, 256, 10],  [0.5,  0.5,  3.0],   _REF_BUDGET),   # thin-slice CT (ratio=6)
+        ([128, 128, 20],  [1.0,  1.0,  5.0],   _REF_BUDGET * 4),
+        ([300, 300, 8],   [0.6,  0.6,  4.0],   _REF_BUDGET // 2),
+        ([200, 180, 15],  [0.8,  0.8,  4.0],   _REF_BUDGET),
+        # Isotropic cases (anisotropy ≤ 3)
+        ([128, 128, 128], [1.0,  1.0,  1.0],   _REF_BUDGET),
+        ([64,  64,  64],  [1.5,  1.5,  1.5],   _REF_BUDGET),
+        ([200, 180, 160], [0.8,  0.9,  1.0],   _REF_BUDGET),
+        ([512, 512, 400], [0.5,  0.5,  0.5],   _REF_BUDGET * 2),
+        ([96,  80,  72],  [1.2,  1.2,  2.0],   _REF_BUDGET),   # mild anisotropy
+    ]
+
+    @pytest.mark.parametrize(
+        "median, spacing, budget",
+        [pytest.param(*c, id=f"case{i}") for i, c in enumerate(_CASES)],
+    )
+    def test_in_plane_dims_are_multiples_of_32(self, median, spacing, budget):
+        """In-plane patch dimensions must be divisible by 32 in all modes.
+
+        In quasi-2D mode the low-res axis is snapped by _snap_lr_to_nnunet_compatible
+        (which uses nnUNet-specific strides, not 32), so only in-plane axes are
+        required to be multiples of 32.  In isotropic mode all axes are in-plane.
+        """
+        with _patch_budget(budget), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(median, spacing)
+        if _is_quasi2d(spacing):
+            lr = _low_res_axis(spacing)
+            in_plane = [i for i in range(3) if i != lr]
+        else:
+            in_plane = [0, 1, 2]
+        for i in in_plane:
+            assert patch_size[i] % 32 == 0, (
+                f"In-plane axis {i}: patch={patch_size} has non-multiple-of-32 dim"
+            )
+
+    @pytest.mark.parametrize(
+        "median, spacing, budget",
+        [pytest.param(*c, id=f"case{i}") for i, c in enumerate(_CASES)],
+    )
+    def test_in_plane_dims_at_least_32(self, median, spacing, budget):
+        """In-plane patch dimensions must be at least 32.
+
+        The low-res axis in quasi-2D mode may legitimately be smaller than 32
+        (e.g. 8 slices for thick-slice CT) since MIN_LOW_RES_AXIS_PATCH_SIZE=5.
+        """
+        with _patch_budget(budget), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(median, spacing)
+        if _is_quasi2d(spacing):
+            lr = _low_res_axis(spacing)
+            in_plane = [i for i in range(3) if i != lr]
+        else:
+            in_plane = [0, 1, 2]
+        for i in in_plane:
+            assert patch_size[i] >= 32, (
+                f"In-plane axis {i}: patch={patch_size} has dim < 32"
+            )
+
+    @pytest.mark.parametrize(
+        "median, spacing, budget",
+        [pytest.param(*c, id=f"case{i}") for i, c in enumerate(_CASES)],
+    )
+    def test_patch_fits_within_median_image(self, median, spacing, budget):
+        """No patch dimension should exceed the corresponding median image size."""
+        with _patch_budget(budget), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(median, spacing)
+        for p, m in zip(patch_size, median):
+            assert p <= m, f"patch dim {p} exceeds median size {m}"
+
+    @pytest.mark.parametrize(
+        "median, spacing, budget",
+        [pytest.param(*c, id=f"case{i}") for i, c in enumerate(_CASES)],
+    )
+    def test_returns_three_dimensions(self, median, spacing, budget):
+        """Patch size must always be a list of exactly 3 integers."""
+        with _patch_budget(budget), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(median, spacing)
+        assert len(patch_size) == 3
+        assert all(isinstance(d, int) for d in patch_size)
+
+
+# ---------------------------------------------------------------------------
+# get_best_patch_size — quasi-2D mode
+# ---------------------------------------------------------------------------
+
+class TestGetBestPatchSizeQuasi2D:
+    """Tests for the quasi-2D branch (anisotropy ratio > MAX threshold)."""
+
+    # Spacing where z-axis is the low-res axis (3.98/0.81 ≈ 4.9 > 3.0).
+    _ANISO_SPACING = [0.81, 0.81, 3.98]
+    _ANISO_MEDIAN  = [491, 404, 52]
+
+    def test_regression_bug_ip_patch_is_multiple_of_32(self):
+        """Regression: ip_patch must be a multiple of 32 even when clamped
+        to median_ip.  Before the fix min(512, 491) = 491 was returned raw."""
+        with _patch_budget(_REF_BUDGET), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(
+                self._ANISO_MEDIAN, self._ANISO_SPACING
+            )
+        assert patch_size[0] % 32 == 0
+        assert patch_size[1] % 32 == 0
+        assert patch_size[0] != 491, "491 is not a multiple of 32 — snap-order bug"
+
+    def test_regression_bug_exact_values(self):
+        """Regression: with REF_BUDGET and snap=identity the result is [384,384,8].
+
+        median_ip = min(491, 404) = 404 → largest multiple of 32 ≤ 404 = 384.
+        (Before the max→min fix ip_patch was 480, which exceeded axis-1 size 404.)
+        """
+        with _patch_budget(_REF_BUDGET), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(
+                self._ANISO_MEDIAN, self._ANISO_SPACING
+            )
+        assert patch_size[0] == 384
+        assert patch_size[1] == 384
+
+    def test_low_res_axis_identified_correctly(self):
+        """The axis with the largest spacing gets the small (lr) patch size."""
+        # z has the largest spacing → index 2 should be the small dimension.
+        with _patch_budget(_REF_BUDGET), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(
+                [200, 200, 30], [0.8, 0.8, 4.0]
+            )
+        # In quasi-2D mode in-plane ≥ low-res is not guaranteed by maths, but
+        # the low-res patch should be smaller than the in-plane patches.
+        assert patch_size[2] <= patch_size[0]
+        assert patch_size[2] <= patch_size[1]
+
+    def test_lr_patch_respects_min_low_res_size(self):
+        """lr_patch never drops below MIN_LOW_RES_AXIS_PATCH_SIZE."""
+        # Tiny image depth + tiny budget → lr_patch could underflow without the clip.
+        with _patch_budget(32 ** 3), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(
+                [64, 64, 6], [0.5, 0.5, 4.0]
+            )
+        # low-res axis is index 2; must be ≥ min(MIN_LOW_RES_AXIS_PATCH_SIZE, 6)
+        min_lr = min(_C.MIN_LOW_RES_AXIS_PATCH_SIZE, 6)
+        assert patch_size[2] >= min_lr
+
+    def test_lr_patch_does_not_exceed_median_lr(self):
+        """lr_patch never exceeds the median depth of the image."""
+        median = [300, 300, 20]
+        with _patch_budget(_REF_BUDGET * 8), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(median, [0.8, 0.8, 5.0])
+        # low-res axis is index 2
+        assert patch_size[2] <= median[2]
+
+    def test_in_plane_both_axes_equal(self):
+        """Both in-plane axes always receive the same patch size."""
+        with _patch_budget(_REF_BUDGET), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(
+                self._ANISO_MEDIAN, self._ANISO_SPACING
+            )
+        assert patch_size[0] == patch_size[1]
+
+    def test_quasi2d_triggered_just_above_threshold(self):
+        """Anisotropy ratio just above threshold enters quasi-2D mode."""
+        # ratio = 3.1 / 1.0 = 3.1 > 3.0 → quasi-2D
+        with _patch_budget(_REF_BUDGET), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(
+                [200, 200, 40], [1.0, 1.0, 3.1]
+            )
+        # Low-res axis (z) should be the smallest.
+        assert patch_size[2] <= patch_size[0]
+
+    def test_x_axis_as_low_res(self):
+        """Quasi-2D correctly handles x as the low-resolution axis."""
+        # x spacing is largest → axis 0 is low-res
+        with _patch_budget(_REF_BUDGET), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(
+                [15, 256, 256], [5.0, 0.8, 0.8]
+            )
+        # axis 0 should be the small dimension
+        assert patch_size[0] <= patch_size[1]
+        assert patch_size[0] <= patch_size[2]
+
+    @pytest.mark.parametrize(
+        "batch_size, expected_ordering",
+        [
+            pytest.param(1, "larger",  id="batch1_larger_patch"),
+            pytest.param(4, "smaller", id="batch4_smaller_patch"),
+        ],
+    )
+    def test_larger_batch_size_gives_smaller_patch(self, batch_size, expected_ordering):
+        """Budget scales inversely with batch_size so patch volume shrinks."""
+        with _patch_snap_identity():
+            patch_b2 = au.get_best_patch_size(
+                [300, 300, 40], [0.8, 0.8, 4.0], batch_size_per_gpu=2
+            )
+            patch_bx = au.get_best_patch_size(
+                [300, 300, 40], [0.8, 0.8, 4.0], batch_size_per_gpu=batch_size
+            )
+        vol_b2 = int(np.prod(patch_b2))
+        vol_bx = int(np.prod(patch_bx))
+        if expected_ordering == "larger":
+            assert vol_bx >= vol_b2
+        else:
+            assert vol_bx <= vol_b2
+
+
+# ---------------------------------------------------------------------------
+# get_best_patch_size — 3D isotropic mode
+# ---------------------------------------------------------------------------
+
+class TestGetBestPatchSizeIsotropic:
+    """Tests for the 3D isotropic branch (anisotropy ratio ≤ MAX threshold)."""
+
+    def test_isotropic_spacing_yields_roughly_cubic_patch(self):
+        """Isotropic spacing → all three patch dims should be equal."""
+        with _patch_budget(_REF_BUDGET), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(
+                [256, 256, 256], [1.0, 1.0, 1.0]
+            )
+        assert patch_size[0] == patch_size[1] == patch_size[2]
+
+    def test_budget_constrains_patch_volume(self):
+        """Patch voxel count should not exceed the budget by more than 32³."""
+        budget = _REF_BUDGET
+        with _patch_budget(budget), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(
+                [256, 256, 256], [1.0, 1.0, 1.0]
+            )
+        volume = int(np.prod(patch_size))
+        # Allow one 32-voxel snap-up per axis beyond the theoretical budget.
+        assert volume <= budget + 3 * 32 * (budget ** (2 / 3))
+
+    def test_small_image_clamped_to_median_size(self):
+        """When the image is smaller than the budget allows, patch ≤ image size."""
+        # Tiny image: budget would suggest larger than image → clamp.
+        with _patch_budget(_REF_BUDGET * 10), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(
+                [64, 64, 64], [1.0, 1.0, 1.0]
+            )
+        assert patch_size[0] <= 64
+        assert patch_size[1] <= 64
+        assert patch_size[2] <= 64
+
+    def test_non_cubic_image_distributes_budget_by_spacing(self):
+        """Anisotropic image (but below threshold) is handled in isotropic mode."""
+        # ratio = 2.0/1.0 = 2.0 ≤ 3.0 → isotropic mode
+        with _patch_budget(_REF_BUDGET), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(
+                [200, 180, 100], [1.0, 1.0, 2.0]
+            )
+        # All invariants should still hold.
+        assert all(d % 32 == 0 for d in patch_size)
+        assert all(d >= 32 for d in patch_size)
+
+    def test_isotropic_just_below_anisotropy_threshold(self):
+        """Anisotropy ratio just below threshold stays in isotropic mode."""
+        # ratio = 3.0 / 1.0 = 3.0, which is NOT > threshold → isotropic
+        with _patch_budget(_REF_BUDGET), _patch_snap_identity():
+            patch_size = au.get_best_patch_size(
+                [128, 128, 128], [1.0, 1.0, 3.0]
+            )
+        assert all(d % 32 == 0 for d in patch_size)
+        assert all(d >= 32 for d in patch_size)
+
+    def test_large_budget_clamped_to_image_size(self):
+        """A very large budget results in patch ≤ image on all axes."""
+        with _patch_budget(_REF_BUDGET * 100), _patch_snap_identity():
+            median = [96, 80, 72]
+            patch_size = au.get_best_patch_size(median, [1.0, 1.0, 1.0])
+        for p, m in zip(patch_size, median):
+            assert p <= m

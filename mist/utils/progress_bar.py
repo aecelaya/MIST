@@ -1,12 +1,15 @@
 """Progress bars for MIST training and validation loops."""
+import numpy as np
 from rich.progress import (
     BarColumn,
-    TextColumn,
-    Progress,
     MofNCompleteColumn,
-    TimeElapsedColumn
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
 )
-import numpy as np
 
 
 class TrainProgressBar(Progress):
@@ -88,20 +91,24 @@ class ValidationProgressBar(Progress):
 
 
 def get_progress_bar(task_name: str) -> Progress:
-    """Set up rich progress bar.
+    """Return a configured Rich progress bar.
 
     Args:
-        task_name: Name of the task. This will be displayed on the left side of
-            the progress bar.
+        task_name: Label displayed on the left side of the progress bar.
 
     Returns:
-        A rich progress bar object.
+        A Rich :class:`~rich.progress.Progress` instance that writes to the
+        shared MIST console.
     """
-    # Set up rich progress bar
+    from mist.utils.console import console
     return Progress(
-        TextColumn(task_name),
+        SpinnerColumn(),
+        TextColumn(f"[bold blue]{task_name}"),
         BarColumn(),
         MofNCompleteColumn(),
-        TextColumn("•"),
-        TimeElapsedColumn()
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=False,
     )

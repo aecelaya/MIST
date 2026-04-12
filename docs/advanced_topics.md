@@ -82,7 +82,7 @@ Below is an example of a valid `config.json` file.
     "optimizer": "adamw",
     "learning_rate": 0.001,
     "lr_scheduler": "cosine",
-    "warmup_epochs": 0,
+    "warmup_epochs": 20,
     "l2_penalty": 1e-04,
     "grad_clip_norm": 1.0,
     "amp": true,
@@ -901,7 +901,8 @@ LR
        0     warmup_epochs
 ```
 
-Warmup is off by default (`warmup_epochs: 0`). It is most useful when:
+The default is `warmup_epochs: 20`, which works well for the default 1000-epoch
+run with AdamW and cosine decay. Warmup is most important when:
 
 - Using transformer-based architectures such as SwinUNETR, where large gradient
   updates in early epochs can destabilize attention weights.
@@ -909,9 +910,8 @@ Warmup is off by default (`warmup_epochs: 0`). It is most useful when:
   sudden full-LR update can damage learned features before the rest of the
   network has adapted.
 
-A warmup of 5–10 epochs is a reasonable starting point for most cases. For
-longer runs (1000 epochs) with transformer architectures, 20–30 epochs is more
-appropriate.
+For shorter runs or simpler CNN architectures, you can reduce or disable warmup
+with `--warmup-epochs 0`.
 
 ### Examples
 
@@ -924,13 +924,13 @@ mist_train --numpy /path/to/preprocessed/npy/files \
            --lr-scheduler polynomial
 ```
 
-Run with cosine annealing and a 10-epoch linear warmup.
+Run with cosine annealing and a 20-epoch linear warmup (the default).
 
 ```console
 mist_train --numpy /path/to/preprocessed/npy/files \
            --results /path/to/results/folder \
            --lr-scheduler cosine \
-           --warmup-epochs 10
+           --warmup-epochs 20
 ```
 
 Or set it directly in `config.json`:
@@ -938,7 +938,7 @@ Or set it directly in `config.json`:
 ```json
 "training": {
     "lr_scheduler": "cosine",
-    "warmup_epochs": 10
+    "warmup_epochs": 20
 }
 ```
 

@@ -5,10 +5,13 @@ import numpy as np
 import pytest
 from rich.progress import (
     BarColumn,
-    TextColumn,
-    Progress,
     MofNCompleteColumn,
-    TimeElapsedColumn
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
 )
 
 # MIST imports.
@@ -217,15 +220,17 @@ def test_get_progress_bar_structure_and_usage():
     # Basic type.
     assert isinstance(pb, Progress)
 
-    # Verify the configured columns: [TextColumn, BarColumn, MofN,
-    # TextColumn("•"), TimeElapsed]
+    # Verify the configured columns:
+    # [Spinner, TextColumn, Bar, MofN, TaskProgress, TimeElapsed, TimeRemaining]
     cols = pb.columns
-    assert len(cols) == 5
-    assert isinstance(cols[0], TextColumn)
-    assert isinstance(cols[1], BarColumn)
-    assert isinstance(cols[2], MofNCompleteColumn)
-    assert isinstance(cols[3], TextColumn)
-    assert isinstance(cols[4], TimeElapsedColumn)
+    assert len(cols) == 7
+    assert isinstance(cols[0], SpinnerColumn)
+    assert isinstance(cols[1], TextColumn)
+    assert isinstance(cols[2], BarColumn)
+    assert isinstance(cols[3], MofNCompleteColumn)
+    assert isinstance(cols[4], TaskProgressColumn)
+    assert isinstance(cols[5], TimeElapsedColumn)
+    assert isinstance(cols[6], TimeRemainingColumn)
 
     # Ensure it behaves as a context manager and can run a task.
     # This should not raise and should allow advancing to completion.
