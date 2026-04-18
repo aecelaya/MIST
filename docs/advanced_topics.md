@@ -1014,6 +1014,196 @@ loading weights. If the input channels differ between source and target, the
     avoid damaging the pretrained encoder features with a large initial LR
     update. See [Linear warmup](#linear-warmup) for details.
 
+## MISFIT integration
+
+[MISFIT](https://github.com/mist-medical/MISFIT) is a companion tool for
+training 3D medical imaging foundation models via self-supervised learning.
+MISFIT pretrains a **SwinViT encoder** on unlabeled NIfTI volumes using a
+masked autoencoder (MAE) objective — no segmentation labels are required.
+The pretrained encoder transfers directly into MIST's SwinUNETR architectures,
+giving the segmentation model a better initialization than random weights,
+especially when labeled data is scarce.
+
+### Overview
+
+```
+Unlabeled NIfTI corpus
+        │
+        ▼
+  misfit_index          ← scan paths, compute intensity stats, assign splits
+        │
+        ▼
+  misfit_train          ← self-supervised MAE pretraining
+        │                 encoder_weights.pt saved automatically
+        ▼
+  misfit_evaluate /     ← optional: verify reconstruction quality
+  misfit_inspect
+        │
+        ▼
+  mist_train            ← supervised segmentation fine-tuning
+  --pretrained-weights  ← point at encoder_weights.pt
+```
+
+### Step 1 — Build the MISFIT index
+
+`misfit_index` scans your NIfTI corpus, computes per-volume intensity
+statistics (p1, p99, foreground mean/std), voxel spacing, and affine
+transform, and assigns train/val/test splits. The output is a single Parquet
+file consumed by all downstream MISFIT commands.
+
+Prepare a CSV (or Parquet) file with a `path` column listing absolute paths
+to your NIfTI files:
+
+```csv
+path
+/data/volumes/CT_001.nii.gz
+/data/volumes/CT_002.nii.gz
+/data/volumes/CT_003.nii.gz
+```
+
+Then run `misfit_index`:
+
+```console
+misfit_index --input  /data/paths.csv \
+             --output /data/index.parquet
+```
+
+On first run, `misfit_index` also writes a companion
+`<output_stem>_config.json` recording the split ratios and random seed. Edit
+it and re-run `misfit_index` to change split proportions.
+
+### Step 2 — Pretrain with MISFIT
+
+Run MAE pretraining on the indexed corpus. MISFIT trains a single-channel
+encoder — modalities are treated independently:
+
+```console
+misfit_train --index   /data/index.parquet \
+             --results /runs/pretrain
+```
+
+For multi-GPU training, use `torchrun`:
+
+```console
+torchrun --nproc_per_node=4 \
+    $(which misfit_train) \
+        --index   /data/index.parquet \
+        --results /runs/pretrain \
+        --model   swinunetr-small
+```
+
+The model variant (`swinunetr-small`, `swinunetr-base`, `swinunetr-large`)
+**must match** the MIST SwinUNETR variant you plan to fine-tune — both tools
+use the same variant names and identical `feature_size` values.
+
+Training writes the following outputs:
+
+```text
+/runs/pretrain/
+    checkpoints/
+        checkpoint.pt       Latest checkpoint (overwritten each epoch).
+    models/
+        best_model.pt       Full MAE checkpoint (best validation loss).
+        encoder_weights.pt  Encoder-only weights, remapped for MIST.
+    config.json             Architecture and hyperparameter record.
+```
+
+`encoder_weights.pt` is saved automatically whenever the validation loss
+improves. It contains encoder weights with keys remapped from
+`encoder.*` to `model.swinViT.*` — the format MIST's SwinUNETR expects —
+so no manual export step is required.
+
+### Step 3 — Verify reconstruction quality (optional)
+
+Before transferring weights, confirm the encoder has learned meaningful
+representations. `misfit_evaluate` reports masked reconstruction metrics on
+the validation split:
+
+```console
+misfit_evaluate --checkpoint  /runs/pretrain/models/best_model.pt \
+                --index       /data/index.parquet \
+                --config      /runs/pretrain/config.json \
+                --output-csv  /runs/pretrain/eval.csv
+```
+
+`misfit_inspect` produces full-volume reconstruction NIfTIs for visual
+review in ITK-SNAP or 3D Slicer:
+
+```console
+misfit_inspect --checkpoint  /runs/pretrain/models/best_model.pt \
+               --index       /data/index.parquet \
+               --config      /runs/pretrain/config.json \
+               --output-dir  /runs/pretrain/reconstructions
+```
+
+### Step 4 — Fine-tune in MIST
+
+Pass `encoder_weights.pt` to `mist_train` via `--pretrained-weights`. The
+architecture variant must match the one used during MISFIT pretraining:
+
+```console
+mist_train \
+    --numpy              /path/to/preprocessed/data \
+    --results            /path/to/mist/results \
+    --model              swinunetr-small \
+    --pretrained-weights /runs/pretrain/models/encoder_weights.pt \
+    --warmup-epochs      10
+```
+
+### Handling channel mismatches
+
+MISFIT trains on single-channel images. MIST tasks are often multi-channel
+(e.g., four MRI contrasts for brain tumor segmentation). The
+`--input-channel-strategy` flag controls how the single-channel patch
+embedding is adapted to the multi-channel MIST model:
+
+| Strategy  | Behaviour |
+|-----------|-----------|
+| `average` | Average source channels to one, then tile to match the target channel count. *(default)* |
+| `first`   | Use only the first source channel, then tile to match the target channel count. |
+| `skip`    | Keep the patch embedding at random initialization; do not transfer it. |
+
+`average` is the recommended default — it preserves the magnitude of the
+pretrained embedding while expanding it to the required number of input
+channels:
+
+```console
+mist_train \
+    --numpy                  /path/to/preprocessed/data \
+    --results                /path/to/mist/results \
+    --model                  swinunetr-small \
+    --pretrained-weights     /runs/pretrain/models/encoder_weights.pt \
+    --input-channel-strategy average \
+    --warmup-epochs          10
+```
+
+### When MISFIT pretraining helps most
+
+MISFIT pretraining is most beneficial in **low-label regimes** — tasks where
+the number of annotated cases is small relative to the model capacity. When
+labels are plentiful a well-tuned random initialization often closes the gap.
+
+Practical guidelines:
+
+- **Few labeled cases (< ~50)** — expect the largest gains. The pretrained
+  encoder provides strong anatomical representations that reduce the number of
+  labeled cases needed to reach a given Dice score.
+- **Domain match matters** — pretraining on volumes from the same scanner,
+  field strength, and modality as the target task transfers better than
+  out-of-domain pretraining.
+- **Warmup is important** — always use `--warmup-epochs` (5–10 epochs is a
+  good starting point) when fine-tuning from MISFIT weights. A full-LR update
+  at epoch 0 can damage pretrained encoder features before the decoder has
+  adapted. See [Linear warmup](#linear-warmup).
+
+!!! note
+    MISFIT pretraining is only compatible with MIST's SwinUNETR architectures
+    (`swinunetr-small`, `swinunetr-base`, `swinunetr-large`). The key remapping
+    in MISFIT's `encoder_weights.pt` targets the `model.swinViT.*` prefix that
+    MIST's SwinUNETR implementation expects. Other MIST architectures (nnUNet,
+    MedNeXt, FMG-Net, W-Net) have different encoder structures and are not
+    compatible with MISFIT checkpoints.
+
 ## Docker
 The MIST package is also available as a Docker image. Start by pulling the
 `mistmedical/mist` image from DockerHub:
