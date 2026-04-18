@@ -4,7 +4,6 @@ import pytest
 from unittest.mock import patch
 
 # MIST imports.
-from mist.metrics import lesion_wise_metrics
 from mist.metrics.lesion_wise_metrics import (
     _consolidate_gt_lesions,
     compute_lesion_wise_metrics,

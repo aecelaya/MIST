@@ -244,15 +244,6 @@ def test_run_all_entry_handles_false_flags_and_empty_lists(monkeypatch):
         raising=True,
     )
 
-    argv = [
-        "--data", "d.json",
-        "--results", "r",
-        "--numpy", "n",
-        # Explicitly false flags and empty list.
-        # (with our minimal CLI, absence of flag == False; sim. by not passing).
-        "--folds",  # Empty list not representable on CLI, verify via ns below.
-    ]
-
     # Parse and construct expected.
     ns = entry._parse_run_all_args(
         argv=["--data", "d.json", "--results", "r", "--numpy", "n"]

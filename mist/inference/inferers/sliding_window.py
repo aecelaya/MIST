@@ -13,12 +13,13 @@ from mist.inference.inference_utils import get_default_device
 @register_inferer("sliding_window")
 class SlidingWindowInferer(AbstractInferer):
     """Sliding window inference using MONAI's built-in API."""
+
     def __init__(
         self,
         patch_size: Tuple[int, int, int],
-        patch_overlap: float=0.5,
-        patch_blend_mode: str="gaussian",
-        device: Optional[Union[str, torch.device]]=None,
+        patch_overlap: float = 0.5,
+        patch_blend_mode: str = "gaussian",
+        device: Optional[Union[str, torch.device]] = None,
     ):
         """Initialize the sliding window inferer.
 

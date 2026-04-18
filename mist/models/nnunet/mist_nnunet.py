@@ -26,6 +26,7 @@ class NNUNet(MISTModel):
     (e.g., 256×256×5); the adaptive topology will automatically use stride-1 in
     the thin axis.
     """
+
     def __init__(
         self,
         in_channels: int,

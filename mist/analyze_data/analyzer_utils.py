@@ -6,9 +6,11 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import KFold
+import torch
 
 # MIST imports.
 from mist.analyze_data.analyzer_constants import AnalyzeConstants as constants
+from mist.models.nnunet.nnunet_utils import get_unet_params
 from mist.utils import io as io_utils
 
 
@@ -225,7 +227,6 @@ def _get_voxel_budget(batch_size_per_gpu: int = 2) -> int:
     Returns:
         Per-patch voxel budget as a positive integer.
     """
-    import torch  # local import — torch may not be installed in all envs
     if torch.cuda.is_available() and torch.cuda.device_count() > 0:
         min_mem = min(
             torch.cuda.get_device_properties(i).total_memory
@@ -289,10 +290,6 @@ def _snap_lr_to_nnunet_compatible(
     Returns:
         Snapped lr_patch that is divisible by z_divisor.
     """
-    # Local import to avoid a top-level circular dependency between the
-    # analyze_data and models packages.
-    from mist.models.nnunet.nnunet_utils import get_unet_params  # pylint: disable=import-outside-toplevel
-
     trial = [median_ip, median_ip, median_ip]
     trial[low_res_axis] = lr_patch
     _, strides, _ = get_unet_params(trial, target_spacing)

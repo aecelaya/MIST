@@ -27,6 +27,7 @@ class SoftSkeletonize(nn.Module):
 
     Iteratively erodes and opens the image to isolate the centerline.
     """
+
     def __init__(self, num_iter=40):
         super().__init__()
         self.num_iter = num_iter

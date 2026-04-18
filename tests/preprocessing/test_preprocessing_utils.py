@@ -11,9 +11,9 @@ from mist.preprocessing import preprocessing_utils as pu
 
 def _make_ants_image(
     arr_xyz: np.ndarray,
-    spacing: Tuple[float, float, float]=(1.0, 1.0, 1.0),
-    origin: Tuple[float, float, float]=(0.0, 0.0, 0.0),
-    direction_mat: Optional[np.ndarray]=None,
+    spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+    origin: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+    direction_mat: Optional[np.ndarray] = None,
 ):
     """Create an ANTs image with metadata set."""
     img = ants.from_numpy(arr_xyz.astype(np.float32))
@@ -25,9 +25,9 @@ def _make_ants_image(
 
 def _make_sitk_image_from_xyz(
     arr_xyz: np.ndarray,
-    spacing: Tuple[float, float, float]=(1.0, 1.0, 1.0),
-    origin: Tuple[float, float, float]=(0.0, 0.0, 0.0),
-    direction_mat: Optional[np.ndarray]=None,
+    spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+    origin: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+    direction_mat: Optional[np.ndarray] = None,
 ):
     """Create a SimpleITK image from an XYZ-ordered array and set metadata.
 

@@ -15,6 +15,7 @@ from mist.inference.ensemblers.ensembler_registry import (
 
 class DummyEnsembler(AbstractEnsembler):
     """Dummy Ensembler for base class testing."""
+
     def combine(self, predictions: List[torch.Tensor]) -> torch.Tensor:
         return predictions[0]
 

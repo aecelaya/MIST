@@ -51,6 +51,7 @@ class TTAStrategy(ABC):
     This class does not execute the transforms. The transforms are executed in
     core inference logic.
     """
+
     def __init__(self):
         """Initialize the transform with a name."""
         self.name = self.__class__.__name__.lower()
@@ -58,7 +59,7 @@ class TTAStrategy(ABC):
     @abstractmethod
     def get_transforms(self) -> List[AbstractTransform]:
         """Return a list of forward/inverse transforms to apply at inference."""
-        pass # pylint: disable=unnecessary-pass # pragma: no cover
+        pass  # pylint: disable=unnecessary-pass # pragma: no cover
 
     def __call__(self) -> List[AbstractTransform]:
         return self.get_transforms()
@@ -79,6 +80,7 @@ class NoTTAStrategy(TTAStrategy):
 
     This strategy does not apply any transformations to the input image.
     """
+
     def get_transforms(self) -> List[AbstractTransform]:
         return [get_transform("identity")]
 
@@ -89,6 +91,7 @@ class AllFlipsStrategy(TTAStrategy):
 
     This strategy applies all possible flips to the input image.
     """
+
     def get_transforms(self) -> List[AbstractTransform]:
         return [
             get_transform("identity"),

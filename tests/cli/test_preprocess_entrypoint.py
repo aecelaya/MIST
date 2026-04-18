@@ -7,7 +7,7 @@ import pytest
 from mist.cli import preprocess_entrypoint as entry
 
 
-def _touch(path: Path, text: str="") -> None:
+def _touch(path: Path, text: str = "") -> None:
     """Create a file at `path` with optional text content."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)

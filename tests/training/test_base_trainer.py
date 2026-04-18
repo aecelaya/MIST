@@ -50,11 +50,11 @@ class DummyModel(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.l = nn.Linear(2, 2)
+        self.fc = nn.Linear(2, 2)
 
     def forward(self, x):
         """Forward pass through the dummy linear layer."""
-        return self.l(x)
+        return self.fc(x)
 
 
 class DummyLoss(nn.Module):
@@ -655,6 +655,19 @@ def test_fit_multi_gpu_uses_spawn(tmp_pipeline, mist_args, monkeypatch):
     trainer = DummyTrainer(mist_args)
     trainer.fit()
     assert spawned["count"] == 1
+
+
+def test_fit_sets_cudnn_conv_fp32_precision_when_available(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """fit() sets cudnn.conv.fp32_precision='tf32' on PyTorch >= 2.5."""
+    fake_conv = SimpleNamespace(fp32_precision=None)
+    monkeypatch.setattr(torch.backends.cudnn, "conv", fake_conv, raising=False)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1, raising=False)
+    trainer = DummyTrainer(mist_args)
+    trainer.run_cross_validation = lambda rank, world_size: None
+    trainer.fit()
+    assert fake_conv.fp32_precision == "tf32"
 
 
 def test_invalid_folds_subset_raises(tmp_pipeline, mist_args):
@@ -1398,7 +1411,6 @@ def test_build_components_spacing_aware_loss_injects_spacing(
     loss constructor."""
     spacing_loss = next(iter(bt.TrainerConstants.SPACING_AWARE_LOSSES))
 
-    import json
     results, numpy_dir = tmp_pipeline
     config_path = Path(results) / "config.json"
     config = json.loads(config_path.read_text())
@@ -1492,7 +1504,10 @@ def test_train_fold_logs_alpha_for_composite_loss(
 
     # Stub get_alpha_scheduler to return a simple callable — no real scheduler
     # needed; we just need state["composite_loss_weighting"] to be non-None.
-    monkeypatch.setattr(bt, "get_alpha_scheduler", lambda name, num_epochs, **kw: lambda epoch: 0.7)
+    monkeypatch.setattr(
+        bt, "get_alpha_scheduler",
+        lambda name, num_epochs, **kw: lambda epoch: 0.7
+    )
 
     # Capture the SummaryWriter used during training.
     created_writers = []

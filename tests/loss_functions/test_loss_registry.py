@@ -9,6 +9,7 @@ from mist.loss_functions.base import SegmentationLoss
 
 class DummyLoss(SegmentationLoss):
     """A dummy loss function for testing the registry."""
+
     def forward(self, y_true, y_pred, *args, **kwargs):
         return y_pred.sum()
 

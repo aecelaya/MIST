@@ -8,6 +8,7 @@ import copy
 import os
 import math
 import random
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -396,7 +397,6 @@ class BaseTrainer(ABC):
             return
 
         if not pretrained_config_path:
-            import warnings
             warnings.warn(
                 "--pretrained-weights is set but --pretrained-config was not "
                 "provided. Skipping encoder compatibility validation."

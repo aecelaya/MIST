@@ -16,9 +16,10 @@ from mist.inference.inferers.inferer_registry import (
 
 class DummyInferer(AbstractInferer):
     """Dummy Inferer for base class testing."""
+
     def infer(
         self,
-        image: torch.Tensor, model: Callable[[torch.Tensor],torch.Tensor]
+        image: torch.Tensor, model: Callable[[torch.Tensor], torch.Tensor]
     ) -> torch.Tensor:
         return model(image)
 
@@ -49,7 +50,7 @@ def test_inferer_hash_and_eq():
 
 # SlidingWindowInferer tests.
 @patch(
-        "mist.inference.inferers.sliding_window.monai.inferers.sliding_window_inference"
+    "mist.inference.inferers.sliding_window.monai.inferers.sliding_window_inference"
 )
 def test_sliding_window_inferer_basic(mock_sw_inference):
     """Test basic functionality of SlidingWindowInferer."""

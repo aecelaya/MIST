@@ -139,6 +139,7 @@ def test_back_to_original_space(
 
 class _DummyModel:
     """Minimal stub for a torch.nn.Module, supporting .to(...).eval()."""
+
     def __init__(self):
         self.device_arg = None
 
@@ -172,7 +173,7 @@ def test_load_test_time_models_no_checkpoints(tmp_path: Path, mock_mist_config):
 
 
 @patch("mist.models.model_loader.load_model_from_config")
-@patch("torch.cuda.is_available",return_value=False)
+@patch("torch.cuda.is_available", return_value=False)
 def test_load_test_time_models_loads_all_on_cpu_when_no_cuda(
     mock_cuda_available,
     mock_load_model,
@@ -236,7 +237,6 @@ def test_load_test_time_models_uses_provided_device(
         str(models_dir / "fold_0.pt"),
         mock_mist_config,
     )
-
 
 
 @pytest.mark.parametrize("input_mask,original_labels,expected_output", [
@@ -403,7 +403,7 @@ def test_validate_inference_images_secondary_image_not_3d(
 
     # Simulate 3D anchor and non-3D second image.
     mock_image_header_info.side_effect = [{"dim": [3]}, {"dim": [2]}]
-    mock_is_image_3d.side_effect = [True, False] # Second image fails.
+    mock_is_image_3d.side_effect = [True, False]  # Second image fails.
     mock_compare_headers.return_value = True
     mock_image_read.return_value = MagicMock()
 

@@ -2,7 +2,6 @@
 from typing import Any, Dict, List
 from unittest.mock import patch
 import numpy as np
-import pytest
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -26,6 +25,7 @@ class SpyProgress:
     Captures constructor columns, add_task calls, update calls, and start/stop
     state without performing any terminal output.
     """
+
     def __init__(self, *columns: Any):
         self.columns = columns
         self.started = False
@@ -187,13 +187,13 @@ def test_validation_progressbar_multiple_updates():
     pb = ValidationProgressBar(val_steps=3)
     losses = [0.33, 0.31, 0.3051]
 
-    for l in losses:
-        pb.update(loss=l)
+    for val in losses:
+        pb.update(loss=val)
 
     assert len(pb.progress.update_calls) == len(losses)
-    for l, update in zip(losses, pb.progress.update_calls):
+    for val, update in zip(losses, pb.progress.update_calls):
         assert update["advance"] == 1
-        assert update["loss"] == f"val_loss: {l:.4f}"
+        assert update["loss"] == f"val_loss: {val:.4f}"
 
 
 @patch("mist.utils.progress_bar.Progress", new=SpyProgress)

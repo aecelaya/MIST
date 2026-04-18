@@ -71,7 +71,7 @@ class FakeScaler:
         self._scaled = 0
         self._stepped = 0
         self._updated = 0
-        self._unscaled = 0 # NEW: Track unscale calls
+        self._unscaled = 0  # NEW: Track unscale calls
 
     def scale(self, loss: torch.Tensor) -> "FakeScaler":
         """Pretend to scale the loss; return self for chaining .backward()."""
@@ -308,6 +308,7 @@ def test_training_step_criterion_optimizer_and_scaler(
 
     # Fake criterion that records inputs and returns a simple scalar loss.
     called = {}
+
     def fake_criterion(*, y_true, y_pred, y_supervision, alpha, dtm):
         called["y_true"] = y_true
         called["y_pred"] = y_pred
@@ -362,7 +363,7 @@ def test_training_step_criterion_optimizer_and_scaler(
         assert state["scaler"]._scaled == 1
         assert state["scaler"]._stepped == 1
         assert state["scaler"]._updated == 1
-        assert state["scaler"]._unscaled == 1 
+        assert state["scaler"]._unscaled == 1
     else:
         assert state["scaler"] is None
 

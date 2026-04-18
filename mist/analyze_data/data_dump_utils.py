@@ -576,10 +576,10 @@ def build_label_statistics(
     }
     if len(active_fractions) >= 2:
         dominant = max(
-            active_fractions, key=lambda l: active_fractions[l]
+            active_fractions, key=lambda lbl: active_fractions[lbl]
         )
         minority = min(
-            active_fractions, key=lambda l: active_fractions[l]
+            active_fractions, key=lambda lbl: active_fractions[lbl]
         )
         imbalance_ratio = round(
             active_fractions[dominant]

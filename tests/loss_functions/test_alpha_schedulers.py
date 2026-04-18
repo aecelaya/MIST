@@ -11,6 +11,7 @@ from mist.loss_functions.alpha_schedulers import (
     list_alpha_schedulers,
 )
 
+
 class TestConstantScheduler:
     """Tests for the ConstantScheduler."""
 
@@ -63,7 +64,7 @@ class TestLinearScheduler:
     def test_clamping_at_end(self):
         """Test that alpha clamps to end_val after decay duration."""
         scheduler = LinearScheduler(
-            num_epochs=10, 
+            num_epochs=10,
             init_pause=2,
             start_val=1.0,
             end_val=0.2

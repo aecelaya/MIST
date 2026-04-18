@@ -17,23 +17,24 @@ from mist.models.mednext.mednext_blocks import (
 
 class MedNeXt(MISTModel):
     """Base MedNeXt architecture."""
+
     def __init__(
         self,
-        init_filters: int=32,
-        in_channels: int=1,
-        out_channels: int=2,
-        patch_size: Any=None,
-        encoder_expansion_ratio: Union[Sequence[int], int]=2,
-        decoder_expansion_ratio: Union[Sequence[int], int]=2,
-        bottleneck_expansion_ratio: int=2,
-        kernel_size: int=7,
-        use_deep_supervision: bool=False,
-        use_residual_blocks: bool=False,
-        blocks_down: Sequence[int]=(2, 2, 2, 2),
-        blocks_bottleneck: int=2,
-        blocks_up: Sequence[int]=(2, 2, 2, 2),
-        norm_type: str="group",
-        global_resp_norm: bool=False,
+        init_filters: int = 32,
+        in_channels: int = 1,
+        out_channels: int = 2,
+        patch_size: Any = None,
+        encoder_expansion_ratio: Union[Sequence[int], int] = 2,
+        decoder_expansion_ratio: Union[Sequence[int], int] = 2,
+        bottleneck_expansion_ratio: int = 2,
+        kernel_size: int = 7,
+        use_deep_supervision: bool = False,
+        use_residual_blocks: bool = False,
+        blocks_down: Sequence[int] = (2, 2, 2, 2),
+        blocks_bottleneck: int = 2,
+        blocks_up: Sequence[int] = (2, 2, 2, 2),
+        norm_type: str = "group",
+        global_resp_norm: bool = False,
         **kwargs: Any,
     ):
         """Initialize the MedNeXt model.
@@ -244,7 +245,7 @@ class MedNeXt(MISTModel):
             zip(self.up_blocks, self.dec_stages)
         ):
             if self.use_deep_supervision and i < len(self.out_blocks):
-                ds_outputs.append(self.out_blocks[i](x)) # pylint: disable=used-before-assignment
+                ds_outputs.append(self.out_blocks[i](x))  # pylint: disable=used-before-assignment
 
             x = up_block(x)
             x = x + enc_outputs[-(i + 1)]

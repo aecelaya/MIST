@@ -39,7 +39,7 @@ def test_get_optimizer_adam_hyperparams(model):
 def test_get_optimizer_adamw_case_insensitive_and_hyperparams(model):
     """Test getting AdamW optimizer with specific hyperparameters."""
     opt = reg.get_optimizer(
-        "ADAMW", # case-insensitive.
+        "ADAMW",  # case-insensitive.
         params=model.parameters(),
         learning_rate=0.002,
         weight_decay=0.1,
@@ -59,7 +59,7 @@ def test_get_optimizer_sgd_uses_constants_and_ignores_eps(model):
         params=model.parameters(),
         learning_rate=0.1,
         weight_decay=0.05,
-        eps=123.456, # Intentionally meaningless for SGD.
+        eps=123.456,  # Intentionally meaningless for SGD.
     )
     assert isinstance(opt, torch.optim.SGD)
     pg = opt.param_groups[0]

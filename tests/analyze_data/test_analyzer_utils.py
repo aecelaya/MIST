@@ -1,15 +1,18 @@
 """Tests for mist.analyze_data.analyze_utils."""
+import logging
 from typing import Dict, Any, List, Tuple, Union
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 
 # MIST imports.
 from mist.analyze_data import analyzer_utils as au
 from mist.analyze_data import analyzer_constants as constants
+from mist.models.nnunet.nnunet_utils import get_unet_params
 
 _C = constants.AnalyzeConstants()
 _REF_BUDGET = _C.PATCH_BUDGET_REFERENCE_VOXELS  # 128^3 = 2,097,152
@@ -195,8 +198,6 @@ class TestGetFilesDF:
         self, monkeypatch, tmp_path: Path, caplog
     ):
         """A patient missing an image file produces a warning."""
-        import logging
-
         base = tmp_path
         ds_info = _make_dataset_info(base)
         p = base / "train" / "patient_x"
@@ -218,8 +219,6 @@ class TestGetFilesDF:
         self, monkeypatch, tmp_path: Path, caplog
     ):
         """A patient missing a mask file produces a warning in train mode."""
-        import logging
-
         base = tmp_path / "dataset"
         ds_info = _make_dataset_info(base)
         p = base / "train" / "patient_y"
@@ -411,27 +410,19 @@ class TestGetVoxelBudget:
 
     def test_returns_default_when_cuda_unavailable(self, monkeypatch):
         """Falls back to PATCH_BUDGET_DEFAULT_VOXELS when CUDA is absent."""
-        import torch
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-        from mist.analyze_data.analyzer_constants import AnalyzeConstants as C
-        assert au._get_voxel_budget() == C.PATCH_BUDGET_DEFAULT_VOXELS
+        assert au._get_voxel_budget() == _C.PATCH_BUDGET_DEFAULT_VOXELS
 
     def test_returns_default_when_no_devices(self, monkeypatch):
         """Falls back when CUDA reports zero devices."""
-        import torch
         monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
         monkeypatch.setattr(torch.cuda, "device_count", lambda: 0)
-        from mist.analyze_data.analyzer_constants import AnalyzeConstants as C
-        assert au._get_voxel_budget() == C.PATCH_BUDGET_DEFAULT_VOXELS
+        assert au._get_voxel_budget() == _C.PATCH_BUDGET_DEFAULT_VOXELS
 
     def test_scales_linearly_with_gpu_memory(self, monkeypatch):
         """Budget scales linearly: 32 GB GPU → 2× the reference budget."""
-        import torch
-        from mist.analyze_data.analyzer_constants import AnalyzeConstants as C
-        from unittest.mock import MagicMock
-
         fake_props = MagicMock()
-        fake_props.total_memory = 2 * C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES
+        fake_props.total_memory = 2 * _C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES
 
         monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
         monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
@@ -439,19 +430,15 @@ class TestGetVoxelBudget:
             torch.cuda, "get_device_properties", lambda i: fake_props
         )
 
-        expected = 2 * C.PATCH_BUDGET_REFERENCE_VOXELS
+        expected = 2 * _C.PATCH_BUDGET_REFERENCE_VOXELS
         assert au._get_voxel_budget() == expected
 
     def test_uses_minimum_across_gpus(self, monkeypatch):
         """With multiple GPUs the smallest VRAM determines the budget."""
-        import torch
-        from mist.analyze_data.analyzer_constants import AnalyzeConstants as C
-        from unittest.mock import MagicMock
-
         small = MagicMock()
-        small.total_memory = C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES // 2  # 8 GB
+        small.total_memory = _C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES // 2  # 8 GB
         large = MagicMock()
-        large.total_memory = C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES * 2   # 32 GB
+        large.total_memory = _C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES * 2   # 32 GB
 
         monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
         monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
@@ -461,17 +448,13 @@ class TestGetVoxelBudget:
             lambda i: small if i == 0 else large,
         )
 
-        expected = C.PATCH_BUDGET_REFERENCE_VOXELS // 2
+        expected = _C.PATCH_BUDGET_REFERENCE_VOXELS // 2
         assert au._get_voxel_budget() == expected
 
     def test_budget_scales_inversely_with_batch_size(self, monkeypatch):
         """Doubling batch size halves the per-patch voxel budget."""
-        import torch
-        from mist.analyze_data.analyzer_constants import AnalyzeConstants as C
-        from unittest.mock import MagicMock
-
         props = MagicMock()
-        props.total_memory = C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES
+        props.total_memory = _C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES
 
         monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
         monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
@@ -512,10 +495,9 @@ class TestSnapLrToNnunetCompatible:
         return strides
 
     def _patch_get_unet_params(self, monkeypatch, z_divisor, low_res_axis):
-        import mist.models.nnunet.nnunet_utils as nnunet_utils_module
         strides = self._make_strides(z_divisor, low_res_axis)
         monkeypatch.setattr(
-            nnunet_utils_module,
+            au,
             "get_unet_params",
             lambda patch_size, spacing: (None, strides, None),
         )
@@ -782,8 +764,6 @@ class TestGetBestPatchSize:
         For each realistic scenario, verify that the result patch size on the
         low-res axis is exactly divisible by the cumulative nnUNet z-stride.
         """
-        from mist.models.nnunet.nnunet_utils import get_unet_params
-
         # budget = 18 * 320^2 triggers the prostate-like regime.
         monkeypatch.setattr(
             au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 18 * 320 ** 2
@@ -793,7 +773,7 @@ class TestGetBestPatchSize:
             ([320, 320, 20], [0.625, 0.625, 3.6]),   # prostate
             ([512, 512, 40], [0.8, 0.8, 3.0]),        # thick-slice CT
             ([512, 512,  8], [0.8, 0.8, 3.0]),        # very thin z
-            ([ 40, 512, 512], [3.0, 0.8, 0.8]),       # low-res on axis 0
+            ([40, 512, 512], [3.0, 0.8, 0.8]),       # low-res on axis 0
             ([512,  40, 512], [0.8, 3.0, 0.8]),       # low-res on axis 1
         ]
         for median, spacing in scenarios:
@@ -1017,8 +997,6 @@ class TestGetVoxelBudget:
 
     def test_scales_with_gpu_memory(self, monkeypatch):
         """Budget scales linearly with GPU memory relative to the 16 GB reference."""
-        import torch
-
         class _FakeProps:
             def __init__(self, mem):
                 self.total_memory = mem
@@ -1028,7 +1006,7 @@ class TestGetVoxelBudget:
 
         ref_mem = _C.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES  # 16 GB
         ref_vox = _C.PATCH_BUDGET_REFERENCE_VOXELS
-        ref_bs  = _C.PATCH_BUDGET_REFERENCE_BATCH_SIZE
+        ref_bs = _C.PATCH_BUDGET_REFERENCE_BATCH_SIZE
 
         monkeypatch.setattr(
             "torch.cuda.get_device_properties",
@@ -1075,6 +1053,7 @@ def _patch_budget(budget: int):
         "mist.analyze_data.analyzer_utils._get_voxel_budget",
         return_value=budget,
     )
+
 
 def _patch_snap_identity():
     """Context manager: make _snap_lr_to_nnunet_compatible a no-op."""
@@ -1195,7 +1174,7 @@ class TestGetBestPatchSizeQuasi2D:
 
     # Spacing where z-axis is the low-res axis (3.98/0.81 ≈ 4.9 > 3.0).
     _ANISO_SPACING = [0.81, 0.81, 3.98]
-    _ANISO_MEDIAN  = [491, 404, 52]
+    _ANISO_MEDIAN = [491, 404, 52]
 
     def test_regression_bug_ip_patch_is_multiple_of_32(self):
         """Regression: ip_patch must be a multiple of 32 even when clamped

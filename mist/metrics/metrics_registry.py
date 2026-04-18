@@ -46,7 +46,7 @@ class Metric(ABC):
         Returns:
             Computed metric value, or None if not computable.
         """
-        pass # pylint: disable=unnecessary-pass # pragma: no cover
+        pass  # pylint: disable=unnecessary-pass # pragma: no cover
 
 
 # Global registry for metrics.

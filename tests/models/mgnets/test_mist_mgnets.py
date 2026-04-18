@@ -196,7 +196,6 @@ class TestMakeBlock:
         assert projection.in_channels == mgnet_constants.REDUCTION_THRESHOLD + 1
         assert projection.out_channels == mgnet_constants.REDUCTION_THRESHOLD
 
-
     def test_no_projection_at_exact_threshold(self):
         """in_channels == REDUCTION_THRESHOLD does not trigger projection."""
         block = self.model._make_block(
@@ -234,7 +233,6 @@ class TestMakeUpsample:
     def test_returns_conv_transpose_3d(self):
         up = self.model._make_upsample(in_channels=32, scale_factor=[2, 2, 2])
         assert isinstance(up, torch.nn.ConvTranspose3d)
-
 
     def test_kernel_size_equals_stride(self):
         """kernel_size == stride ensures artifact-free upsampling."""
@@ -353,7 +351,6 @@ class TestMGNetForward:
         assert "prediction" in output
         assert output["deep_supervision"] is None
 
-
     def test_multi_channel_input(self, base_kwargs):
         """Model handles multi-channel inputs correctly."""
         base_kwargs["in_channels"] = 4
@@ -373,4 +370,3 @@ class TestMGNetForward:
             output = model(torch.randn(1, 1, 64, 64, 32))
         assert output.shape[0] == 1
         assert output.shape[1] == base_kwargs["out_channels"]
-

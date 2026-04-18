@@ -6,6 +6,8 @@ import pytest
 from mist.metrics import segmentation_metrics as metrics
 
 # pylint: disable=protected-access, redefined-outer-name
+
+
 @pytest.fixture
 def create_synthetic_masks():
     """Fixture to create synthetic masks for testing."""
@@ -20,7 +22,7 @@ def create_synthetic_masks():
 def test_assert_is_numpy_array_pass():
     """Should pass when given a numpy array."""
     arr = np.array([1, 2, 3])
-    metrics._assert_is_numpy_array("arr", arr) # No exception expected.
+    metrics._assert_is_numpy_array("arr", arr)  # No exception expected.
 
 
 def test_assert_is_numpy_array_fail():
@@ -47,7 +49,7 @@ def test_check_nd_numpy_array_wrong_dims():
 def test_check_2d_numpy_array_pass():
     """Should pass for a valid 2D numpy array."""
     arr = np.zeros((5, 5))
-    metrics._check_2d_numpy_array("arr", arr) # No exception expected.
+    metrics._check_2d_numpy_array("arr", arr)  # No exception expected.
 
 
 def test_check_2d_numpy_array_fail():
@@ -101,19 +103,19 @@ def test_crop_to_bounding_box_invalid_dims():
 def test_assert_is_bool_numpy_array_pass():
     """Should pass when given a bool numpy array."""
     arr = np.zeros((3, 3), dtype=bool)
-    metrics._assert_is_bool_numpy_array("arr", arr) # No exception expected.
+    metrics._assert_is_bool_numpy_array("arr", arr)  # No exception expected.
 
 
 def test_assert_is_bool_numpy_array_wrong_type():
     """Should raise ValueError when given a non-numpy input."""
-    arr = [[True, False], [False, True]] # Not a numpy array.
+    arr = [[True, False], [False, True]]  # Not a numpy array.
     with pytest.raises(ValueError, match="should be a numpy array"):
         metrics._assert_is_bool_numpy_array("arr", arr)
 
 
 def test_assert_is_bool_numpy_array_wrong_dtype():
     """Should raise ValueError when numpy array is not of type bool."""
-    arr = np.zeros((3, 3), dtype=np.uint8) # Wrong dtype.
+    arr = np.zeros((3, 3), dtype=np.uint8)  # Wrong dtype.
     with pytest.raises(
         ValueError, match="should be a numpy array of type bool"
     ):
@@ -215,7 +217,7 @@ def test_compute_surface_distances_invalid_dims():
     spacing_mm = (1.0, 1.0, 1.0, 1.0)  # Match dimensionality
 
     with pytest.raises(ValueError, match="Only 2D and 3D masks are supported"):
-        metrics.compute_surface_distances(mask, mask, spacing_mm) # type: ignore
+        metrics.compute_surface_distances(mask, mask, spacing_mm)  # type: ignore
 
 
 def test_surface_distances_incompatible_shapes():

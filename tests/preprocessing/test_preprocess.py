@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Tuple, Optional
 import argparse
 import json
+import warnings
 import numpy as np
 import pandas as pd
 import pytest
@@ -16,12 +17,13 @@ from mist.utils import console as console_mod
 
 class _DummyAntsImage:
     """Minimal ANTs-like image used in tests."""
+
     def __init__(
         self,
-        arr: Optional[np.ndarray]=None,
-        spacing: Tuple[float, float, float]=(1.0, 1.0, 1.0),
-        origin: Tuple[float, float, float]=(0.0, 0.0, 0.0),
-        direction: Tuple[float, ...]=(1.0,) * 9,
+        arr: Optional[np.ndarray] = None,
+        spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+        origin: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+        direction: Tuple[float, ...] = (1.0,) * 9,
     ) -> None:
         self._arr = (
             np.zeros((2, 2, 2), dtype=np.float32)
@@ -74,6 +76,7 @@ class _DummySitkImage:
 
     SimpleITK-like API (CamelCase preserved intentionally).
     """
+
     def __init__(
         self,
         size=(2, 2, 2),
@@ -191,6 +194,7 @@ class _DummySitkImage:
 
 class _DummyDTM:
     """SITK-like DTM image that records divisors for zero-guard tests."""
+
     def __init__(self, tag, divlog):
         self.tag = tag  # 'dtm', 'int', 'ext', etc.
         self._divlog = divlog
@@ -238,6 +242,7 @@ class _DummyDTM:
 
 class _PB:
     """Very small progress-bar stub used by tests."""
+
     def __enter__(self):
         return self
 
@@ -364,7 +369,6 @@ def test_window_and_normalize_zero_std_returns_zeros():
         "dataset_info": {"modality": "mri"},
         "preprocessing": {"normalize_with_nonzero_mask": False},
     }
-    import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # any RuntimeWarning becomes an error
         out = pp.window_and_normalize(img, cfg)
@@ -415,7 +419,6 @@ def test_resample_image_calls_utils_and_resample(monkeypatch):
     out = pp.resample_image(img_in, target_spacing=(1.0, 1.0, 1.0))
     assert isinstance(out, _DummyAntsImage)
     np.testing.assert_array_equal(out.numpy(), out_ants.numpy())
-
 
 
 def test_resample_image_aniso_axis_type_error(monkeypatch):
@@ -651,6 +654,7 @@ def test_resample_mask_aniso_intermediate_called_for_each_label(monkeypatch):
 
     class _Out:
         """Simple ANTs-like output holder."""
+
         def __init__(self) -> None:
             self.spacing = None
             self.origin = None
@@ -704,7 +708,7 @@ def test_compute_dtm_shapes_and_types(monkeypatch):
         raising=True,
     )
 
-    sums = iter([1, 0]) # First non-empty, second empty.
+    sums = iter([1, 0])  # First non-empty, second empty.
     monkeypatch.setattr(
         pp.preprocessing_utils,
         "sitk_get_sum",
@@ -845,6 +849,7 @@ def test_compute_dtm_empty_mask_diagonal_distance(monkeypatch):
 
     class _ArrayImage:
         """Wrapper returned by sitk.GetImageFromArray."""
+
         def __init__(self, arr):
             self._arr = np.asarray(arr, dtype=np.float32)
 

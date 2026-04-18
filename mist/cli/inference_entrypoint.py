@@ -14,7 +14,7 @@ from mist.inference import inference_utils
 from mist.inference import inference_runners
 
 
-def _parse_inference_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
+def _parse_inference_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command line arguments for MIST inference."""
     p = ArgParser(
         formatter_class=ArgumentDefaultsHelpFormatter,
@@ -29,7 +29,7 @@ def _parse_inference_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
     p.arg(
         "--config", type=str, required=True,
         help="Path to config.json from a MIST training run."
-)
+    )
     p.arg(
         "--paths-csv", type=str, required=True,
         help="CSV with an 'id' column and one or more image path columns."
@@ -106,7 +106,7 @@ def run_inference(ns: argparse.Namespace) -> None:
 
     # Load & validate inputs
     df = pd.read_csv(paths_csv)
-    inference_utils.validate_paths_dataframe(df) # Raises if invalid.
+    inference_utils.validate_paths_dataframe(df)  # Raises if invalid.
     mist_cfg = io.read_json_file(str(config_path))
 
     # Execute inference

@@ -27,7 +27,7 @@ class AbstractEnsembler(ABC):
         Returns:
             Aggregated prediction tensor of the same shape.
         """
-        pass # pylint: disable=unnecessary-pass # pragma: no cover
+        pass  # pylint: disable=unnecessary-pass # pragma: no cover
 
     def __call__(self, predictions: List[torch.Tensor]) -> torch.Tensor:
         return self.combine(predictions)

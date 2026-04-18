@@ -6,6 +6,8 @@ import numpy as np
 from mist.postprocessing import postprocessing_utils as utils
 
 # Tests for the group_labels_in_mask function.
+
+
 def test_group_labels_with_valid_subset():
     """Test grouping with a valid subset of labels."""
     mask = np.array([

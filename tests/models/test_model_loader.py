@@ -15,6 +15,7 @@ from mist.models.model_loader import (
 from mist.models.model_registry import get_model_from_registry
 from mist.models.nnunet.mist_nnunet import NNUNet
 
+
 @pytest.fixture
 def valid_mist_config():
     """Fixture for a valid MIST model configuration."""
@@ -31,7 +32,6 @@ def valid_mist_config():
             }
         }
     }
-
 
 
 # ---------------------------------------------------------------------------
@@ -608,5 +608,3 @@ def test_load_pretrained_encoder_incompatible_shape_is_skipped(
 
     _, summary = load_pretrained_encoder(_IncompatibleModel(), source_checkpoint)
     assert first_key in summary["skipped"]
-
-

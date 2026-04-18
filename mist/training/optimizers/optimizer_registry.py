@@ -23,7 +23,7 @@ def _adamw_optimizer(
     params: Iterable,
     learning_rate: float,
     weight_decay: float,
-    eps:float,
+    eps: float,
 ) -> Optimizer:
     """Internal AdamW optimizer."""
     return torch.optim.AdamW(
@@ -35,7 +35,7 @@ def _sgd_optimizer(
     params: Iterable,
     learning_rate: float,
     weight_decay: float,
-    eps: float, # pylint:disable=unused-argument
+    eps: float,  # pylint:disable=unused-argument
 ) -> Optimizer:
     """SGD optimizer."""
     return torch.optim.SGD(

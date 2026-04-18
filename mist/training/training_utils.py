@@ -13,6 +13,7 @@ class RunningMean:
         count: Number of values added.
         total: Sum of values added.
     """
+
     def __init__(self):
         self.count = 0
         self.total = 0

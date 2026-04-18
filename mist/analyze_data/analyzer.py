@@ -318,7 +318,7 @@ class Analyzer:
         for class_name, class_labels in (
             self.dataset_info["final_classes"].items()
         ):
-            unknown = [l for l in class_labels if l not in all_labels]
+            unknown = [lbl for lbl in class_labels if lbl not in all_labels]
             if unknown:
                 raise ValueError(
                     f"In 'final_classes', class '{class_name}' contains "

@@ -36,7 +36,7 @@ def get_padding(
         )
     padding = tuple(int(p) for p in padding_np)
 
-    return padding if len(padding) > 1 else padding[0] # type: ignore
+    return padding if len(padding) > 1 else padding[0]  # type: ignore
 
 
 def get_output_padding(
@@ -76,7 +76,7 @@ def get_output_padding(
         )
     out_padding = tuple(int(p) for p in out_padding_np)
 
-    return out_padding if len(out_padding) > 1 else out_padding[0] # type: ignore
+    return out_padding if len(out_padding) > 1 else out_padding[0]  # type: ignore
 
 
 def get_unet_params(

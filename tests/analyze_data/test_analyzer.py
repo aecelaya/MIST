@@ -1,7 +1,6 @@
 """Tests for the Analyzer class and its methods."""
 import argparse
 import json
-import os
 from pathlib import Path
 from importlib import metadata
 from typing import Union
@@ -20,7 +19,6 @@ from mist.analyze_data import analyzer_utils as au
 
 # Shared test helpers.
 from tests.analyze_data.helpers import (
-    FakePB,
     fake_get_progress_bar,
     make_ants_image,
 )

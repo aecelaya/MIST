@@ -297,8 +297,8 @@ class TestEvaluationEntry:
         )
 
         entry.evaluation_entry(["--config", "/c.json",
-                                 "--paths-csv", "/p.csv",
-                                 "--output-csv", "/o.csv"])
+                                "--paths-csv", "/p.csv",
+                                "--output-csv", "/o.csv"])
 
         assert called["parsed"] is True
         assert called["ran"] is True

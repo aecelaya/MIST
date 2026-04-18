@@ -78,7 +78,7 @@ class TestDiceCELoss:
             ((1, 3, 4, 4, 4), (1, 2, 4, 4, 4)),
             # Case 2: Mismatched batch size.
             ((2, 3, 4, 4, 4), (1, 1, 4, 4, 4)),
-             # Case 3: Mismatched spatial dimensions.
+            # Case 3: Mismatched spatial dimensions.
             ((1, 3, 4, 4, 4), (1, 1, 5, 5, 5)),
         ]
     )

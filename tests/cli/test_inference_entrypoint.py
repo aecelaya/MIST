@@ -87,7 +87,7 @@ def test_resolve_device_numeric_unavailable_warns_and_cpu(monkeypatch):
 def test_resolve_device_invalid_string_raises():
     """Test _resolve_device raises on invalid device string."""
     with pytest.raises(ValueError, match="Invalid device specification"):
-        entry._resolve_device("cuda:0") # Invalid per our CLI (expects "0").
+        entry._resolve_device("cuda:0")  # Invalid per our CLI (expects "0").
 
 
 def _touch_json(p: Path, payload=None):
@@ -232,7 +232,7 @@ def test_run_inference_calls_infer_with_expected_args(tmp_path, monkeypatch):
     assert captured["models_directory"] == str(models.resolve())
     assert captured["postprocessing_strategy_filepath"] is None
     assert isinstance(captured["device"], entry.torch.device)
-    assert captured["device"].type in ("cpu", "cuda") # Depending on env mock.
+    assert captured["device"].type in ("cpu", "cuda")  # Depending on env mock.
 
 
 def test_run_inference_with_postprocess_strategy(tmp_path, monkeypatch):
@@ -278,6 +278,7 @@ def test_run_inference_with_postprocess_strategy(tmp_path, monkeypatch):
 def test_inference_entry_integration(monkeypatch):
     """Test inference_entry integrates parsing and running."""
     observed = {"parsed": False, "ran": False}
+
     def _parse(argv=None):
         observed["parsed"] = True
         return SimpleNamespace(

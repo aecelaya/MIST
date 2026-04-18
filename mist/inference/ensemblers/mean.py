@@ -10,6 +10,7 @@ from mist.inference.ensemblers.ensembler_registry import register_ensembler
 @register_ensembler("mean")
 class MeanEnsembler(AbstractEnsembler):
     """Simple averaging ensembler over softmax outputs."""
+
     def combine(self, predictions: List[torch.Tensor]) -> torch.Tensor:
         """Average a list of predictions element-wise.
 

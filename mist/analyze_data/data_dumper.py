@@ -58,8 +58,8 @@ class DataDumper:
             "labels": self.dataset_info["labels"],
             "final_classes": dict(self.dataset_info["final_classes"]),
             "dataset_size_gb": data_dump_utils.get_dataset_size_gb(
-            self.paths_df
-        ),
+                self.paths_df
+            ),
         }
 
     def build_data_dump(self) -> Dict[str, Any]:
@@ -244,10 +244,10 @@ class DataDumper:
         lines += [
             "",
             (
-            f"**Foreground density:** mean={nz['mean']:.3f}, "
-            f"std={nz['std']:.3f}, "
-            f"min={nz['min']:.3f}, max={nz['max']:.3f}"
-        ),
+                f"**Foreground density:** mean={nz['mean']:.3f}, "
+                f"std={nz['std']:.3f}, "
+                f"min={nz['min']:.3f}, max={nz['max']:.3f}"
+            ),
             "",
             "## Label Statistics",
             "",

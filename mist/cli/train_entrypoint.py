@@ -93,7 +93,6 @@ def _create_train_dirs(results_dir: Path, has_test_paths: bool) -> None:
         test_pred_dir.mkdir(parents=True, exist_ok=True)
 
 
-
 def train_entry(argv: Optional[List[str]] = None) -> None:
     """Entrypoint for the training command."""
     ns = _parse_train_args(argv)

@@ -348,6 +348,7 @@ def test_run_postprocess_passes_predictions_dir_to_postprocessor(
     class _PPStub:
         def __init__(self, *, strategy_path):
             captured["ctor"] = strategy_path
+
         def run(self, *, base_dir, output_dir, num_workers):
             captured["run"] = (base_dir, output_dir, num_workers)
 

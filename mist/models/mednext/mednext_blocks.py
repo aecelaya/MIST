@@ -17,15 +17,16 @@ class MedNeXtBlock(nn.Module):
         global_resp_beta: Learnable parameter for global response normalization.
         global_resp_gamma: Learnable parameter for global response normalization.
     """
+
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        expansion_ratio: int=4,
-        kernel_size: int=7,
-        use_residual_connection: bool=True,
-        norm_type: str="group",
-        global_resp_norm: bool=False,
+        expansion_ratio: int = 4,
+        kernel_size: int = 7,
+        use_residual_connection: bool = True,
+        norm_type: str = "group",
+        global_resp_norm: bool = False,
     ):
         """Initialize the MedNeXtBlock.
 
@@ -116,15 +117,16 @@ class MedNeXtBlock(nn.Module):
 
 class MedNeXtDownBlock(MedNeXtBlock):
     """MedNeXtDownBlock class for downsampling in the MedNeXt model."""
+
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        expansion_ratio: int=4,
-        kernel_size: int=7,
-        use_residual_connection: bool=False,
-        norm_type: str="group",
-        global_resp_norm: bool=False,
+        expansion_ratio: int = 4,
+        kernel_size: int = 7,
+        use_residual_connection: bool = False,
+        norm_type: str = "group",
+        global_resp_norm: bool = False,
     ):
         """Initialize the MedNeXtDownBlock.
 
@@ -176,15 +178,16 @@ class MedNeXtDownBlock(MedNeXtBlock):
 
 class MedNeXtUpBlock(MedNeXtBlock):
     """MedNeXtUpBlock class for upsampling in the MedNeXt model."""
+
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        expansion_ratio: int=4,
-        kernel_size: int=7,
-        use_residual_connection: bool=False,
-        norm_type: str="group",
-        global_resp_norm: bool=False,
+        expansion_ratio: int = 4,
+        kernel_size: int = 7,
+        use_residual_connection: bool = False,
+        norm_type: str = "group",
+        global_resp_norm: bool = False,
     ):
         """Initialize the MedNeXtUpBlock.
 
@@ -237,6 +240,7 @@ class MedNeXtUpBlock(MedNeXtBlock):
 
 class MedNeXtOutBlock(nn.Module):
     """MedNeXtOutBlock class for the output block in the MedNeXt model."""
+
     def __init__(self, in_channels: int, n_classes: int):
         """Initialize the MedNeXtOutBlock.
 

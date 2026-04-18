@@ -27,13 +27,14 @@ class Predictor:
         device: Torch device to use for inference. If None, defaults to CUDA if
             available, otherwise CPU.
     """
+
     def __init__(
         self,
         models: List[Callable[[torch.Tensor], torch.Tensor]],
         inferer: AbstractInferer,
         ensembler: AbstractEnsembler,
         tta_transforms: List[AbstractTransform],
-        device: Optional[Union[str, torch.device]]=None,
+        device: Optional[Union[str, torch.device]] = None,
     ):
         """Initialize the predictor.
 

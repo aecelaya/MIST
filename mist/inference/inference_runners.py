@@ -79,7 +79,7 @@ def predict_single_example(
     original_ants_image: ants.core.ants_image.ANTsImage,
     mist_configuration: Dict[str, Any],
     predictor: Predictor,
-    foreground_bounding_box: Optional[Dict[str, int]]=None,
+    foreground_bounding_box: Optional[Dict[str, int]] = None,
 ) -> ants.core.ants_image.ANTsImage:
     """Predict on a single example using a Predictor instance.
 
@@ -148,7 +148,7 @@ def predict_single_example(
 def test_on_fold(
     mist_args: argparse.Namespace,
     fold_number: int,
-    device: Optional[Union[str, torch.device]]=None,
+    device: Optional[Union[str, torch.device]] = None,
 ) -> None:
     """Run inference on the test set for a given fold.
 
@@ -287,8 +287,8 @@ def infer_from_dataframe(
     output_directory: str,
     mist_configuration: Dict[str, Any],
     models_directory: str,
-    postprocessing_strategy_filepath: Optional[str]=None,
-    device: Optional[Union[str, torch.device]]=None,
+    postprocessing_strategy_filepath: Optional[str] = None,
+    device: Optional[Union[str, torch.device]] = None,
 ) -> None:
     """Run test-time inference on a set of input images.
 

@@ -343,8 +343,8 @@ class MGNet(MISTModel):
         )
 
     def _make_upsample(
-            self, in_channels: int, scale_factor: Sequence[int]
-        ) -> nn.Module:
+        self, in_channels: int, scale_factor: Sequence[int]
+    ) -> nn.Module:
         """
         Creates a learnable transposed convolution upsampling layer.
 

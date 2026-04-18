@@ -1,6 +1,5 @@
 """Tests for mist.cli.convert_csv_entrypoint."""
 import argparse
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest

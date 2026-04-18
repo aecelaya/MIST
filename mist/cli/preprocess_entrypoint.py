@@ -11,7 +11,7 @@ from mist.utils.console import print_warning
 
 
 def _parse_preprocess_args(
-    argv: Optional[List[str]]=None
+    argv: Optional[List[str]] = None
 ) -> argparse.Namespace:
     """Parse CLI for the preprocessing pipeline."""
     parser = argmod.ArgParser(

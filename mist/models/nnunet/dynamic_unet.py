@@ -32,6 +32,7 @@ class DynamicUNet(nn.Module):
     prediction and deep supervision outputs. If not training, the forward method
     returns the prediction.
     """
+
     def __init__(
         self,
         in_channels: int,
@@ -42,11 +43,11 @@ class DynamicUNet(nn.Module):
         filters: Sequence[int],
         norm_name: Union[Tuple, str],
         act_name: Union[Tuple, str],
-        dropout: Optional[Union[Tuple, str, float]]=None,
-        use_deep_supervision: bool=False,
-        num_deep_supervision_heads: int=2,
-        use_residual_blocks: bool=False,
-        trans_bias: bool=False,
+        dropout: Optional[Union[Tuple, str, float]] = None,
+        use_deep_supervision: bool = False,
+        num_deep_supervision_heads: int = 2,
+        use_residual_blocks: bool = False,
+        trans_bias: bool = False,
     ):
 
         super().__init__()
@@ -191,7 +192,7 @@ class DynamicUNet(nn.Module):
                 self.training and
                 i in self.deep_supervision_head_ids
             ):
-                deep_supervision_head_inputs.append(x) # pylint: disable=possibly-used-before-assignment
+                deep_supervision_head_inputs.append(x)  # pylint: disable=possibly-used-before-assignment
 
         # Reverse the deep supervision head inputs to match the order of the
         # deep supervision heads. Apply the deep supervision heads to their
@@ -274,7 +275,7 @@ class DynamicUNet(nn.Module):
             out_filters,
             kernel_size,
             strides,
-            self.conv_block, # type: ignore
+            self.conv_block,  # type: ignore
         )
 
     def get_decoder_layers(self):
@@ -289,7 +290,7 @@ class DynamicUNet(nn.Module):
             out_filters,
             kernel_size,
             strides,
-            dynamic_unet_blocks.UnetUpBlock, # type: ignore
+            dynamic_unet_blocks.UnetUpBlock,  # type: ignore
             upsample_kernel_size,
             trans_bias=self.trans_bias,
         )
@@ -301,8 +302,8 @@ class DynamicUNet(nn.Module):
         kernel_size: Sequence[Union[Sequence[int], int]],
         strides: Sequence[Union[Sequence[int], int]],
         conv_block: nn.Module,
-        upsample_kernel_size: Optional[Sequence[Union[Sequence[int], int]]]=None,
-        trans_bias: bool=False,
+        upsample_kernel_size: Optional[Sequence[Union[Sequence[int], int]]] = None,
+        trans_bias: bool = False,
     ) -> nn.ModuleList:
         """Get a list of convolutional blocks for the UNet.
 

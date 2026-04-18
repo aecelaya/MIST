@@ -325,7 +325,7 @@ class TrainPipeline(GenericPipeline):
         self,
         image: TensorGPU,
         label: TensorGPU,
-        dtm: Optional[TensorGPU]=None,
+        dtm: Optional[TensorGPU] = None,
     ) -> Sequence[TensorGPU]:
         """Apply random flips to the input image, labels, and DTMs.
 

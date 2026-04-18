@@ -86,8 +86,8 @@ def remove_small_objects_binary(
 def get_top_k_connected_components_binary(
     binary_mask: npt.NDArray[Any],
     top_k: int,
-    morph_cleanup: bool=False,
-    morph_iterations: int=1,
+    morph_cleanup: bool = False,
+    morph_iterations: int = 1,
 ) -> npt.NDArray[np.bool_]:
     """Extract the top K largest connected components from a binary mask.
 
@@ -193,7 +193,7 @@ def replace_small_objects_binary(
     output_mask = np.zeros_like(binary_mask, dtype=np.uint8)
 
     for region in regions:
-        coords = tuple(region.coords.T) # Convert (N, D) to tuple for indexing.
+        coords = tuple(region.coords.T)  # Convert (N, D) to tuple for indexing.
         if region.area < min_size:
             # Assign replacement label to small components.
             output_mask[coords] = replacement_label

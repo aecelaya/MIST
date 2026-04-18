@@ -4,6 +4,7 @@ import numpy as np
 
 # MIST imports.
 from mist.postprocessing import transform_registry as registry
+from mist.postprocessing.postprocessing_constants import PostprocessingConstants as pc
 
 
 # ---------------------------------------------------------------------------
@@ -73,9 +74,6 @@ def test_describe_transforms_kwargs_have_required_keys():
 
 def test_describe_transforms_defaults_match_constants():
     """Kwarg defaults match the values in PostprocessingConstants."""
-    from mist.postprocessing.postprocessing_constants import (
-        PostprocessingConstants as pc
-    )
     descriptions = {d["name"]: d for d in registry.describe_transforms()}
 
     rso = descriptions["remove_small_objects"]["kwargs"]
@@ -110,6 +108,7 @@ def test_transform_registry_contains_all_expected():
         "replace_small_objects_with_label" in registry.POSTPROCESSING_TRANSFORMS
     )
 
+
 def test_get_transform_returns_correct_function():
     """Check get_transform returns correct functions."""
     assert (
@@ -128,6 +127,7 @@ def test_get_transform_returns_correct_function():
         registry.get_transform("replace_small_objects_with_label") is
         registry.replace_small_objects_with_label
     )
+
 
 def test_get_transform_raises_on_invalid_name():
     """Verify error raised when requesting unregistered transform."""

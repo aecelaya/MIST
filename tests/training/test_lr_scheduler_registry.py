@@ -9,7 +9,7 @@ from mist.training.lr_schedulers.lr_schedulers_constants import (
 )
 
 
-def _make_optimizer(lr: float=0.1):
+def _make_optimizer(lr: float = 0.1):
     """Minimal param to satisfy torch optimizer."""
     param = torch.nn.Parameter(torch.zeros(1, requires_grad=True))
     return torch.optim.SGD([param], lr=lr)

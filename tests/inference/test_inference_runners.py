@@ -96,7 +96,8 @@ def noop_cuda_tensor_to(monkeypatch):
 
 class _DummyANTsImage:
     """Minimal stand-in for ANTsImage."""
-    def __init__(self, array: Optional[np.ndarray]=None):
+
+    def __init__(self, array: Optional[np.ndarray] = None):
         self._array = (
             np.array(0, dtype=np.uint8) if array is None else np.asarray(array)
         )
@@ -130,6 +131,7 @@ def _predictor_logits_two_class(_: torch.Tensor) -> torch.Tensor:
 
 class _PB:
     """Minimal progress bar stub with context and .track()."""
+
     def __enter__(self):
         return self
 
@@ -143,6 +145,7 @@ class _PB:
 
 class _DummyModel:
     """Minimal model stub with eval() and to() methods."""
+
     def __init__(self):
         self.device = None
 
@@ -158,6 +161,7 @@ class _DummyModel:
 
 class _DummyLoader:
     """Minimal DALI-like loader with .next() returning [{'image': tensor}]."""
+
     def __init__(self, n: int):
         self.n = n
         self.i = 0

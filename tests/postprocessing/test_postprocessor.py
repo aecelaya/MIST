@@ -537,12 +537,11 @@ def test_run_patient_id_preserves_dots(
         def __exit__(self, *args): return None
         def track(self, items, total=None): return items
 
-    import ants as _ants
     arr = np.zeros((4, 4), dtype=np.uint8)
     input_path = tmp_path / "patient.001.nii.gz"
     output_dir = tmp_path / "out"
     output_dir.mkdir()
-    _ants.image_write(_ants.from_numpy(arr.astype(np.float32)), str(input_path))
+    ants.image_write(ants.from_numpy(arr.astype(np.float32)), str(input_path))
 
     mock_get_progress_bar.return_value = _DummyPB()
     mock_read_json_file.return_value = dummy_strategy

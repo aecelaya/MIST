@@ -12,6 +12,7 @@ from mist.evaluation import evaluation_utils
 # Module-level helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_eval_config(classes=None) -> dict:
     """Return a minimal valid evaluation_config in the new nested format."""
     if classes is None:

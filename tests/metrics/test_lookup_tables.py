@@ -39,8 +39,8 @@ def test_create_table_neighbour_code_to_contour_length_values():
     vertical = 1.0
     horizontal = 1.0
 
-    assert np.isclose(table[int("0001", 2)], diag) # Bottom right only.
-    assert np.isclose(table[int("0011", 2)], horizontal) # Top row.
-    assert np.isclose(table[int("0101", 2)], vertical) # Left column.
-    assert np.isclose(table[int("0110", 2)], 2 * diag) # Cross pattern.
-    assert np.isclose(table[int("1111", 2)], 0.0) # Fully filled -> no boundary.
+    assert np.isclose(table[int("0001", 2)], diag)  # Bottom right only.
+    assert np.isclose(table[int("0011", 2)], horizontal)  # Top row.
+    assert np.isclose(table[int("0101", 2)], vertical)  # Left column.
+    assert np.isclose(table[int("0110", 2)], 2 * diag)  # Cross pattern.
+    assert np.isclose(table[int("1111", 2)], 0.0)  # Fully filled -> no boundary.

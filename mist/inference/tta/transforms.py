@@ -56,12 +56,12 @@ class AbstractTransform(ABC):
     @abstractmethod
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         """Apply the transformation to the input image."""
-        pass # pylint:disable=unnecessary-pass # pragma: no cover
+        pass  # pylint:disable=unnecessary-pass # pragma: no cover
 
     @abstractmethod
     def inverse(self, prediction: torch.Tensor) -> torch.Tensor:
         """Invert the transformation on the prediction."""
-        pass # pylint:disable=unnecessary-pass # pragma: no cover
+        pass  # pylint:disable=unnecessary-pass # pragma: no cover
 
     def __call__(self, image: torch.Tensor) -> torch.Tensor:
         """Alias for forward."""
@@ -84,6 +84,7 @@ class IdentityTransform(AbstractTransform):
     This transform does not apply any changes to the input image. It is
     useful for testing the performance of the model without any TTA.
     """
+
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return image
 
@@ -99,6 +100,7 @@ class FlipXTransform(AbstractTransform):
     It is useful for augmenting the training data and improving model
     robustness.
     """
+
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return torch.flip(image, dims=(2,))
 
@@ -114,6 +116,7 @@ class FlipYTransform(AbstractTransform):
     It is useful for augmenting the training data and improving model
     robustness.
     """
+
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return torch.flip(image, dims=(3,))
 
@@ -129,6 +132,7 @@ class FlipZTransform(AbstractTransform):
     It is useful for augmenting the training data and improving model
     robustness.
     """
+
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return torch.flip(image, dims=(4,))
 
@@ -144,6 +148,7 @@ class FlipXYTransform(AbstractTransform):
     (horizontal and vertical flip). It is useful for augmenting the
     training data and improving model robustness.
     """
+
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return torch.flip(image, dims=(2, 3))
 
@@ -159,6 +164,7 @@ class FlipXZTransform(AbstractTransform):
     (horizontal and depth flip). It is useful for augmenting the training
     data and improving model robustness.
     """
+
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return torch.flip(image, dims=(2, 4))
 
@@ -174,6 +180,7 @@ class FlipYZTransform(AbstractTransform):
     (vertical and depth flip). It is useful for augmenting the training
     data and improving model robustness.
     """
+
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return torch.flip(image, dims=(3, 4))
 
@@ -189,6 +196,7 @@ class FlipXYZTransform(AbstractTransform):
     vertical, and depth flip). It is useful for augmenting the training
     data and improving model robustness.
     """
+
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return torch.flip(image, dims=(2, 3, 4))
 

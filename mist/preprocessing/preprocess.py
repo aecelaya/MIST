@@ -22,7 +22,7 @@ from mist.preprocessing.preprocessing_constants import (
 def resample_image(
     img_ants: ants.core.ants_image.ANTsImage,
     target_spacing: Tuple[float, float, float],
-    new_size: Optional[Tuple[int, int, int]]=None,
+    new_size: Optional[Tuple[int, int, int]] = None,
 ) -> ants.core.ants_image.ANTsImage:
     """Resample an image to a target spacing.
 
@@ -88,7 +88,7 @@ def resample_mask(
     mask_ants: ants.core.ants_image.ANTsImage,
     labels: List[int],
     target_spacing: Tuple[float, float, float],
-    new_size: Optional[Tuple[int, int, int]]=None,
+    new_size: Optional[Tuple[int, int, int]] = None,
 ) -> ants.core.ants_image.ANTsImage:
     """Resample a mask to a target spacing.
 
@@ -201,7 +201,7 @@ def window_and_normalize(
             # Compute the window range based on the 0.5 and 99.5 percentiles
             # of the nonzero values.
             lower = np.percentile(nonzeros, pc.WINDOW_PERCENTILE_LOW)
-            upper = np.percentile(nonzeros,pc.WINDOW_PERCENTILE_HIGH)
+            upper = np.percentile(nonzeros, pc.WINDOW_PERCENTILE_HIGH)
 
             # Compute the mean and standard deviation of the nonzero values.
             mean = np.mean(nonzeros)
@@ -323,8 +323,8 @@ def compute_dtm(
 def preprocess_example(
     config: Dict,
     image_paths_list: List[str],
-    mask_path: Optional[str]=None,
-    fg_bbox: Optional[Dict]=None,
+    mask_path: Optional[str] = None,
+    fg_bbox: Optional[Dict] = None,
 ) -> Dict:
     """Preprocessing function for a single example.
 

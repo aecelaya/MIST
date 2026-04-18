@@ -12,6 +12,8 @@ from mist.metrics.metrics_registry import (
 )
 
 # pylint: disable=redefined-outer-name
+
+
 @pytest.fixture
 def synthetic_masks():
     """Fixture returning two 3D masks and spacing."""
@@ -29,6 +31,7 @@ def test_metric_subclass_missing_required_attr_raises():
         class BadMetric(Metric):  # pylint: disable=unused-variable
             best = 1.0
             worst = 0.0
+
             def __call__(self, truth, pred, spacing, **kwargs):
                 pass  # pragma: no cover
 

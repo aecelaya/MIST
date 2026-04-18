@@ -15,7 +15,7 @@ from mist.utils import io
 
 
 def _parse_postprocess_args(
-    argv: Optional[List[str]]=None
+    argv: Optional[List[str]] = None
 ) -> argparse.Namespace:
     """Parse command line arguments for postprocessing predictions."""
     p = ArgParser(

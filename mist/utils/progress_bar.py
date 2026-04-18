@@ -11,9 +11,12 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from mist.utils.console import console
+
 
 class TrainProgressBar(Progress):
     """Progress bar for training loop with loss and learning rate tracking."""
+
     def __init__(self, current_epoch, fold, epochs, train_steps):
         super().__init__()
 
@@ -36,8 +39,8 @@ class TrainProgressBar(Progress):
         self.task = self.progress.add_task(
             description="Training (loss)",
             total=train_steps,
-            loss=f"loss: ",
-            lr=f"lr: ",
+            loss="loss: ",
+            lr="lr: ",
         )
 
     def update(self, loss, lr):
@@ -59,6 +62,7 @@ class TrainProgressBar(Progress):
 
 class ValidationProgressBar(Progress):
     """Progress bar for validation loop with loss tracking."""
+
     def __init__(self, val_steps):
         super().__init__()
 
@@ -75,7 +79,7 @@ class ValidationProgressBar(Progress):
         self.task = self.progress.add_task(
             description="Validation",
             total=val_steps,
-            loss=f"val_loss: "
+            loss="val_loss: "
         )
 
     def update(self, loss):
@@ -100,7 +104,6 @@ def get_progress_bar(task_name: str) -> Progress:
         A Rich :class:`~rich.progress.Progress` instance that writes to the
         shared MIST console.
     """
-    from mist.utils.console import console
     return Progress(
         SpinnerColumn(),
         TextColumn(f"[bold blue]{task_name}"),

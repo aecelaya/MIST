@@ -66,6 +66,7 @@ def str2bool(value: Union[str, bool]) -> bool:
 
 class ArgParser(ArgumentParser):
     """Argument parser for MIST pipelines."""
+
     def arg(self, *args, **kwargs):
         """Add an argument to the parser."""
         return super().add_argument(*args, **kwargs)

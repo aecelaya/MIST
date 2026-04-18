@@ -9,13 +9,14 @@ from mist.loss_functions.base import SegmentationLoss
 
 class DummyLoss(SegmentationLoss):
     """Minimal subclass to enable testing of preprocess."""
+
     def forward(self, y_true, y_pred, *args, **kwargs):
         return torch.tensor(0.0)
 
 
 def make_inputs(n_classes=3, exclude_background=False):
     """Generate synthetic data for loss input testing."""
-    y_true = torch.randint(0, n_classes, size=(1, 1, 4, 4, 4)) 
+    y_true = torch.randint(0, n_classes, size=(1, 1, 4, 4, 4))
     y_pred = torch.randn((1, n_classes, 4, 4, 4))
     return y_true, y_pred
 

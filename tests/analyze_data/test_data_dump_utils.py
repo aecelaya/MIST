@@ -1111,6 +1111,7 @@ class TestCollectPerPatientStats:
         # Mask with only label 1; label 2 is absent.
         arr = np.zeros((10, 10, 10), dtype=np.float32)
         arr[1:4, 1:4, 1:4] = 1
+
         def _read(p):
             """Return mask or channel image depending on path."""
             if "mask" in str(p):

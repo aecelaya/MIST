@@ -79,7 +79,7 @@ def describe_transforms() -> List[Dict[str, Any]]:
 def remove_small_objects(
     mask: npt.NDArray[Any],
     labels_list: List[int],
-    per_label: bool=False,
+    per_label: bool = False,
     **kwargs
 ) -> npt.NDArray[Any]:
     """Multi-label wrapper around the binary remove_small_objects transform.
@@ -155,7 +155,7 @@ def remove_small_objects(
 def get_top_k_connected_components(
     mask: npt.NDArray[Any],
     labels_list: List[int],
-    per_label: bool=False,
+    per_label: bool = False,
     **kwargs
 ) -> npt.NDArray[Any]:
     """Keeps only top K connected components for specified labels in a mask.
@@ -255,7 +255,7 @@ def get_top_k_connected_components(
 def fill_holes_with_label(
     mask: npt.NDArray[Any],
     labels_list: List[int],
-    per_label: bool=False,
+    per_label: bool = False,
     **kwargs
 ) -> npt.NDArray[Any]:
     """
@@ -336,7 +336,7 @@ def fill_holes_with_label(
 def replace_small_objects_with_label(
     mask: npt.NDArray[Any],
     labels_list: List[int],
-    per_label: bool=True,
+    per_label: bool = True,
     **kwargs
 ) -> npt.NDArray[Any]:
     """Replace small objects belonging to certain labels with replacement label.

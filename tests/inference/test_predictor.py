@@ -6,18 +6,21 @@ from mist.inference.predictor import Predictor
 
 class DummyInferer:
     """Dummy inferer that returns the model's output."""
+
     def __call__(self, image: torch.Tensor, model):
         return model(image)
 
 
 class DummyEnsembler:
     """Dummy ensembler that averages predictions."""
+
     def __call__(self, predictions):
         return sum(predictions) / len(predictions)
 
 
 class DummyTransform:
     """Dummy TTA transform that adds and subtracts 1."""
+
     def __init__(self):
         self.name = "dummy"
 
@@ -30,6 +33,7 @@ class DummyTransform:
 
 class IdentityTransform:
     """TTA transform that passes images and predictions through unchanged."""
+
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         return x
 

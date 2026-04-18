@@ -143,7 +143,7 @@ def back_to_original_space(
 def load_test_time_models(
     models_dir: str,
     mist_config: Dict,
-    device: Optional[Union[str, torch.device]]=None,
+    device: Optional[Union[str, torch.device]] = None,
 ) -> List[Callable[[torch.Tensor], torch.Tensor]]:
     """Load one or more models for test-time inference.
 

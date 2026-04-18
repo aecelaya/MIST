@@ -3,9 +3,11 @@ import sys
 import types
 from unittest import mock
 
+
 class DummyPipeline:
     def __init__(self, *args, **kwargs):
         pass
+
 
 # Create the fake dali structure.
 fake_dali = types.SimpleNamespace(

@@ -1,5 +1,4 @@
 """Tests for MIST TTA transforms and strategies."""
-from typing import Any
 import torch
 import pytest
 
@@ -19,6 +18,7 @@ from mist.inference.tta.strategies import (
 
 class DummyTransform(AbstractTransform):
     """Dummy transform for base class testing."""
+
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return image + 1
 

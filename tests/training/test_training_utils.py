@@ -115,14 +115,14 @@ def test_raises_on_empty_split(tmp_path):
     train_ids = ["p1"]
     tr_img = _make_paths(tmp_path, "images/train", train_ids)
     tr_lbl = _make_paths(tmp_path, "labels/train", train_ids)
-    va_img = [] # Empty.
+    va_img = []  # Empty.
     va_lbl = []
     dtms = None
 
     with pytest.raises(ValueError, match="empty data"):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -134,7 +134,7 @@ def test_raises_on_empty_split(tmp_path):
 def test_raises_on_count_mismatch_train(tmp_path):
     """Test that train_images and train_labels count mismatch raises error."""
     tr_img = _make_paths(tmp_path, "images/train", ["p1", "p2"])
-    tr_lbl = _make_paths(tmp_path, "labels/train", ["p1"]) # Fewer labels.
+    tr_lbl = _make_paths(tmp_path, "labels/train", ["p1"])  # Fewer labels.
     va_img = _make_paths(tmp_path, "images/val", ["p3"])
     va_lbl = _make_paths(tmp_path, "labels/val", ["p3"])
     dtms = None
@@ -142,7 +142,7 @@ def test_raises_on_count_mismatch_train(tmp_path):
     with pytest.raises(ValueError, match="train_images .* != train_labels"):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -159,7 +159,7 @@ def test_raises_on_duplicates_in_train_images(tmp_path):
     p2 = base / "p2.npy"
     p1.touch(); p2.touch()
 
-    tr_img = [p1, p2, p1] # Duplicate p1.
+    tr_img = [p1, p2, p1]  # Duplicate p1.
     tr_lbl = _make_paths(tmp_path, "labels/train", ["p1", "p2", "p1"])
     va_img = _make_paths(tmp_path, "images/val", ["p3"])
     va_lbl = _make_paths(tmp_path, "labels/val", ["p3"])
@@ -168,7 +168,7 @@ def test_raises_on_duplicates_in_train_images(tmp_path):
     with pytest.raises(ValueError, match="duplicate entries in train_images"):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -183,14 +183,14 @@ def test_raises_on_train_val_image_leakage(tmp_path):
     p_shared = (_make_paths(tmp_path, "images/train", ["p1"])[0])
     tr_img = [p_shared]
     tr_lbl = _make_paths(tmp_path, "labels/train", ["p1"])
-    va_img = [p_shared] # Intentional leak.
+    va_img = [p_shared]  # Intentional leak.
     va_lbl = _make_paths(tmp_path, "labels/val", ["p1"])
     dtms = None
 
     with pytest.raises(ValueError, match="overlap in images"):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -211,7 +211,7 @@ def test_raises_on_label_stem_mismatch(tmp_path):
     with pytest.raises(ValueError, match="image/label stem mismatch.*training"):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -251,7 +251,7 @@ def test_raises_on_dtm_count_mismatch(tmp_path):
     with pytest.raises(ValueError, match="train_dtms .* != train_images"):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -282,7 +282,7 @@ def test_raises_on_dtm_duplicates(tmp_path):
     with pytest.raises(ValueError, match="duplicate entries in DTMs"):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -303,7 +303,7 @@ def test_raises_on_dtm_stem_mismatch(tmp_path):
     with pytest.raises(ValueError, match="image/DTM stem mismatch"):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -320,7 +320,7 @@ def test_raises_on_val_image_label_count_mismatch(tmp_path):
     tr_lbl = _make_paths(tmp_path, "labels/train", train_ids)
     # Val is non-empty but mismatched: 2 images vs 1 label.
     val_img_ids = ["p3", "p4"]
-    val_lbl_ids = ["p3"] # One missing on purpose.
+    val_lbl_ids = ["p3"]  # One missing on purpose.
     va_img = _make_paths(tmp_path, "images/val", val_img_ids)
     va_lbl = _make_paths(tmp_path, "labels/val", val_lbl_ids)
 
@@ -330,7 +330,7 @@ def test_raises_on_val_image_label_count_mismatch(tmp_path):
     ):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -343,7 +343,7 @@ def test_raises_on_duplicate_train_labels(tmp_path):
     """Test that duplicate entries in training labels raises error."""
     # Train: 2 imgs, 2 labels but labels contain a duplicate.
     tr_img = _make_paths(tmp_path, "train/images", ["p1", "p2"])
-    tr_lbl = _make_paths(tmp_path, "train/labels", ["p1", "p1"]) # Duplicate.
+    tr_lbl = _make_paths(tmp_path, "train/labels", ["p1", "p1"])  # Duplicate.
     # Val: clean and paired.
     va_img = _make_paths(tmp_path, "val/images", ["q1", "q2"])
     va_lbl = _make_paths(tmp_path, "val/labels", ["q1", "q2"])
@@ -351,7 +351,7 @@ def test_raises_on_duplicate_train_labels(tmp_path):
     with pytest.raises(ValueError, match="duplicate entries in train_labels"):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -366,13 +366,13 @@ def test_raises_on_duplicate_val_images(tmp_path):
     tr_img = _make_paths(tmp_path, "train/images", ["p1", "p2"])
     tr_lbl = _make_paths(tmp_path, "train/labels", ["p1", "p2"])
     # Val: 2 imgs (duplicate), 2 labels (distinct) to keep counts equal.
-    va_img = _make_paths(tmp_path, "val/images", ["q1", "q1"]) # Duplicate.
+    va_img = _make_paths(tmp_path, "val/images", ["q1", "q1"])  # Duplicate.
     va_lbl = _make_paths(tmp_path, "val/labels", ["q1", "q2"])
 
     with pytest.raises(ValueError, match="duplicate entries in val_images"):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -393,7 +393,7 @@ def test_raises_on_duplicate_val_labels(tmp_path: Path):
     with pytest.raises(ValueError, match="duplicate entries in val_labels"):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -413,14 +413,14 @@ def test_raises_on_label_overlap(tmp_path):
 
     # Create label overlap by reusing one TRAIN label file path in VAL labels.
     va_lbl = [
-        _make_paths(tmp_path, "val/labels", ["q1"])[0], # q1 label in val.
-        tr_lbl[1], # <-- overlap: same path as train/labels/p2.npy.
+        _make_paths(tmp_path, "val/labels", ["q1"])[0],  # q1 label in val.
+        tr_lbl[1],  # <-- overlap: same path as train/labels/p2.npy.
     ]
 
     with pytest.raises(ValueError, match=r"train/val overlap in labels"):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -447,7 +447,7 @@ def test_raises_on_validation_stem_mismatch(tmp_path):
     ):
         tu.sanity_check_fold_data(
             fold=0,
-    
+
             train_images=tr_img,
             train_labels=tr_lbl,
             val_images=va_img,
@@ -469,10 +469,10 @@ def test_get_npy_paths_happy_default_suffix(tmp_path: Path):
     ids = ["p1", "p2"]
     _touch_ids(base, ids, suffix=".npy")
 
-    paths = tu.get_npy_paths(base, ids) # Default suffix, must_exist=True.
+    paths = tu.get_npy_paths(base, ids)  # Default suffix, must_exist=True.
     expected = [str((base / f"{i}.npy").resolve()) for i in ids]
 
-    assert paths == expected # Order preserved, absolute paths returned.
+    assert paths == expected  # Order preserved, absolute paths returned.
     for p in paths:
         assert p.endswith(".npy")
         assert Path(p).exists()
@@ -502,7 +502,7 @@ def test_get_npy_paths_raises_with_preview_and_more(tmp_path):
     # Make p0 exist; others will be missing to trigger preview + "more".
     _touch_ids(base, ["p0"], suffix=".npy")
 
-    ids = ["p0", "p1", "p2", "p3", "p4", "p5", "p6"] # Six missing.
+    ids = ["p0", "p1", "p2", "p3", "p4", "p5", "p6"]  # Six missing.
     with pytest.raises(FileNotFoundError) as exc:
         tu.get_npy_paths(base, ids, must_exist=True)
 
@@ -519,7 +519,7 @@ def test_get_npy_paths_raises_with_preview_and_more(tmp_path):
 def test_get_npy_paths_custom_suffix_and_path_ids(tmp_path):
     """Test that custom suffix and Path IDs work correctly."""
     base = tmp_path / "nii"
-    ids = [Path("A"), Path("B")] # Path objects are supported.
+    ids = [Path("A"), Path("B")]  # Path objects are supported.
     _touch_ids(base, ["A", "B"], suffix=".nii.gz")
 
     paths = tu.get_npy_paths(base, ids, suffix=".nii.gz", must_exist=True)
