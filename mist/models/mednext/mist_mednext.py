@@ -245,7 +245,7 @@ class MedNeXt(MISTModel):
             zip(self.up_blocks, self.dec_stages)
         ):
             if self.use_deep_supervision and i < len(self.out_blocks):
-                ds_outputs.append(self.out_blocks[i](x))  # pylint: disable=used-before-assignment
+                ds_outputs.append(self.out_blocks[i](x))  # pylint: disable=used-before-assignment  # noqa: E501
 
             x = up_block(x)
             x = x + enc_outputs[-(i + 1)]

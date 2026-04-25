@@ -110,7 +110,7 @@ def predict_single_example(
         # skip=True: images were read as-is with no spatial transforms applied.
         # The prediction is already in the original image's voxel space, so
         # just copy the original header directly — no reorient or resample.
-        prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]
+        prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # noqa: E501
     else:
         # Ensure bounding box is defined if cropping was used.
         if (
@@ -140,7 +140,7 @@ def predict_single_example(
             prediction.numpy(), original_labels
         )
         prediction = (
-            original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]
+            original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # noqa: E501
         )
     return prediction.astype("uint8")
 

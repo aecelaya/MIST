@@ -284,8 +284,9 @@ class MGNet(MISTModel):
         if max_height <= 1:
             return [1]
 
-        core_sequence = list(range(2, max_height + 1)) + \
-            list(range(max_height - 1, 1, -1))
+        core_sequence = (
+            list(range(2, max_height + 1)) + list(range(max_height - 1, 1, -1))
+        )
         full_sequence = [1]
         for val in core_sequence:
             full_sequence.extend([val, 1])
@@ -447,8 +448,9 @@ class MGNet(MISTModel):
                 current_features = block(torch.cat(inputs_to_concat, dim=1))
 
             # Peak reached.
-            peak_depth_idx = self.bottleneck_layer_idx - \
-                len(spike_module["up_blocks"])
+            peak_depth_idx = (
+                self.bottleneck_layer_idx - len(spike_module["up_blocks"])
+            )
             neighbor_peak_registry[peak_depth_idx] = current_features
             encoder_feature_registry[peak_depth_idx].append(current_features)
 

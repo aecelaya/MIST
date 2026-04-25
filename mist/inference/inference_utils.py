@@ -135,7 +135,7 @@ def back_to_original_space(
     # will take care of other details in the header like the origin and the
     # image bounding box.
     # ANTs stubs don't annotate new_image_like's return type.
-    prediction = original_ants_image.new_image_like(prediction.numpy())  # type: ignore[no-any-return]
+    prediction = original_ants_image.new_image_like(prediction.numpy())  # type: ignore[no-any-return]  # noqa: E501
     return prediction
 
 

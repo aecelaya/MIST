@@ -192,7 +192,7 @@ class DynamicUNet(nn.Module):
                 self.training and
                 i in self.deep_supervision_head_ids
             ):
-                deep_supervision_head_inputs.append(x)  # pylint: disable=possibly-used-before-assignment
+                deep_supervision_head_inputs.append(x)  # pylint: disable=possibly-used-before-assignment  # noqa: E501
 
         # Reverse the deep supervision head inputs to match the order of the
         # deep supervision heads. Apply the deep supervision heads to their

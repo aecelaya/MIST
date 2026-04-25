@@ -207,8 +207,9 @@ class SurfaceDilationLogic(nn.Module):
         # 3. Dice score (sum over spatial dims D, H, W).
         spatial_dims = (2, 3, 4)
         overlap = (dilated_p * dilated_t).sum(dim=spatial_dims)
-        union = dilated_p.sum(dim=spatial_dims) + \
-            dilated_t.sum(dim=spatial_dims)
+        union = (
+            dilated_p.sum(dim=spatial_dims) + dilated_t.sum(dim=spatial_dims)
+        )
 
         s_hat = (2.0 * overlap) / (union + self.eps)
         return 1.0 - torch.mean(s_hat)
