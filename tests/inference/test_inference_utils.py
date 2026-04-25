@@ -272,7 +272,7 @@ def test_remap_mask_labels(input_mask, original_labels, expected_output):
 @patch("mist.analyze_data.analyzer_utils.is_image_3d")
 @patch("ants.image_read")
 @patch("ants.image_header_info")
-@patch("os.path.isfile")
+@patch("pathlib.Path.is_file")
 def test_validate_inference_images_success(
     mock_isfile,
     mock_image_header_info,
@@ -313,7 +313,7 @@ def test_validate_inference_images_missing_id():
         iu.validate_inference_images({"img": "/some/path/img.nii.gz"})
 
 
-@patch("os.path.isfile")
+@patch("pathlib.Path.is_file")
 def test_validate_inference_images_missing_file(mock_isfile):
     """Test that missing image file raises FileNotFoundError."""
     patient_dict = {"id": "abc", "img1": "/missing/path.nii.gz"}
@@ -324,7 +324,7 @@ def test_validate_inference_images_missing_file(mock_isfile):
 
 @patch("mist.analyze_data.analyzer_utils.is_image_3d")
 @patch("ants.image_header_info")
-@patch("os.path.isfile")
+@patch("pathlib.Path.is_file")
 def test_validate_inference_images_anchor_not_3d(
     mock_isfile,
     mock_image_header_info,
@@ -343,7 +343,7 @@ def test_validate_inference_images_anchor_not_3d(
 @patch("mist.analyze_data.analyzer_utils.is_image_3d")
 @patch("ants.image_read")
 @patch("ants.image_header_info")
-@patch("os.path.isfile")
+@patch("pathlib.Path.is_file")
 def test_validate_inference_images_header_mismatch(
     mock_isfile,
     mock_image_header_info,
@@ -383,7 +383,7 @@ def test_validate_inference_images_no_image_columns():
 @patch("mist.analyze_data.analyzer_utils.is_image_3d")
 @patch("ants.image_read")
 @patch("ants.image_header_info")
-@patch("os.path.isfile")
+@patch("pathlib.Path.is_file")
 def test_validate_inference_images_secondary_image_not_3d(
     mock_isfile,
     mock_image_header_info,

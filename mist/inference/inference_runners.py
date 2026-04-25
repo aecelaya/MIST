@@ -5,7 +5,7 @@ This module contains high-level entry points for running full-resolution
 for fold-based evaluation and general test-time prediction from CSV input.
 """
 import argparse
-import os
+from pathlib import Path
 from typing import Any, Dict, Optional, Union, List
 
 import ants
@@ -172,25 +172,25 @@ def test_on_fold(
     device = device or inference_utils.get_default_device()
 
     # Extract the results directory from the MIST arguments.
-    results_dir = os.path.join(mist_args.results)
-    numpy_dir = os.path.join(mist_args.numpy)
-    models_dir = os.path.join(results_dir, "models")
-    config_path = os.path.join(results_dir, "config.json")
+    results_dir = Path(mist_args.results)
+    numpy_dir = Path(mist_args.numpy)
+    models_dir = results_dir / "models"
+    config_path = results_dir / "config.json"
     config = io.read_json_file(config_path)
 
     # Get dataframe with paths for test images.
-    train_df = pd.read_csv(os.path.join(results_dir, "train_paths.csv"))
+    train_df = pd.read_csv(results_dir / "train_paths.csv")
     test_df = train_df.loc[train_df["fold"] == fold_number]
 
     # Construct paths to preprocessed .npy image volumes.
     test_image_paths = training_utils.get_npy_paths(
-        data_dir=os.path.join(numpy_dir, "images"),
+        data_dir=numpy_dir / "images",
         patient_ids=list(test_df["id"]),
     )
 
     # Get bounding box data.
     foreground_bounding_boxes = pd.read_csv(
-        os.path.join(results_dir, "fg_bboxes.csv")
+        results_dir / "fg_bboxes.csv"
     )
 
     # Get DALI loader for streaming preprocessed numpy files.
@@ -206,8 +206,8 @@ def test_on_fold(
     )
 
     # Load model.
-    weights_path = os.path.join(models_dir, f"fold_{fold_number}.pt")
-    model = model_loader.load_model_from_config(weights_path, config)
+    weights_path = models_dir / f"fold_{fold_number}.pt"
+    model = model_loader.load_model_from_config(str(weights_path), config)
     model.eval()
     model.to(device)
 
@@ -215,8 +215,8 @@ def test_on_fold(
     predictor = _build_predictor(config, models=[model], device=device)
 
     # Create output directory.
-    output_directory = os.path.join(results_dir, "predictions", "train", "raw")
-    os.makedirs(output_directory, exist_ok=True)
+    output_directory = results_dir / "predictions" / "train" / "raw"
+    output_directory.mkdir(parents=True, exist_ok=True)
 
     # Progress bar and error messages.
     error_messages = []
@@ -229,7 +229,7 @@ def test_on_fold(
         for image_index in pb.track(range(len(test_df))):
             patient = test_df.iloc[image_index].to_dict()
             patient_id = patient["id"]
-            filename = os.path.join(output_directory, f"{patient_id}.nii.gz")
+            filename = str(output_directory / f"{patient_id}.nii.gz")
             try:
                 # Get image paths from patient dictionary. Load the original
                 # image using ANTs. If this is a multi-modality image, we need
@@ -342,7 +342,7 @@ def infer_from_dataframe(
     # initialize the postprocessor.
     postprocessor = None
     if postprocessing_strategy_filepath is not None:
-        if not os.path.exists(postprocessing_strategy_filepath):
+        if not Path(postprocessing_strategy_filepath).exists():
             raise FileNotFoundError(
                 "Postprocess strategy file not found: "
                 f"{postprocessing_strategy_filepath}"
@@ -352,7 +352,7 @@ def infer_from_dataframe(
         )
 
     # Create destination directory if it does not exist.
-    os.makedirs(output_directory, exist_ok=True)
+    Path(output_directory).mkdir(parents=True, exist_ok=True)
 
     # Set up rich progress bar.
     error_messages = []
@@ -362,8 +362,8 @@ def infer_from_dataframe(
         for patient_index in pb.track(range(len(paths_dataframe))):
             patient = paths_dataframe.iloc[patient_index].to_dict()
             patient_id = patient["id"]
-            prediction_filename = os.path.join(
-                output_directory, f"{patient_id}.nii.gz"
+            prediction_filename = str(
+                Path(output_directory) / f"{patient_id}.nii.gz"
             )
             try:
                 # Validate the input patient data.

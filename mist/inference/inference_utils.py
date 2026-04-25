@@ -2,7 +2,6 @@
 from typing import Any, Dict, Optional, Tuple, List, Union
 from collections.abc import Callable
 from pathlib import Path
-import os
 
 import ants
 import numpy as np
@@ -251,13 +250,13 @@ def validate_inference_images(
 
     # Check all files exist.
     for image_path in image_paths:
-        if not os.path.isfile(image_path):
+        if not Path(image_path).is_file():
             raise FileNotFoundError(
-                f"Image file not found: {os.path.basename(image_path)}"
+                f"Image file not found: {Path(image_path).name}"
             )
 
     # Load anchor image. Check if it is 3D before proceeding.
-    anchor_filename = os.path.basename(image_paths[0])
+    anchor_filename = Path(image_paths[0]).name
     anchor_header = ants.image_header_info(image_paths[0])
     if not analyzer_utils.is_image_3d(anchor_header):
         raise ValueError(f"Anchor image is not 3D: {anchor_filename}")
@@ -265,7 +264,7 @@ def validate_inference_images(
 
     # Check header compatibility for additional modalities.
     for image_path in image_paths[1:]:
-        current_filename = os.path.basename(image_path)
+        current_filename = Path(image_path).name
         current_header = ants.image_header_info(image_path)
         if not analyzer_utils.is_image_3d(current_header):
             raise ValueError(f"Image is not 3D: {current_filename}")

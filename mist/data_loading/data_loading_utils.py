@@ -1,8 +1,8 @@
 """Utility functions for data loading."""
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import List, Optional, Any
-import os
 
 from nvidia.dali import fn
 from nvidia.dali import math
@@ -264,5 +264,5 @@ def is_valid_generic_pipeline_input(input_data: Any) -> bool:
     return all(
         isinstance(item, str) and
         item.endswith(".npy") and
-        os.path.isfile(item) for item in input_data
+        Path(item).is_file() for item in input_data
     )

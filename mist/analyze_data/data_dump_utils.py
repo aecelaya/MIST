@@ -1,6 +1,6 @@
 """Utilities for the DataDumper module."""
+from pathlib import Path
 from typing import Dict, Any, List
-import os
 
 import numpy as np
 import ants
@@ -26,8 +26,8 @@ def get_dataset_size_gb(paths_df: pd.DataFrame) -> float:
             if col in ("id", "fold"):
                 continue
             val = row[col]
-            if isinstance(val, str) and os.path.exists(val):
-                total_bytes += os.path.getsize(val)
+            if isinstance(val, str) and Path(val).exists():
+                total_bytes += Path(val).stat().st_size
     return round(total_bytes / 1e9, 4)
 
 
