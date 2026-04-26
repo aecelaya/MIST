@@ -1,10 +1,10 @@
 """Input output utilities for MIST runtime IO operations."""
-from typing import Dict, Any, Union
+from typing import Any
 from pathlib import Path
 import json
 
 
-def read_json_file(json_file: Union[str, Path]) -> Dict[str, Any]:
+def read_json_file(json_file: str | Path) -> dict[str, Any]:
     """Read json file and output it as a dictionary.
 
     Args:
@@ -13,13 +13,13 @@ def read_json_file(json_file: Union[str, Path]) -> Dict[str, Any]:
     Returns:
         json_data: Dictionary with json file data.
     """
-    with open(json_file, "r", encoding="utf-8") as file:
+    with open(json_file, encoding="utf-8") as file:
         json_data = json.load(file)
     return json_data
 
 
 def write_json_file(
-    json_file: Union[str, Path], json_data: Dict[str, Any]
+    json_file: str | Path, json_data: dict[str, Any]
 ) -> None:
     """Write dictionary as json file.
 

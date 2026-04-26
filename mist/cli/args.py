@@ -1,5 +1,4 @@
 """Handle command line arguments for main MIST pipelines."""
-from typing import Union
 import argparse
 from argparse import ArgumentParser
 
@@ -11,7 +10,7 @@ from mist.loss_functions.loss_registry import list_registered_losses
 from mist.loss_functions.alpha_schedulers import list_alpha_schedulers
 
 
-def positive_int(value: Union[str, int]) -> int:
+def positive_int(value: str | int) -> int:
     """Check if the input is a positive integer."""
     integer_value = int(value)
     if integer_value <= 0:
@@ -21,7 +20,7 @@ def positive_int(value: Union[str, int]) -> int:
     return integer_value
 
 
-def positive_float(value: Union[str, float]) -> float:
+def positive_float(value: str | float) -> float:
     """Check if the input is a positive float."""
     float_value = float(value)
     if float_value <= 0:
@@ -31,7 +30,7 @@ def positive_float(value: Union[str, float]) -> float:
     return float_value
 
 
-def non_negative_int(value: Union[str, int]) -> int:
+def non_negative_int(value: str | int) -> int:
     """Check if the input is a non-negative integer."""
     integer_value = int(value)
     if integer_value < 0:
@@ -41,7 +40,7 @@ def non_negative_int(value: Union[str, int]) -> int:
     return integer_value
 
 
-def float_0_1(value: Union[str, float]) -> float:
+def float_0_1(value: str | float) -> float:
     """Check if the input is a float in [0, 1]."""
     float_value = float(value)
     if not 0 <= float_value <= 1:
@@ -52,7 +51,7 @@ def float_0_1(value: Union[str, float]) -> float:
     return float_value
 
 
-def str2bool(value: Union[str, bool]) -> bool:
+def str2bool(value: str | bool) -> bool:
     """Convert a string to a boolean value."""
     if isinstance(value, bool):
         return value

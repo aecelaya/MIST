@@ -10,7 +10,7 @@ Two output files are saved to the results directory:
     - data_dump.md: Narrativized summary optimized for LLM consumption.
 """
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -34,10 +34,10 @@ class DataDumper:
     def __init__(
         self,
         paths_df: pd.DataFrame,
-        dataset_info: Dict[str, Any],
-        config: Dict[str, Any],
-        results_dir: Union[str, Path],
-        cropped_dims: Optional[np.ndarray] = None,
+        dataset_info: dict[str, Any],
+        config: dict[str, Any],
+        results_dir: str | Path,
+        cropped_dims: np.ndarray | None = None,
     ):
         self.paths_df = paths_df
         self.dataset_info = dataset_info
@@ -46,7 +46,7 @@ class DataDumper:
         self.cropped_dims = cropped_dims
         self.console = rich.console.Console()
 
-    def _build_dataset_summary(self) -> Dict[str, Any]:
+    def _build_dataset_summary(self) -> dict[str, Any]:
         """Build the dataset_summary section of the data dump."""
         return {
             "task": self.dataset_info["task"],
@@ -62,7 +62,7 @@ class DataDumper:
             ),
         }
 
-    def build_data_dump(self) -> Dict[str, Any]:
+    def build_data_dump(self) -> dict[str, Any]:
         """Compute all statistics and assemble the data dump dictionary.
 
         Returns:
@@ -110,7 +110,7 @@ class DataDumper:
             "mist_config_path": str(self.results_dir / "config.json"),
         }
 
-    def generate_markdown_summary(self, dump: Dict[str, Any]) -> str:
+    def generate_markdown_summary(self, dump: dict[str, Any]) -> str:
         """Generate a markdown narrative from the data dump dictionary.
 
         Args:

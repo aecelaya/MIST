@@ -1,5 +1,5 @@
 """Sliding window inferer implementation using MONAI."""
-from typing import Callable, Tuple, Union, Optional
+from collections.abc import Callable
 import torch
 import monai
 
@@ -16,10 +16,10 @@ class SlidingWindowInferer(AbstractInferer):
 
     def __init__(
         self,
-        patch_size: Tuple[int, int, int],
+        patch_size: tuple[int, int, int],
         patch_overlap: float = 0.5,
         patch_blend_mode: str = "gaussian",
-        device: Optional[Union[str, torch.device]] = None,
+        device: str | torch.device | None = None,
     ):
         """Initialize the sliding window inferer.
 

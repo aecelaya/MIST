@@ -1,7 +1,6 @@
 """Entrypoint for the analyze command."""
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
-from typing import Optional, List
 import argparse
 
 # MIST imports.
@@ -16,7 +15,7 @@ def prepare_analyze_dirs(cli: argparse.Namespace) -> Path:
     return results_dir
 
 
-def analyze_entry(argv: Optional[List[str]] = None) -> None:
+def analyze_entry(argv: list[str] | None = None) -> None:
     """Entrypoint for the analyze command."""
     # Build the argument parser.
     parser = argmod.ArgParser(

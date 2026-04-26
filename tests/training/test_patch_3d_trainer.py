@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
-from typing import Any, Dict, Tuple
+from typing import Any
 import pandas as pd
 import pytest
 import torch
@@ -19,7 +19,7 @@ from mist.training.trainers.patch_3d_trainer import Patch3DTrainer
 class DummyIter:
     """Simple DALI-style iterator with .next()[0] and .reset()."""
 
-    def __init__(self, batch: Dict[str, torch.Tensor], steps: int):
+    def __init__(self, batch: dict[str, torch.Tensor], steps: int):
         """Initialize the iterator.
 
         Args:
@@ -30,7 +30,7 @@ class DummyIter:
         self._steps = max(0, int(steps))
         self._i = 0
 
-    def next(self) -> Tuple[Dict[str, torch.Tensor]]:
+    def next(self) -> tuple[dict[str, torch.Tensor]]:
         """Return a batch and advance the internal counter."""
         if self._i >= self._steps:
             self._i = 0
@@ -50,7 +50,7 @@ class DummyModel(nn.Module):
         super().__init__()
         self.fc = nn.Linear(4, 4, bias=False)
 
-    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         """Forward that mimics MIST dict outputs."""
         pred = self.fc(x)
         return {"prediction": pred, "deep_supervision": None}

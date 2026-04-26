@@ -1,7 +1,7 @@
 """Base class for segmentation loss functions."""
 
 from abc import ABC, abstractmethod
-from typing import Tuple, Any
+from typing import Any
 
 
 import torch
@@ -45,7 +45,7 @@ class SegmentationLoss(nn.Module, ABC):
         self,
         y_true: torch.Tensor,
         y_pred: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Preprocesses loss inputs for segmentation tasks.
 
         This method converts the ground truth labels to one-hot encoding and

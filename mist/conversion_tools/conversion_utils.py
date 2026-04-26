@@ -1,12 +1,11 @@
 """Utilities for converting datasets to MIST format."""
-from typing import Union
 import shutil
 from pathlib import Path
 
 
 def copy_image_from_source_to_dest(
-    image_source: Union[str, Path],
-    image_destination: Union[str, Path],
+    image_source: str | Path,
+    image_destination: str | Path,
 ) -> None:
     """Copy image from source to destination.
 

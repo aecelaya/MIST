@@ -1,7 +1,6 @@
 """Entrypoint for running the MIST training pipeline."""
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
-from typing import List, Optional, Tuple
 import argparse
 import pandas as pd
 import torch
@@ -16,7 +15,7 @@ from mist.evaluation import evaluation_utils
 from mist.evaluation.evaluator import Evaluator
 
 
-def _parse_train_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def _parse_train_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI for the training pipeline.
 
     Falls back to ./results and ./numpy if not provided, then downstream
@@ -38,7 +37,7 @@ def _parse_train_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return ns
 
 
-def _ensure_required_artifacts(ns: argparse.Namespace) -> Tuple[Path, bool]:
+def _ensure_required_artifacts(ns: argparse.Namespace) -> tuple[Path, bool]:
     """Verify results & numpy folders contain the expected structure.
 
     Returns:
@@ -93,7 +92,7 @@ def _create_train_dirs(results_dir: Path, has_test_paths: bool) -> None:
         test_pred_dir.mkdir(parents=True, exist_ok=True)
 
 
-def train_entry(argv: Optional[List[str]] = None) -> None:
+def train_entry(argv: list[str] | None = None) -> None:
     """Entrypoint for the training command."""
     ns = _parse_train_args(argv)
 

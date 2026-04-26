@@ -1,6 +1,6 @@
 """Unit tests for DeepSupervisionLoss wrapper."""
 
-from typing import Any, List, Tuple
+from typing import Any
 
 import torch
 
@@ -18,7 +18,7 @@ class ShapeSpyLoss(SegmentationLoss):
 
     def __init__(self):
         super().__init__()
-        self.history: List[Tuple[torch.Size, torch.Size]] = []
+        self.history: list[tuple[torch.Size, torch.Size]] = []
 
     def forward(
         self,
@@ -42,7 +42,7 @@ class DummySumLoss(SegmentationLoss):
 
 def _make_mock_data(
     num_supervisions: int = 0,
-) -> Tuple[torch.Tensor, torch.Tensor, Tuple[torch.Tensor, ...]]:
+) -> tuple[torch.Tensor, torch.Tensor, tuple[torch.Tensor, ...]]:
     """Creates mock data for supervision testing.
 
     Args:

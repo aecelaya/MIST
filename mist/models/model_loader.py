@@ -1,6 +1,5 @@
 """Unified interface for validating, building, and loading MIST models."""
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple
 import warnings
 import torch
 
@@ -9,8 +8,8 @@ from mist.models.model_registry import get_model_from_registry
 
 
 def average_fold_weights(
-    weights_paths: List[str],
-    output_path: Optional[str] = None,
+    weights_paths: list[str],
+    output_path: str | None = None,
 ) -> OrderedDict:
     """Average weights from multiple fold checkpoints.
 
@@ -71,8 +70,8 @@ _ADAPTIVE_ARCHITECTURES = {"nnunet", "nnunet-pocket", "fmgnet", "wnet"}
 
 
 def validate_encoder_compatibility(
-    source_config: Dict,
-    target_config: Dict,
+    source_config: dict,
+    target_config: dict,
     force: bool = False,
 ) -> None:
     """Validate that source and target configs have compatible encoder structure.
@@ -133,7 +132,7 @@ def load_pretrained_encoder(
     model: torch.nn.Module,
     weights_path: str,
     in_channel_strategy: str = "average",
-) -> Tuple[torch.nn.Module, Dict[str, List[str]]]:
+) -> tuple[torch.nn.Module, dict[str, list[str]]]:
     """Load pretrained encoder weights into a model.
 
     Only encoder weights (as defined by model.get_encoder_state_dict()) are
@@ -185,7 +184,7 @@ def load_pretrained_encoder(
 
     target_encoder_sd = model.get_encoder_state_dict()
     partial_sd = OrderedDict()
-    summary: Dict[str, List[str]] = {
+    summary: dict[str, list[str]] = {
         "loaded": [],
         "channel_strategy_applied": [],
         "skipped": [],
@@ -236,7 +235,7 @@ def load_pretrained_encoder(
     return model, summary
 
 
-def validate_mist_config_for_model_loading(config: Dict) -> None:
+def validate_mist_config_for_model_loading(config: dict) -> None:
     """Validate structure of the MIST configuration.
 
     Args:
@@ -272,7 +271,7 @@ def validate_mist_config_for_model_loading(config: Dict) -> None:
 
 def load_model_from_config(
     weights_path: str,
-    config: Dict,
+    config: dict,
 ) -> torch.nn.Module:
     """Load a model and its weights from a config dictionary and checkpoint.
 

@@ -1,10 +1,6 @@
 """Modified lookup tables used by surface distance metrics."""
 # ruff: noqa: E501  — long lines are numerical data arrays; reformatting harms readability
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
 
-from typing import Tuple
 
 import math
 import numpy as np
@@ -285,7 +281,7 @@ _NEIGHBOUR_CODE_TO_NORMALS = [
 
 
 def create_table_neighbour_code_to_surface_area(
-        spacing_mm: Tuple[float, float, float],
+        spacing_mm: tuple[float, float, float],
 ) -> npt.NDArray[np.float64]:
     """Returns an array mapping neighbourhood code to the surface elements area.
 
@@ -315,7 +311,7 @@ def create_table_neighbour_code_to_surface_area(
 
 
 def create_table_neighbour_code_to_contour_length(
-        spacing_mm: Tuple[float, float],
+        spacing_mm: tuple[float, float],
 ) -> npt.NDArray[np.float64]:
     """Returns an array mapping neighbourhood code to the contour length.
     For the list of possible cases and their figures, see page 38 from:

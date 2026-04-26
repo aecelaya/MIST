@@ -1,6 +1,5 @@
 """Unit tests for DiceLoss in MIST."""
 
-from typing import Tuple
 
 import torch
 
@@ -11,7 +10,7 @@ def _make_mock_data(
     n_classes: int = 3,
     batch_size: int = 2,
     size: int = 4,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Generates valid input tensors for Dice loss testing.
 
     Args:

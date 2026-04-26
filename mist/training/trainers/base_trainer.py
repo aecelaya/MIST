@@ -1,6 +1,6 @@
 """Base trainer class for MIST."""
 
-from typing import Dict, Any
+from typing import Any
 from abc import ABC, abstractmethod
 from pathlib import Path
 import contextlib
@@ -258,7 +258,7 @@ class BaseTrainer(ABC):
         # Write the updated configuration to the config.json file.
         io.write_json_file(self.config_json, self.config)
 
-    def _check_resume_overrides(self, original_config: Dict[str, Any]) -> None:
+    def _check_resume_overrides(self, original_config: dict[str, Any]) -> None:
         """Warn or raise when --resume is combined with config-altering flags.
 
         Architecture and patch-size changes are incompatible with a saved
@@ -506,7 +506,7 @@ class BaseTrainer(ABC):
                 math.ceil(len(train_images) / max(1, self.batch_size)),
             )
 
-    def build_components(self, rank: int, world_size: int) -> Dict[str, Any]:
+    def build_components(self, rank: int, world_size: int) -> dict[str, Any]:
         """Build the model, loss function, and optimizer components."""
         training = self.config["training"]
 
@@ -637,7 +637,7 @@ class BaseTrainer(ABC):
         """Return the checkpoint path for a given fold."""
         return self.checkpoints_dir / f"fold_{fold}_checkpoint.pt"
 
-    def save_checkpoint(self, fold: int, state: Dict[str, Any]) -> None:
+    def save_checkpoint(self, fold: int, state: dict[str, Any]) -> None:
         """Save a training checkpoint for the given fold (rank 0 only).
 
         Saves the current model weights, optimizer, LR scheduler, and scaler
@@ -669,7 +669,7 @@ class BaseTrainer(ABC):
         torch.save(checkpoint, tmp)
         tmp.rename(path)
 
-    def load_checkpoint(self, fold: int, state: Dict[str, Any]) -> bool:
+    def load_checkpoint(self, fold: int, state: dict[str, Any]) -> bool:
         """Load a training checkpoint into state (all ranks).
 
         Restores model weights, optimizer, LR scheduler, and scaler states

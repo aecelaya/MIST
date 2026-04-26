@@ -1,7 +1,7 @@
 """Tests for mist.analyze_data.data_dumper."""
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -26,7 +26,7 @@ def _make_paths_df(n=3) -> pd.DataFrame:
     })
 
 
-def _make_dataset_info() -> Dict[str, Any]:
+def _make_dataset_info() -> dict[str, Any]:
     """Minimal dataset_info dictionary."""
     return {
         "task": "test-task",
@@ -37,14 +37,14 @@ def _make_dataset_info() -> Dict[str, Any]:
     }
 
 
-def _make_config() -> Dict[str, Any]:
+def _make_config() -> dict[str, Any]:
     """Minimal MIST config dictionary."""
     return {
         "preprocessing": {"median_resampled_image_size": [64, 64, 32]}
     }
 
 
-def _make_controlled_dump(results_dir: str) -> Dict[str, Any]:
+def _make_controlled_dump(results_dir: str) -> dict[str, Any]:
     """Build a fully specified dump dict for markdown/run tests."""
     return {
         "dataset_summary": {

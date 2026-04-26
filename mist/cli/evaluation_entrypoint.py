@@ -3,7 +3,6 @@
 import argparse
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
-from typing import List, Optional
 
 import pandas as pd
 
@@ -12,7 +11,7 @@ from mist.evaluation.evaluator import Evaluator
 from mist.utils import io
 
 
-def _parse_eval_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def _parse_eval_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI for evaluation."""
     parser = ArgParser(
         formatter_class=ArgumentDefaultsHelpFormatter,
@@ -88,7 +87,7 @@ def run_evaluation(ns: argparse.Namespace) -> None:
     evaluator.run(max_workers=ns.num_workers_evaluate)
 
 
-def evaluation_entry(argv: Optional[List[str]] = None) -> None:
+def evaluation_entry(argv: list[str] | None = None) -> None:
     """Entrypoint callable from __main__ or tests."""
     ns = _parse_eval_args(argv)
     run_evaluation(ns)

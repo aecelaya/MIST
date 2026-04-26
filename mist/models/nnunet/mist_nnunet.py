@@ -1,7 +1,6 @@
 """MIST implementation of nnUNet."""
 from collections import OrderedDict
 from collections.abc import Sequence
-from typing import Union, Dict
 import torch
 
 # MIST imports.
@@ -89,6 +88,6 @@ class NNUNet(MISTModel):
              if k.startswith(encoder_prefixes)}
         )
 
-    def forward(self, x: torch.Tensor) -> Union[torch.Tensor, Dict]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor | dict:
         """Forward pass for nnUNet."""
         return self.unet(x)

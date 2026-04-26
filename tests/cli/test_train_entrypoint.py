@@ -1,5 +1,4 @@
 """Tests for MIST training entrypoint CLI."""
-from typing import List, Tuple
 import argparse
 import json
 from pathlib import Path
@@ -323,7 +322,7 @@ def test_train_entry_happy_path_no_test_empty_eval(tmp_path, monkeypatch):
     )
 
     # Record folds for test_on_fold calls.
-    folds_called: List[int] = []
+    folds_called: list[int] = []
     monkeypatch.setattr(
         entry,
         "test_on_fold",
@@ -421,7 +420,7 @@ def test_train_entry_happy_path_with_eval_and_test_infer(
     )
 
     # Fold test tracker.
-    folds_called: List[int] = []
+    folds_called: list[int] = []
     monkeypatch.setattr(
         entry,
         "test_on_fold",
@@ -457,7 +456,7 @@ def test_train_entry_happy_path_with_eval_and_test_infer(
     test_df = pd.DataFrame({"id": [9]})
     monkeypatch.setattr(pd, "read_csv", lambda p: test_df, raising=True)
 
-    infer_calls: List[Tuple[str, str]] = []
+    infer_calls: list[tuple[str, str]] = []
 
     def _infer_from_dataframe(
         paths_dataframe,

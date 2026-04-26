@@ -3,7 +3,7 @@
 import warnings
 from functools import partial
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Union, Any
+from typing import Any
 
 import ants
 import numpy as np
@@ -11,10 +11,10 @@ import pandas as pd
 
 
 def validate_mask(
-    mask_path: Union[str, Path],
-    evaluation_config: Dict[str, Any],
+    mask_path: str | Path,
+    evaluation_config: dict[str, Any],
     mask_type: str = "mask",
-) -> Optional[str]:
+) -> str | None:
     """Validate a mask (ground truth or prediction) for evaluation.
 
     Checks that the mask can be read, is 3D, has an integer or boolean dtype,
@@ -74,11 +74,11 @@ def validate_mask(
 
 
 def build_evaluation_dataframe(
-    train_paths_csv: Union[str, Path],
-    prediction_folder: Union[str, Path],
-    evaluation_config: Optional[Dict[str, Any]] = None,
+    train_paths_csv: str | Path,
+    prediction_folder: str | Path,
+    evaluation_config: dict[str, Any] | None = None,
     validate: bool = False,
-) -> Tuple[pd.DataFrame, Optional[str]]:
+) -> tuple[pd.DataFrame, str | None]:
     """Get DataFrame with columns 'id', 'mask', and 'prediction' for evaluation.
 
     This function matches predictions to ground truth masks based on the patient
@@ -183,7 +183,7 @@ def build_evaluation_dataframe(
 
 
 def initialize_results_dataframe(
-    evaluation_config: Dict[str, Any]
+    evaluation_config: dict[str, Any]
 ) -> pd.DataFrame:
     """Initialize results dataframe from the evaluation configuration.
 
@@ -259,7 +259,7 @@ def compute_results_stats(results_df: pd.DataFrame) -> pd.DataFrame:
 def crop_to_union(
     mask: np.ndarray,
     prediction: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Crop both arrays to the bounding box of their non-zero union.
 
     This significantly speeds up surface distance metrics (Hausdorff) by

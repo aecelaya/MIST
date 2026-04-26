@@ -1,5 +1,5 @@
 """Tests for MIST inferers."""
-from typing import Callable
+from collections.abc import Callable
 from unittest.mock import patch, MagicMock
 import pytest
 import torch

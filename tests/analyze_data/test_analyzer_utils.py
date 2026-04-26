@@ -1,6 +1,6 @@
 """Tests for mist.analyze_data.analyze_utils."""
 import logging
-from typing import Dict, Any, List, Tuple, Union
+from typing import Any
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -19,13 +19,13 @@ _REF_BUDGET = _C.PATCH_BUDGET_REFERENCE_VOXELS  # 128^3 = 2,097,152
 
 
 def _make_header(
-    dims: Tuple[int, ...] = (64, 64, 32),
-    origin: Tuple[float, ...] = (0.0, 0.0, 0.0),
-    spacing: Tuple[float, ...] = (1.0, 1.0, 2.5),
-    direction: Union[
-        np.ndarray, List[float], Tuple[float, ...]
-    ] = np.eye(3),
-) -> Dict[str, Any]:
+    dims: tuple[int, ...] = (64, 64, 32),
+    origin: tuple[float, ...] = (0.0, 0.0, 0.0),
+    spacing: tuple[float, ...] = (1.0, 1.0, 2.5),
+    direction: (
+        np.ndarray | list[float] | tuple[float, ...]
+    ) = np.eye(3),
+) -> dict[str, Any]:
     """Helper to construct a header dict."""
     return {
         "dimensions": list(dims),
@@ -165,7 +165,7 @@ class TestGetFloat32ExampleMemorySize:
 # get_files_df
 # ---------------------------------------------------------------------------
 
-def _make_dataset_info(base: Path) -> Dict[str, Any]:
+def _make_dataset_info(base: Path) -> dict[str, Any]:
     """Create a dataset_info structure for mocking utils.io.read_json_file."""
     return {
         "train-data": str(base / "train"),

@@ -2,7 +2,7 @@
 import concurrent.futures
 import shutil
 from pathlib import Path
-from typing import Dict, List, Union, cast
+from typing import cast
 import ants
 import numpy as np
 from rich.table import Table
@@ -26,11 +26,11 @@ from mist.postprocessing.postprocessing_utils import StrategyStep
 def _postprocess_single_file(
     input_path: Path,
     output_path: Path,
-    transforms: List[str],
-    apply_to_labels: List[List[int]],
-    per_label: List[bool],
-    transform_kwargs: List[Dict],
-) -> List[str]:
+    transforms: list[str],
+    apply_to_labels: list[list[int]],
+    per_label: list[bool],
+    transform_kwargs: list[dict],
+) -> list[str]:
     """Copy a mask to the output directory then apply all transforms.
 
     Copying first ensures the original is preserved in the output directory
@@ -108,7 +108,7 @@ class Postprocessor:
         self.per_label = [step["per_label"] for step in strategy]
         self.transform_kwargs = [step.get("kwargs", {}) for step in strategy]
 
-    def _load_strategy(self, strategy_path: str) -> List[StrategyStep]:
+    def _load_strategy(self, strategy_path: str) -> list[StrategyStep]:
         """Load and validate the transform strategy from a JSON file.
 
         Args:
@@ -131,7 +131,7 @@ class Postprocessor:
 
         # Cast the raw strategy to a list of StrategyStep.
         # This is a type hinting step and does not perform any validation.
-        strategy = cast(List[StrategyStep], raw_strategy)
+        strategy = cast(list[StrategyStep], raw_strategy)
 
         # Validate each step has required fields.
         for i, step in enumerate(strategy):
@@ -170,7 +170,7 @@ class Postprocessor:
                 )
         return strategy
 
-    def _gather_base_filepaths(self, base_dir: Path) -> List[Path]:
+    def _gather_base_filepaths(self, base_dir: Path) -> list[Path]:
         """Gather all .nii.gz files from the base directory.
 
         We only want valid files so we iterate through all candidates and check
@@ -224,7 +224,7 @@ class Postprocessor:
             self,
             patient_id: str,
             mask: ants.core.ants_image.ANTsImage
-    ) -> tuple[ants.core.ants_image.ANTsImage, List[str]]:
+    ) -> tuple[ants.core.ants_image.ANTsImage, list[str]]:
         """Apply all transforms in the strategy to a single ANTsImage mask.
 
         Args:
@@ -234,7 +234,7 @@ class Postprocessor:
         Returns:
             A tuple of the transformed ANTsImage and a list of messages.
         """
-        messages: List[str] = []
+        messages: list[str] = []
 
         for transform_name, per_label_flag, label_group, kwargs in zip(
             self.transforms,
@@ -261,8 +261,8 @@ class Postprocessor:
 
     def run(
         self,
-        base_dir: Union[str, Path],
-        output_dir: Union[str, Path],
+        base_dir: str | Path,
+        output_dir: str | Path,
         num_workers: int = 1,
     ) -> None:
         """Apply strategy to all prediction masks in a base directory.

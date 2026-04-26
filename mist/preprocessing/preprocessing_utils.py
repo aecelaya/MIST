@@ -1,5 +1,4 @@
 """Preprocessing utilities for MIST."""
-from typing import Dict, Tuple, List
 import numpy as np
 import skimage
 import ants
@@ -63,7 +62,7 @@ def sitk_to_ants(img_sitk: sitk.Image) -> ants.core.ants_image.ANTsImage:
 
 def get_fg_mask_bbox(
     img_ants: ants.core.ants_image.ANTsImage,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Get the bounding box of the foreground mask.
 
     This function computes the bounding box of the foreground in a 3D image. It
@@ -129,8 +128,8 @@ def get_fg_mask_bbox(
 
 def aniso_intermediate_resample(
     img_sitk: sitk.Image,
-    new_size: Tuple[int, int, int],
-    target_spacing: Tuple[float, float, float],
+    new_size: tuple[int, int, int],
+    target_spacing: tuple[float, float, float],
     low_res_axis: int,
 ) -> sitk.Image:
     """Intermediate resampling step for anisotropic images.
@@ -173,7 +172,7 @@ def aniso_intermediate_resample(
     return img_sitk
 
 
-def check_anisotropic(img_sitk: sitk.Image) -> Dict:
+def check_anisotropic(img_sitk: sitk.Image) -> dict:
     """Check if an image is anisotropic.
 
     Args:
@@ -201,8 +200,8 @@ def check_anisotropic(img_sitk: sitk.Image) -> Dict:
 
 def make_onehot(
     mask_ants: ants.core.ants_image.ANTsImage,
-    labels_list: List[int]
-) -> List[sitk.Image]:
+    labels_list: list[int]
+) -> list[sitk.Image]:
     """Convert a multi-class ANTs image into a list of binary sitk images.
 
     Args:
@@ -230,7 +229,7 @@ def make_onehot(
     return masks_sitk
 
 
-def sitk_get_min_max(image: sitk.Image) -> Tuple[float, float]:
+def sitk_get_min_max(image: sitk.Image) -> tuple[float, float]:
     """Get minimum and maximum voxel values from a SimpleITK image.
 
     Args:
@@ -262,7 +261,7 @@ def sitk_get_sum(image: sitk.Image) -> float:
 
 def crop_to_fg(
     img_ants: ants.core.ants_image.ANTsImage,
-    fg_bbox: Dict[str, int],
+    fg_bbox: dict[str, int],
 ) -> ants.core.ants_image.ANTsImage:
     """Crop image to foreground bounding box.
 

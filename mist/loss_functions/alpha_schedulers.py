@@ -7,7 +7,7 @@ This module provides scheduler classes to dynamically adjust the weighting
 import inspect
 import math
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Type
+from typing import Any
 
 
 class AlphaScheduler(ABC):
@@ -165,14 +165,14 @@ class CosineScheduler(AlphaScheduler):
         return self.end_val + (self.start_val - self.end_val) * cosine_factor
 
 
-ALPHA_SCHEDULER_REGISTRY: Dict[str, Type[AlphaScheduler]] = {
+ALPHA_SCHEDULER_REGISTRY: dict[str, type[AlphaScheduler]] = {
     "constant": ConstantScheduler,
     "linear": LinearScheduler,
     "cosine": CosineScheduler,
 }
 
 
-def get_default_scheduler_config(name: str) -> Dict[str, Any]:
+def get_default_scheduler_config(name: str) -> dict[str, Any]:
     """Build a ``{name, params}`` config dict with constructor defaults.
 
     Extracts default parameter values directly from the scheduler's
@@ -237,7 +237,7 @@ def get_alpha_scheduler(name: str, num_epochs: int, **params) -> AlphaScheduler:
     return cls(**params)
 
 
-def list_alpha_schedulers() -> List[str]:
+def list_alpha_schedulers() -> list[str]:
     """Lists all registered alpha scheduler names.
 
     Returns:

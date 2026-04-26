@@ -1,6 +1,6 @@
 """Constants for base trainer configurations in MIST."""
 
-from typing import FrozenSet, Sequence
+from collections.abc import Sequence
 import dataclasses
 
 
@@ -15,13 +15,13 @@ class TrainerConstants:
     GRAD_CLIP_VALUE: float = 1.0
 
     # Loss names that require sddl_spacing_xyz at construction.
-    SPACING_AWARE_LOSSES: FrozenSet[str] = frozenset({"volumetric_sddl", "vessel_sddl"})
+    SPACING_AWARE_LOSSES: frozenset[str] = frozenset({"volumetric_sddl", "vessel_sddl"})
 
     # Loss names that require precomputed distance transform maps (DTMs).
-    DTM_AWARE_LOSSES: FrozenSet[str] = frozenset({"bl", "hdos", "gsl"})
+    DTM_AWARE_LOSSES: frozenset[str] = frozenset({"bl", "hdos", "gsl"})
 
     # Loss names that blend two terms via a schedulable alpha weight.
-    COMPOSITE_LOSSES: FrozenSet[str] = frozenset(
+    COMPOSITE_LOSSES: frozenset[str] = frozenset(
         {"bl", "hdos", "gsl", "cldice", "volumetric_sddl", "vessel_sddl"}
     )
 

@@ -3,7 +3,6 @@ import argparse
 import json
 from pathlib import Path
 from importlib import metadata
-from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -37,21 +36,21 @@ def _ensure_dir(p: Path) -> Path:
     return p
 
 
-def _ensure_train_dir_for(path_like: Union[str, Path]) -> Path:
+def _ensure_train_dir_for(path_like: str | Path) -> Path:
     p = Path(path_like)
     d = _ensure_dir(p.parent / "train_data")
     (d / "placeholder.txt").write_text("x")
     return d
 
 
-def _ensure_test_dir_for(path_like: Union[str, Path]) -> Path:
+def _ensure_test_dir_for(path_like: str | Path) -> Path:
     p = Path(path_like)
     d = _ensure_dir(p.parent / "test_data")
     (d / "placeholder.txt").write_text("y")
     return d
 
 
-def fake_dataset_json(path: Union[str, Path]) -> dict:
+def fake_dataset_json(path: str | Path) -> dict:
     """Return a minimal valid dataset.json dictionary."""
     tdir = _ensure_train_dir_for(path)
     return {

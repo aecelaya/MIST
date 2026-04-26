@@ -1,10 +1,10 @@
 """Registry for segmentation loss functions in MIST."""
 
-from typing import Callable, Dict, Type, List
+from collections.abc import Callable
 
 from mist.loss_functions.base import SegmentationLoss
 
-LOSS_REGISTRY: Dict[str, Callable[..., SegmentationLoss]] = {}
+LOSS_REGISTRY: dict[str, Callable[..., SegmentationLoss]] = {}
 
 
 def register_loss(name: str):
@@ -19,7 +19,7 @@ def register_loss(name: str):
         @register_loss("dice")
         class DiceLoss(SegmentationLoss): ...
     """
-    def decorator(cls: Type[SegmentationLoss]) -> Type[SegmentationLoss]:
+    def decorator(cls: type[SegmentationLoss]) -> type[SegmentationLoss]:
         # Normalize to lowercase for robustness
         normalized_name = name.lower()
 
@@ -53,6 +53,6 @@ def get_loss(name: str) -> Callable[..., SegmentationLoss]:
     return LOSS_REGISTRY[normalized_name]
 
 
-def list_registered_losses() -> List[str]:
+def list_registered_losses() -> list[str]:
     """List all registered loss function names."""
     return sorted(LOSS_REGISTRY.keys())

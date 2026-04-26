@@ -6,7 +6,7 @@ for fold-based evaluation and general test-time prediction from CSV input.
 """
 import argparse
 from pathlib import Path
-from typing import Any, Dict, Optional, Union, List
+from typing import Any
 
 import ants
 import numpy as np
@@ -37,9 +37,9 @@ from mist.training import training_utils
 
 
 def _build_predictor(
-    mist_configuration: Dict[str, Any],
-    models: List,
-    device: Union[str, torch.device],
+    mist_configuration: dict[str, Any],
+    models: list,
+    device: str | torch.device,
 ) -> Predictor:
     """Build a Predictor from a MIST configuration dict.
 
@@ -77,9 +77,9 @@ def _build_predictor(
 def predict_single_example(
     preprocessed_image: torch.Tensor,
     original_ants_image: ants.core.ants_image.ANTsImage,
-    mist_configuration: Dict[str, Any],
+    mist_configuration: dict[str, Any],
     predictor: Predictor,
-    foreground_bounding_box: Optional[Dict[str, int]] = None,
+    foreground_bounding_box: dict[str, int] | None = None,
 ) -> ants.core.ants_image.ANTsImage:
     """Predict on a single example using a Predictor instance.
 
@@ -95,8 +95,8 @@ def predict_single_example(
     """
     # Training vs original labels.
     n_classes = mist_configuration["model"]["params"]["out_channels"]
-    training_labels: List[int] = list(range(n_classes))
-    original_labels: List[int] = mist_configuration["dataset_info"]["labels"]
+    training_labels: list[int] = list(range(n_classes))
+    original_labels: list[int] = mist_configuration["dataset_info"]["labels"]
 
     # Run prediction via Predictor (handles TTA + ensembling internally).
     prediction = predictor(preprocessed_image)
@@ -148,7 +148,7 @@ def predict_single_example(
 def test_on_fold(
     mist_args: argparse.Namespace,
     fold_number: int,
-    device: Optional[Union[str, torch.device]] = None,
+    device: str | torch.device | None = None,
 ) -> None:
     """Run inference on the test set for a given fold.
 
@@ -285,10 +285,10 @@ def test_on_fold(
 def infer_from_dataframe(
     paths_dataframe: pd.DataFrame,
     output_directory: str,
-    mist_configuration: Dict[str, Any],
+    mist_configuration: dict[str, Any],
     models_directory: str,
-    postprocessing_strategy_filepath: Optional[str] = None,
-    device: Optional[Union[str, torch.device]] = None,
+    postprocessing_strategy_filepath: str | None = None,
+    device: str | torch.device | None = None,
 ) -> None:
     """Run test-time inference on a set of input images.
 

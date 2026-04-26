@@ -1,6 +1,7 @@
 """Wrapper for deep supervision loss in segmentation tasks."""
 
-from typing import Any, Callable, Optional, Tuple
+from typing import Any
+from collections.abc import Callable
 
 import torch
 from torch import nn
@@ -25,7 +26,7 @@ class DeepSupervisionLoss(nn.Module):
     def __init__(
         self,
         loss_fn: SegmentationLoss,
-        scaling_fn: Optional[Callable[[int], float]] = None,
+        scaling_fn: Callable[[int], float] | None = None,
     ):
         """Initialize the DeepSupervisionLoss wrapper.
 
@@ -72,7 +73,7 @@ class DeepSupervisionLoss(nn.Module):
         self,
         y_true: torch.Tensor,
         y_pred: torch.Tensor,
-        y_supervision: Optional[Tuple[torch.Tensor, ...]] = None,
+        y_supervision: tuple[torch.Tensor, ...] | None = None,
         **kwargs: Any,
     ) -> torch.Tensor:
         """Computes the total weighted loss.

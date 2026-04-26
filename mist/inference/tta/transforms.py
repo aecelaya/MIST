@@ -2,19 +2,20 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Type, TypeVar, Callable
+from typing import Any, TypeVar
+from collections.abc import Callable
 
 import torch
 
 # Registry for transform classes. Stores classes; instances are created on
 # demand by get_transform() to avoid shared mutable state.
 T = TypeVar("T", bound="AbstractTransform")
-TTA_TRANSFORM_REGISTRY: Dict[str, Type["AbstractTransform"]] = {}
+TTA_TRANSFORM_REGISTRY: dict[str, type[AbstractTransform]] = {}
 
 
-def register_transform(name: str) -> Callable[[Type[T]], Type[T]]:
+def register_transform(name: str) -> Callable[[type[T]], type[T]]:
     """Decorator to register a TTA transform class by name."""
-    def decorator(cls: Type[T]) -> Type[T]:
+    def decorator(cls: type[T]) -> type[T]:
         if not issubclass(cls, AbstractTransform):
             raise TypeError(f"{cls.__name__} must subclass AbstractTransform.")
         if name in TTA_TRANSFORM_REGISTRY:
@@ -24,12 +25,12 @@ def register_transform(name: str) -> Callable[[Type[T]], Type[T]]:
     return decorator
 
 
-def list_transforms() -> List[str]:
+def list_transforms() -> list[str]:
     """List all registered TTA transforms."""
     return list(TTA_TRANSFORM_REGISTRY.keys())
 
 
-def get_transform(name: str) -> "AbstractTransform":
+def get_transform(name: str) -> AbstractTransform:
     """Retrieve a fresh instance of a registered TTA transform by name."""
     if name not in TTA_TRANSFORM_REGISTRY:
         raise KeyError(

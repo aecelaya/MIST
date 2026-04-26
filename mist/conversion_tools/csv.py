@@ -1,7 +1,7 @@
 """Converts data from csv files to MIST format."""
 import concurrent.futures
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any
 import pandas as pd
 
 # MIST imports.
@@ -53,10 +53,10 @@ def _validate_csv_columns(df: pd.DataFrame, mode: str) -> None:
 
 
 def _copy_single_patient_csv(
-    patient_dict: Dict[str, Any],
+    patient_dict: dict[str, Any],
     dest: Path,
     mode: str,
-) -> Optional[str]:
+) -> str | None:
     """Copy a single patient's files to the destination directory.
 
     Args:
@@ -98,7 +98,7 @@ def _copy_single_patient_csv(
 
 def copy_csv_data(
     df: pd.DataFrame,
-    dest: Union[str, Path],
+    dest: str | Path,
     mode: str,
     progress_bar_message: str,
     max_workers: int = 1,
@@ -142,9 +142,9 @@ def copy_csv_data(
 
 
 def convert_csv(
-    train_csv: Union[str, Path],
-    dest: Union[str, Path],
-    test_csv: Optional[Union[str, Path]] = None,
+    train_csv: str | Path,
+    dest: str | Path,
+    test_csv: str | Path | None = None,
     max_workers: int = 1,
 ) -> None:
     """Converts train and test data from csv files to MIST format.

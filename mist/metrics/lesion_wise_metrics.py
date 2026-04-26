@@ -1,5 +1,5 @@
 """Lesion-wise metrics for segmentation evaluation."""
-from typing import Any, Dict, List, Set, Tuple, Union
+from typing import Any
 import numpy as np
 from scipy.ndimage import label, binary_dilation, generate_binary_structure
 
@@ -47,8 +47,8 @@ def _consolidate_gt_lesions(
 def compute_lesion_wise_metrics(
     pred: np.ndarray,
     gt: np.ndarray,
-    spacing: Tuple[float, float, float],
-    metrics: List[str],
+    spacing: tuple[float, float, float],
+    metrics: list[str],
     min_lesion_volume: float = LesionWiseMetricsConstants.MIN_LESION_VOLUME,
     surface_dice_tolerance_mm: float = (
         LesionWiseMetricsConstants.SURFACE_DICE_TOLERANCE_MM
@@ -56,7 +56,7 @@ def compute_lesion_wise_metrics(
     dilation_iters: int = LesionWiseMetricsConstants.DILATION_ITERS,
     gt_consolidation_iters: int = LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS,
     reduction: str = "mean",
-) -> Union[List[Dict[str, Any]], Dict[str, float]]:
+) -> list[dict[str, Any]] | dict[str, float]:
     """Compute lesion-wise metrics following the BraTS evaluation protocol.
 
     Each GT lesion above the volume threshold is matched to overlapping
@@ -127,9 +127,9 @@ def compute_lesion_wise_metrics(
     gt_lesion_ids = np.unique(labeled_gt)
     gt_lesion_ids = gt_lesion_ids[gt_lesion_ids > 0]
 
-    matched_pred_labels: Set[int] = set()
+    matched_pred_labels: set[int] = set()
     num_gt_above_thresh = 0
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     needs_surface = bool({"haus95", "surface_dice"}.intersection(metrics))
 
     for lesion_id in gt_lesion_ids:
@@ -151,7 +151,7 @@ def compute_lesion_wise_metrics(
         detected = len(pred_overlap_labels) > 0
         pred_lesion = np.isin(labeled_pred, pred_overlap_labels)
 
-        lesion_result: Dict[str, Any] = {
+        lesion_result: dict[str, Any] = {
             "gt_lesion_id": int(lesion_id),
             "gt_volume_mm3": lesion_vol,
             "num_matched_pred_labels": len(pred_overlap_labels),
@@ -201,7 +201,7 @@ def compute_lesion_wise_metrics(
     if denominator == 0:
         return {}
 
-    aggregate: Dict[str, float] = {}
+    aggregate: dict[str, float] = {}
 
     if "dice" in metrics:
         aggregate["lesion_wise_dice"] = (

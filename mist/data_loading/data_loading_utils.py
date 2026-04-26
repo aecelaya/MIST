@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import List, Optional, Any
+from typing import Any
 
 from nvidia.dali import fn
 from nvidia.dali import math
@@ -14,7 +14,7 @@ from mist.data_loading.data_loading_constants import DataLoadingConstants as con
 
 
 def get_numpy_reader(
-        files: List[str],
+        files: list[str],
         shard_id: int,
         num_shards: int,
         seed: int,
@@ -213,9 +213,9 @@ def contrast_fn(img: TensorGPU) -> TensorGPU:
 
 
 def validate_train_and_eval_inputs(
-        imgs: List[str],
-        lbls: List[str],
-        dtms: Optional[List[str]] = None,
+        imgs: list[str],
+        lbls: list[str],
+        dtms: list[str] | None = None,
 ) -> None:
     """Validate that the input data is correct.
 

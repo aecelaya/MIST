@@ -1,6 +1,5 @@
 """Tests for the analyze command entrypoint."""
 import argparse
-from typing import List
 import pytest
 
 # MIST imports.
@@ -23,7 +22,7 @@ class _DummyAnalyzer:
         self.run_called = True
 
 
-def _patch_argparse(min_args: List[str], monkeypatch) -> None:
+def _patch_argparse(min_args: list[str], monkeypatch) -> None:
     """Make entry.argmod parser minimal and deterministic for tests."""
 
     def _mk_parser(**kwargs):

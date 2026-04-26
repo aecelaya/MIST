@@ -3,7 +3,7 @@
 import concurrent.futures
 import gc
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any
 
 import ants
 import numpy as np
@@ -35,8 +35,8 @@ class Evaluator:
     def __init__(
         self,
         filepaths_dataframe: pd.DataFrame,
-        evaluation_config: Dict[str, Any],
-        output_csv_path: Union[str, Path],
+        evaluation_config: dict[str, Any],
+        output_csv_path: str | Path,
         validate_masks: bool = False,
     ):
         """Initialize the Evaluator.
@@ -96,8 +96,8 @@ class Evaluator:
 
     @staticmethod
     def _validate_evaluation_config(
-        evaluation_config: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        evaluation_config: dict[str, Any]
+    ) -> dict[str, Any]:
         """Validate the evaluation configuration dictionary.
 
         Args:
@@ -139,8 +139,8 @@ class Evaluator:
 
     @staticmethod
     def _compute_diagonal_distance(
-        shape: Tuple[int, ...],
-        spacing: Tuple[float, ...],
+        shape: tuple[int, ...],
+        spacing: tuple[float, ...],
     ) -> float:
         """Compute the Euclidean diagonal distance of an image in mm."""
         dims_mm = np.multiply(shape, spacing)
@@ -152,7 +152,7 @@ class Evaluator:
         num_prediction_voxels: int,
         best_case_value: float,
         worst_case_value: float
-    ) -> Union[float, None]:
+    ) -> float | None:
         """Return best/worst case values for empty masks."""
         if num_mask_voxels == 0 and num_prediction_voxels == 0:
             return best_case_value
@@ -163,7 +163,7 @@ class Evaluator:
     def _load_patient_data(
         self,
         patient_id: str
-    ) -> Dict[str, ants.core.ants_image.ANTsImage]:
+    ) -> dict[str, ants.core.ants_image.ANTsImage]:
         """Load the ground truth and prediction paths for a given patient ID."""
         try:
             row = self.filepaths_dataframe.loc[patient_id]
@@ -221,10 +221,10 @@ class Evaluator:
         patient_id: str,
         mask: np.ndarray,
         prediction: np.ndarray,
-        spacing: Tuple[float, ...],
-        class_metrics_config: Dict[str, Dict[str, Any]],
-        diagonal_distance_override: Optional[float] = None
-    ) -> Tuple[Dict[str, float], Optional[str]]:
+        spacing: tuple[float, ...],
+        class_metrics_config: dict[str, dict[str, Any]],
+        diagonal_distance_override: float | None = None
+    ) -> tuple[dict[str, float], str | None]:
         """Compute metrics for a binary mask pair."""
         result = {}
         error_messages = []
@@ -286,10 +286,10 @@ class Evaluator:
         patient_id: str,
         mask: np.ndarray,
         prediction: np.ndarray,
-        spacing: Tuple[float, ...],
-    ) -> Tuple[Dict[str, Union[str, float]], Optional[str]]:
+        spacing: tuple[float, ...],
+    ) -> tuple[dict[str, str | float], str | None]:
         """Evaluate single patient and compute metrics for each class."""
-        results: Dict[str, Union[str, float]] = {"id": patient_id}
+        results: dict[str, str | float] = {"id": patient_id}
         patient_errors = []
 
         full_diagonal_distance = self._compute_diagonal_distance(
@@ -336,7 +336,7 @@ class Evaluator:
     def _evaluate_patient_pipeline(
         self,
         patient_id: str
-    ) -> Tuple[Optional[Dict], Optional[str]]:
+    ) -> tuple[dict | None, str | None]:
         """Complete evaluation for a single patient to be run in parallel."""
         patient_data = None
         result = None

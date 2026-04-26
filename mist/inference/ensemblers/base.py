@@ -1,6 +1,6 @@
 """Abstract base class for all prediction ensemblers in MIST."""
 from abc import ABC, abstractmethod
-from typing import List, Any
+from typing import Any
 
 import torch
 
@@ -17,7 +17,7 @@ class AbstractEnsembler(ABC):
         self.name = self.__class__.__name__.lower()
 
     @abstractmethod
-    def combine(self, predictions: List[torch.Tensor]) -> torch.Tensor:
+    def combine(self, predictions: list[torch.Tensor]) -> torch.Tensor:
         """Aggregate a list of predictions into a single output.
 
         Args:
@@ -29,7 +29,7 @@ class AbstractEnsembler(ABC):
         """
         pass  # pylint: disable=unnecessary-pass # pragma: no cover
 
-    def __call__(self, predictions: List[torch.Tensor]) -> torch.Tensor:
+    def __call__(self, predictions: list[torch.Tensor]) -> torch.Tensor:
         return self.combine(predictions)
 
     def __repr__(self) -> str:

@@ -1,6 +1,6 @@
 """MIST-compatible base implementation of MedNeXt."""
 from collections import OrderedDict
-from typing import Any, Union, Dict
+from typing import Any
 from collections.abc import Sequence
 import torch
 import torch.nn as nn
@@ -24,8 +24,8 @@ class MedNeXt(MISTModel):
         in_channels: int = 1,
         out_channels: int = 2,
         patch_size: Any = None,
-        encoder_expansion_ratio: Union[Sequence[int], int] = 2,
-        decoder_expansion_ratio: Union[Sequence[int], int] = 2,
+        encoder_expansion_ratio: Sequence[int] | int = 2,
+        decoder_expansion_ratio: Sequence[int] | int = 2,
         bottleneck_expansion_ratio: int = 2,
         kernel_size: int = 7,
         use_deep_supervision: bool = False,
@@ -215,7 +215,7 @@ class MedNeXt(MISTModel):
              if k.startswith(encoder_prefixes)}
         )
 
-    def forward(self, x: torch.Tensor) -> Union[torch.Tensor, Dict]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor | dict:
         """Forward pass of the MedNeXt model.
 
         Args:

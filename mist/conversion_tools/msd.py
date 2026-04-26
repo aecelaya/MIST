@@ -1,7 +1,7 @@
 """Converts medical segmentation decathlon dataset to MIST dataset."""
 import concurrent.futures
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any
 import numpy as np
 import SimpleITK as sitk
 
@@ -15,11 +15,11 @@ def _copy_single_patient_msd(
     patient_entry: Any,
     source: Path,
     dest: Path,
-    modalities: Dict[int, str],
+    modalities: dict[int, str],
     is_training: bool,
     image_source_dir: str,
     dest_mode_dir: str,
-) -> Optional[str]:
+) -> str | None:
     """Copy a single MSD patient to the destination in MIST format.
 
     Args:
@@ -86,10 +86,10 @@ def _copy_single_patient_msd(
 
 
 def copy_msd_data(
-    source: Union[str, Path],
-    dest: Union[str, Path],
-    msd_json: Dict[str, Any],
-    modalities: Dict[int, str],
+    source: str | Path,
+    dest: str | Path,
+    msd_json: dict[str, Any],
+    modalities: dict[int, str],
     mode: str,
     progress_bar_message: str,
     max_workers: int = 1,
@@ -145,8 +145,8 @@ def copy_msd_data(
 
 
 def convert_msd(
-    source: Union[str, Path],
-    dest: Union[str, Path],
+    source: str | Path,
+    dest: str | Path,
     max_workers: int = 1,
 ) -> None:
     """Converts medical segmentation decathlon dataset to MIST dataset.

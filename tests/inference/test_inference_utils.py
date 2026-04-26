@@ -1,5 +1,4 @@
 """Tests for MIST inference utilities."""
-from typing import Tuple, Dict
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 import ants
@@ -475,8 +474,8 @@ def test_validate_paths_dataframe_parametrized(df, should_raise, match):
 
 def _make_ants_image(
     arr_xyz: np.ndarray,
-    spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
-    origin: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ):
     """Create an ANTs image with basic metadata."""
     img = ants.from_numpy(arr_xyz.astype(np.float32))
@@ -486,7 +485,7 @@ def _make_ants_image(
     return img
 
 
-def _crop_with_bbox(arr: np.ndarray, bbox: Dict[str, int]) -> np.ndarray:
+def _crop_with_bbox(arr: np.ndarray, bbox: dict[str, int]) -> np.ndarray:
     """Numpy crop using the same inclusive end convention as crop_to_fg."""
     xs, xe = bbox["x_start"], bbox["x_end"]
     ys, ye = bbox["y_start"], bbox["y_end"]
@@ -496,8 +495,8 @@ def _crop_with_bbox(arr: np.ndarray, bbox: Dict[str, int]) -> np.ndarray:
 
 def _expected_decrop(
     cropped: np.ndarray,
-    og_shape: Tuple[int, int, int],
-    bbox: Dict[str, int],
+    og_shape: tuple[int, int, int],
+    bbox: dict[str, int],
 ) -> np.ndarray:
     """Construct the expected zero-padded array according to bbox placement."""
     out = np.zeros(og_shape, dtype=cropped.dtype)

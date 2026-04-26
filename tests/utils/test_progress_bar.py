@@ -1,5 +1,5 @@
 """Unit tests for MIST training/validation progress bars."""
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import patch
 import numpy as np
 from rich.progress import (
@@ -31,9 +31,9 @@ class SpyProgress:
         self.started = False
         self.stopped = False
         self._next_task_id = 1
-        self.tasks: List[int] = []
-        self.add_task_calls: List[Dict[str, Any]] = []
-        self.update_calls: List[Dict[str, Any]] = []
+        self.tasks: list[int] = []
+        self.add_task_calls: list[dict[str, Any]] = []
+        self.update_calls: list[dict[str, Any]] = []
 
     # API surface used by the module under test.
     def add_task(self, description: str, total: int, **fields: Any) -> int:

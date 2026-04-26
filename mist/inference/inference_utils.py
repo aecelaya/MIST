@@ -1,5 +1,5 @@
 """Utility functions for MIST inference modules."""
-from typing import Any, Dict, Optional, Tuple, List, Union
+from typing import Any
 from collections.abc import Callable
 from pathlib import Path
 
@@ -22,7 +22,7 @@ def get_default_device() -> str:
 
 def decrop_from_fg(
     ants_image: ants.core.ants_image.ANTsImage,
-    fg_bbox: Dict[str, int],
+    fg_bbox: dict[str, int],
 ) -> ants.core.ants_image.ANTsImage:
     """Decrop image to original size using foreground bounding box.
 
@@ -57,9 +57,9 @@ def decrop_from_fg(
 def back_to_original_space(
     raw_prediction: npt.NDArray[Any],
     original_ants_image: ants.core.ants_image.ANTsImage,
-    target_spacing: Tuple[float, float, float],
-    training_labels: List[int],
-    foreground_bounding_box: Optional[Dict[str, Any]],
+    target_spacing: tuple[float, float, float],
+    training_labels: list[int],
+    foreground_bounding_box: dict[str, Any] | None,
 ) -> ants.core.ants_image.ANTsImage:
     """Place 3D prediction back into original image space.
 
@@ -141,9 +141,9 @@ def back_to_original_space(
 
 def load_test_time_models(
     models_dir: str,
-    mist_config: Dict,
-    device: Optional[Union[str, torch.device]] = None,
-) -> List[Callable[[torch.Tensor], torch.Tensor]]:
+    mist_config: dict,
+    device: str | torch.device | None = None,
+) -> list[Callable[[torch.Tensor], torch.Tensor]]:
     """Load one or more models for test-time inference.
 
     This function loads all models matching the pattern `fold_*.pt` in the
@@ -194,7 +194,7 @@ def load_test_time_models(
 
 def remap_mask_labels(
     mask_npy: npt.NDArray[Any],
-    original_labels: List[int],
+    original_labels: list[int],
 ) -> npt.NDArray[Any]:
     """Remap label indices in a predicted mask to their original values.
 
@@ -214,8 +214,8 @@ def remap_mask_labels(
 
 
 def validate_inference_images(
-    patient_dict: Dict[str, str]
-) -> Tuple[ants.core.ants_image.ANTsImage, List[str]]:
+    patient_dict: dict[str, str]
+) -> tuple[ants.core.ants_image.ANTsImage, list[str]]:
     """Validate all images listed in the patient dictionary.
 
     Ensures that each image file exists, is a valid 3D image, and that all

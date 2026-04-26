@@ -1,16 +1,17 @@
 """Registry for inference strategies in MIST."""
-from typing import Dict, Type, List, Callable, TypeVar
+from typing import TypeVar
+from collections.abc import Callable
 
 from mist.inference.inferers.base import AbstractInferer
 
 # Global registry for inferers.
 T = TypeVar("T", bound=AbstractInferer)
-INFERER_REGISTRY: Dict[str, Type[AbstractInferer]] = {}
+INFERER_REGISTRY: dict[str, type[AbstractInferer]] = {}
 
 
-def register_inferer(name: str) -> Callable[[Type[T]], Type[T]]:
+def register_inferer(name: str) -> Callable[[type[T]], type[T]]:
     """Decorator to register a new inferer class."""
-    def decorator(cls: Type[T]) -> Type[T]:
+    def decorator(cls: type[T]) -> type[T]:
         if not issubclass(cls, AbstractInferer):
             raise TypeError(
                 f"{cls.__name__} must inherit from AbstractInferer."
@@ -22,12 +23,12 @@ def register_inferer(name: str) -> Callable[[Type[T]], Type[T]]:
     return decorator
 
 
-def list_inferers() -> List[str]:
+def list_inferers() -> list[str]:
     """List all registered inferers."""
     return list(INFERER_REGISTRY.keys())
 
 
-def get_inferer(name: str) -> Type[AbstractInferer]:
+def get_inferer(name: str) -> type[AbstractInferer]:
     """Retrieve a registered inferer class by name."""
     if name not in INFERER_REGISTRY:
         raise KeyError(

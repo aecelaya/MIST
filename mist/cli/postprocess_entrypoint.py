@@ -1,7 +1,6 @@
 """Command line tool for postprocessing predictions from MIST output."""
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
-from typing import Optional, List
 import argparse
 import shutil
 
@@ -15,7 +14,7 @@ from mist.utils import io
 
 
 def _parse_postprocess_args(
-    argv: Optional[List[str]] = None
+    argv: list[str] | None = None
 ) -> argparse.Namespace:
     """Parse command line arguments for postprocessing predictions."""
     p = ArgParser(
@@ -200,7 +199,7 @@ def run_postprocess(ns: argparse.Namespace) -> None:
         )
 
 
-def postprocess_entry(argv: Optional[List[str]] = None) -> None:
+def postprocess_entry(argv: list[str] | None = None) -> None:
     """Entrypoint callable from __main__ or tests."""
     ns = _parse_postprocess_args(argv)
     run_postprocess(ns)

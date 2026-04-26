@@ -1,7 +1,6 @@
 """Entrypoint for the preprocessing pipeline."""
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
-from typing import Optional, List
 import argparse
 
 # MIST imports.
@@ -11,7 +10,7 @@ from mist.utils.console import print_warning
 
 
 def _parse_preprocess_args(
-    argv: Optional[List[str]] = None
+    argv: list[str] | None = None
 ) -> argparse.Namespace:
     """Parse CLI for the preprocessing pipeline."""
     parser = argmod.ArgParser(
@@ -77,7 +76,7 @@ def _prepare_preprocess_dirs(ns: argparse.Namespace) -> None:
     numpy_dir.mkdir(parents=True, exist_ok=True)
 
 
-def preprocess_entry(argv: Optional[List[str]] = None) -> None:
+def preprocess_entry(argv: list[str] | None = None) -> None:
     """Entrypoint for the preprocess command."""
     ns = _parse_preprocess_args(argv)
     _ensure_analyze_artifacts(ns)

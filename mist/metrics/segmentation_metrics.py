@@ -1,9 +1,6 @@
 """Modified module exposing surface distance based measures."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
 
-from typing import Any, Tuple, Union, Dict
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -59,7 +56,7 @@ def _assert_is_bool_numpy_array(name: str, array: Any) -> None:
 
 def _compute_bounding_box(
         mask: npt.NDArray[np.bool_],
-) -> Tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
     """Computes the bounding box of the masks.
 
     This function generalizes to arbitrary number of dimensions great or equal
@@ -139,7 +136,7 @@ def _crop_to_bounding_box(
 def _sort_distances_surfels(
         distances: npt.NDArray[np.float64],
         surfel_areas: npt.NDArray[np.float64],
-) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """Sorts the two list with respect to the tuple of (distance, surfel_area).
 
     Args:
@@ -156,8 +153,8 @@ def _sort_distances_surfels(
 def compute_surface_distances(
     mask_gt: npt.NDArray[np.bool_],
     mask_pred: npt.NDArray[np.bool_],
-    spacing_mm: Union[Tuple[float, float], Tuple[float, float, float]],
-) -> Dict[str, npt.NDArray[np.float64]]:
+    spacing_mm: tuple[float, float] | tuple[float, float, float],
+) -> dict[str, npt.NDArray[np.float64]]:
     """Computes closest distances from all surface points to the other surface.
 
     This function can be applied to 2D or 3D tensors. For 2D, both masks must be
@@ -322,7 +319,7 @@ def compute_surface_distances(
 
 
 def compute_average_surface_distance(
-        surface_distances: Dict[str, npt.NDArray[np.float64]],
+        surface_distances: dict[str, npt.NDArray[np.float64]],
 ) -> float:
     """Returns the average surface distance.
 
@@ -350,7 +347,7 @@ def compute_average_surface_distance(
 
 
 def compute_robust_hausdorff(
-        surface_distances: Dict[str, npt.NDArray[np.float64]],
+        surface_distances: dict[str, npt.NDArray[np.float64]],
         percent: float = 95.0,
 ) -> float:
     """Computes the robust Hausdorff distance.
@@ -406,9 +403,9 @@ def compute_robust_hausdorff(
 
 
 def compute_surface_overlap_at_tolerance(
-        surface_distances: Dict[str, npt.NDArray[np.float64]],
+        surface_distances: dict[str, npt.NDArray[np.float64]],
         tolerance_mm: float,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Computes the overlap of the surfaces at a specified tolerance.
 
     Computes the overlap of the ground truth surface with the predicted surface
@@ -443,7 +440,7 @@ def compute_surface_overlap_at_tolerance(
 
 
 def compute_surface_dice_at_tolerance(
-        surface_distances: Dict[str, npt.NDArray[np.float64]],
+        surface_distances: dict[str, npt.NDArray[np.float64]],
         tolerance_mm: float,
 ) -> float:
     """Computes the _surface_ DICE coefficient at a specified tolerance.

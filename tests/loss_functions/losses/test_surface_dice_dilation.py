@@ -2,7 +2,6 @@
 
 import math
 import warnings
-from typing import Tuple
 from unittest import mock
 
 import torch
@@ -31,7 +30,7 @@ def _make_mock_data(
     n_classes: int = 3,
     batch_size: int = 2,
     size: int = 8,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Random raw inputs: label ints (B, 1, H, W, D) and logits (B, C, H, W, D)."""
     y_true = torch.randint(0, n_classes, size=(batch_size, 1, size, size, size))
     y_pred = torch.randn((batch_size, n_classes, size, size, size))
@@ -42,7 +41,7 @@ def _make_preprocessed_data(
     n_classes: int = 3,
     batch_size: int = 2,
     size: int = 8,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Preprocessed inputs: one-hot (B, C, H, W, D) and softmax (B, C, H, W, D).
 
     SurfaceDilationLogic.forward receives already-preprocessed tensors from

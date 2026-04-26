@@ -1,6 +1,5 @@
 """Unit tests for the BoundaryLoss function."""
 
-from typing import Tuple
 
 import torch
 import pytest
@@ -12,7 +11,7 @@ def _make_mock_data(
     n_classes: int = 3,
     batch_size: int = 2,
     size: int = 8,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Generates valid inputs + DTM for BoundaryLoss testing."""
     y_true = torch.randint(
         0, n_classes, size=(batch_size, 1, size, size, size)

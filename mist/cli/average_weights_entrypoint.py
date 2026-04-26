@@ -1,12 +1,11 @@
 """Entrypoint for averaging MIST fold checkpoint weights."""
-from typing import List, Optional
 import argparse
 
 from mist.cli.args import ArgParser
 from mist.models.model_loader import average_fold_weights
 
 
-def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = ArgParser(
         description=(
             "Average weights from multiple MIST fold checkpoints. "
@@ -33,7 +32,7 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def average_weights_entry(argv: Optional[List[str]] = None) -> None:
+def average_weights_entry(argv: list[str] | None = None) -> None:
     """Entrypoint for the mist_average_weights command."""
     ns = _parse_args(argv)
     average_fold_weights(ns.weights, output_path=ns.output)

@@ -7,7 +7,6 @@ This implementation is based on the original MONAI implementation, but has been
 modified to be compatible with the MIST.
 """
 from collections.abc import Sequence
-from typing import Union, Tuple, Optional, Dict
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -37,13 +36,13 @@ class DynamicUNet(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Sequence[Union[Sequence[int], int]],
-        strides: Sequence[Union[Sequence[int], int]],
-        upsample_kernel_size: Sequence[Union[Sequence[int], int]],
+        kernel_size: Sequence[Sequence[int] | int],
+        strides: Sequence[Sequence[int] | int],
+        upsample_kernel_size: Sequence[Sequence[int] | int],
         filters: Sequence[int],
-        norm_name: Union[Tuple, str],
-        act_name: Union[Tuple, str],
-        dropout: Optional[Union[Tuple, str, float]] = None,
+        norm_name: tuple | str,
+        act_name: tuple | str,
+        dropout: tuple | str | float | None = None,
         use_deep_supervision: bool = False,
         num_deep_supervision_heads: int = 2,
         use_residual_blocks: bool = False,
@@ -149,7 +148,7 @@ class DynamicUNet(nn.Module):
         else:
             self.filters = self.filters[: len(self.strides)]
 
-    def forward(self, x: torch.Tensor) -> Union[torch.Tensor, Dict]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor | dict:
         """Forward pass for the Dynamic UNet architecture."""
         skips = []
 
@@ -299,10 +298,10 @@ class DynamicUNet(nn.Module):
         self,
         in_channels: Sequence[int],
         out_channels: Sequence[int],
-        kernel_size: Sequence[Union[Sequence[int], int]],
-        strides: Sequence[Union[Sequence[int], int]],
+        kernel_size: Sequence[Sequence[int] | int],
+        strides: Sequence[Sequence[int] | int],
         conv_block: nn.Module,
-        upsample_kernel_size: Optional[Sequence[Union[Sequence[int], int]]] = None,
+        upsample_kernel_size: Sequence[Sequence[int] | int] | None = None,
         trans_bias: bool = False,
     ) -> nn.ModuleList:
         """Get a list of convolutional blocks for the UNet.

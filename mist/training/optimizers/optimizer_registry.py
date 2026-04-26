@@ -1,5 +1,5 @@
 """Registry for optimizers used in training."""
-from typing import Callable, Dict, Iterable, List
+from collections.abc import Callable, Iterable
 import torch
 from torch.optim import Optimizer
 
@@ -47,7 +47,7 @@ def _sgd_optimizer(
     )
 
 
-OPTIMIZER_REGISTRY: Dict[str, Callable[..., Optimizer]] = {
+OPTIMIZER_REGISTRY: dict[str, Callable[..., Optimizer]] = {
     "adam": _adam_optimizer,
     "adamw": _adamw_optimizer,
     "sgd": _sgd_optimizer,
@@ -77,6 +77,6 @@ def get_optimizer(name: str, params: Iterable, **kwargs) -> Optimizer:
     return OPTIMIZER_REGISTRY[name](params, **kwargs)
 
 
-def list_optimizers() -> List[str]:
+def list_optimizers() -> list[str]:
     """Return the list of available optimizer names."""
     return sorted(OPTIMIZER_REGISTRY.keys())

@@ -1,6 +1,6 @@
 """3D patch trainer for MIST built on top of BaseTrainer."""
 
-from typing import Tuple, Any, Dict
+from typing import Any
 
 import torch
 from monai.inferers import sliding_window_inference
@@ -15,10 +15,10 @@ class Patch3DTrainer(BaseTrainer):
 
     def build_dataloaders(
         self,
-        fold_data: Dict[str, Any],
+        fold_data: dict[str, Any],
         rank: int,
         world_size: int,
-    ) -> Tuple[Any, Any]:
+    ) -> tuple[Any, Any]:
         """Build DALI dataloaders for training and validation.
 
         This method constructs the DALI-based training and validation data

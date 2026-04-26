@@ -7,7 +7,6 @@ import rich
 from mist.utils import console as console_mod
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Tuple
 import pandas as pd
 import pytest
 import torch
@@ -101,7 +100,6 @@ class DummySummaryWriter:
 
     def flush(self):
         """Flush the collected scalars."""
-        pass
 
     def close(self):
         """Close the writer, marking it as closed."""
@@ -193,7 +191,7 @@ def patch_cuda_and_moves(monkeypatch):
 
 
 @pytest.fixture
-def tmp_pipeline(tmp_path: Path) -> Tuple[Path, Path]:
+def tmp_pipeline(tmp_path: Path) -> tuple[Path, Path]:
     """Create a temporary results and numpy directory with required files."""
     results = tmp_path / "results"
     numpy_dir = tmp_path / "numpy"
@@ -332,7 +330,6 @@ def patch_registries(monkeypatch):
 
         def step(self):
             """Dummy step method that does nothing."""
-            pass
 
         def state_dict(self):
             """Return empty state dict."""
@@ -340,7 +337,6 @@ def patch_registries(monkeypatch):
 
         def load_state_dict(self, state):
             """Load state dict (no-op)."""
-            pass
 
     monkeypatch.setattr(
         bt, "get_lr_scheduler",

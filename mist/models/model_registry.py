@@ -1,8 +1,8 @@
 """Model registry for managing architecture creation in MIST."""
-from typing import Callable, Dict, List
+from collections.abc import Callable
 
 # Dictionary mapping model names to builder functions.
-MODEL_REGISTRY: Dict[str, Callable] = {}
+MODEL_REGISTRY: dict[str, Callable] = {}
 
 
 def register_model(name: str) -> Callable:
@@ -45,7 +45,7 @@ def get_model_from_registry(model_name: str, **kwargs):
     return MODEL_REGISTRY[model_name](**kwargs)
 
 
-def list_registered_models() -> List[str]:
+def list_registered_models() -> list[str]:
     """
     List all available registered models.
 

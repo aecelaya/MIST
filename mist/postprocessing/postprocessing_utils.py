@@ -1,5 +1,5 @@
 """Postprocessing utilities for MIST predictions."""
-from typing import List, Any, Dict, TypedDict, cast
+from typing import Any, TypedDict, cast
 import numpy as np
 import numpy.typing as npt
 import skimage
@@ -11,12 +11,12 @@ class StrategyStep(TypedDict):
     transform: str
     apply_to_labels: list[int]
     per_label: bool
-    kwargs: Dict[str, Any]
+    kwargs: dict[str, Any]
 
 
 def group_labels_in_mask(
     mask_npy: npt.NDArray[Any],
-    labels_list: List[int]
+    labels_list: list[int]
 ) -> npt.NDArray[Any]:
     """Extract a group of labels from a multi-label mask.
 

@@ -16,7 +16,7 @@ Implementation Note:
     complex loss hierarchies (like SegmentationLoss -> Dice -> DiceCELoss).
 """
 
-from typing import Sequence, Tuple, Union
+from collections.abc import Sequence
 import math
 import warnings
 
@@ -62,7 +62,7 @@ class SurfaceDilationLogic(nn.Module):
     def __init__(
         self,
         spacing_xyz: Sequence[float],
-        tau_mm: Union[float, str],
+        tau_mm: float | str,
         tau_safety_factor: float,
         boundary_ksize: int,
         eps: float,
@@ -113,8 +113,8 @@ class SurfaceDilationLogic(nn.Module):
         self.kxkykz = self._get_kernel_sizes(self.tau_mm, self.spacing_xyz)
 
     def _get_kernel_sizes(
-        self, tau: float, spacing: Tuple[float, float, float]
-    ) -> Tuple[int, int, int]:
+        self, tau: float, spacing: tuple[float, float, float]
+    ) -> tuple[int, int, int]:
         """Calculate odd kernel sizes (kx, ky, kz) based on physical spacing.
 
         Calculates radius = ceil(tau / spacing) and kernel = 2 * radius + 1.
@@ -232,7 +232,7 @@ class VolumetricSDDL(DiceCELoss):
     def __init__(
         self,
         sddl_spacing_xyz: Sequence[float],
-        tau_mm: Union[float, str] = "auto",
+        tau_mm: float | str = "auto",
         tau_safety_factor: float = 1.25,
         boundary_ksize: int = 3,
         eps: float = 1e-6,
@@ -317,7 +317,7 @@ class VesselSDDL(CLDice):
     def __init__(
         self,
         sddl_spacing_xyz: Sequence[float],
-        tau_mm: Union[float, str] = "auto",
+        tau_mm: float | str = "auto",
         tau_safety_factor: float = 1.25,
         boundary_ksize: int = 3,
         eps: float = 1e-6,

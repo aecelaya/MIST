@@ -1,7 +1,6 @@
 """Command line tool for converting CSV-format datasets to MIST format."""
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
-from typing import List, Optional
 import argparse
 
 from mist.cli.args import ArgParser
@@ -9,7 +8,7 @@ from mist.conversion_tools.csv import convert_csv
 
 
 def _parse_convert_csv_args(
-    argv: Optional[List[str]] = None,
+    argv: list[str] | None = None,
 ) -> argparse.Namespace:
     """Parse CLI arguments for CSV dataset conversion."""
     parser = ArgParser(
@@ -50,7 +49,7 @@ def run_convert_csv(ns: argparse.Namespace) -> None:
     convert_csv(train_csv, output, test_csv, max_workers=ns.num_workers_conversion)
 
 
-def convert_csv_entry(argv: Optional[List[str]] = None) -> None:
+def convert_csv_entry(argv: list[str] | None = None) -> None:
     """Entrypoint callable from __main__ or tests."""
     ns = _parse_convert_csv_args(argv)
     run_convert_csv(ns)

@@ -2,7 +2,7 @@
 import argparse
 import concurrent.futures
 from pathlib import Path
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Any
 import ants
 import numpy as np
 import numpy.typing as npt
@@ -21,8 +21,8 @@ from mist.preprocessing.preprocessing_constants import (
 
 def resample_image(
     img_ants: ants.core.ants_image.ANTsImage,
-    target_spacing: Tuple[float, float, float],
-    new_size: Optional[Tuple[int, int, int]] = None,
+    target_spacing: tuple[float, float, float],
+    new_size: tuple[int, int, int] | None = None,
 ) -> ants.core.ants_image.ANTsImage:
     """Resample an image to a target spacing.
 
@@ -86,9 +86,9 @@ def resample_image(
 
 def resample_mask(
     mask_ants: ants.core.ants_image.ANTsImage,
-    labels: List[int],
-    target_spacing: Tuple[float, float, float],
-    new_size: Optional[Tuple[int, int, int]] = None,
+    labels: list[int],
+    target_spacing: tuple[float, float, float],
+    new_size: tuple[int, int, int] | None = None,
 ) -> ants.core.ants_image.ANTsImage:
     """Resample a mask to a target spacing.
 
@@ -161,7 +161,7 @@ def resample_mask(
 
 def window_and_normalize(
     image: npt.NDArray[Any],
-    config: Dict[str, Any],
+    config: dict[str, Any],
 ) -> npt.NDArray[Any]:
     """Window and normalize an image.
 
@@ -234,7 +234,7 @@ def window_and_normalize(
 
 def compute_dtm(
     mask_ants: ants.core.ants_image.ANTsImage,
-    labels: List[int],
+    labels: list[int],
     normalize_dtm: bool,
 ) -> npt.NDArray[Any]:
     """Compute distance transform map (DTM) for a mask.
@@ -321,11 +321,11 @@ def compute_dtm(
 
 
 def preprocess_example(
-    config: Dict,
-    image_paths_list: List[str],
-    mask_path: Optional[str] = None,
-    fg_bbox: Optional[Dict] = None,
-) -> Dict:
+    config: dict,
+    image_paths_list: list[str],
+    mask_path: str | None = None,
+    fg_bbox: dict | None = None,
+) -> dict:
     """Preprocessing function for a single example.
 
     If config['preprocessing']['skip'] is True:
@@ -451,13 +451,13 @@ def preprocess_example(
 
 
 def _preprocess_single_patient(
-    config: Dict,
-    patient: Dict,
-    image_columns: List[str],
-    fg_bbox: Optional[Dict],
-    output_dirs: Dict[str, Path],
+    config: dict,
+    patient: dict,
+    image_columns: list[str],
+    fg_bbox: dict | None,
+    output_dirs: dict[str, Path],
     compute_dtms: bool,
-) -> Optional[str]:
+) -> str | None:
     """Preprocess a single patient and save outputs to disk.
 
     Args:

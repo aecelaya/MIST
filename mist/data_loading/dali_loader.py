@@ -1,7 +1,6 @@
 """DALI loaders for loading data into models during training."""
 
 from collections.abc import Sequence
-from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -38,9 +37,9 @@ class GenericPipeline(Pipeline):
         seed: int,
         num_gpus: int,
         shuffle_input: bool = True,
-        input_image_files: Optional[List[str]] = None,
-        input_label_files: Optional[List[str]] = None,
-        input_dtm_files: Optional[List[str]] = None,
+        input_image_files: list[str] | None = None,
+        input_label_files: list[str] | None = None,
+        input_dtm_files: list[str] | None = None,
     ):
         """Initialize the pipeline with the given parameters.
 
@@ -145,12 +144,12 @@ class TrainPipeline(GenericPipeline):
 
     def __init__(
         self,
-        image_paths: List[str],
-        label_paths: List[str],
-        dtm_paths: Optional[List[str]],
-        roi_size: Tuple[int, int, int],
-        labels: Optional[List[int]],
-        oversampling: Optional[float],
+        image_paths: list[str],
+        label_paths: list[str],
+        dtm_paths: list[str] | None,
+        roi_size: tuple[int, int, int],
+        labels: list[int] | None,
+        oversampling: float | None,
         extract_patches: bool = True,
         use_augmentation: bool = True,
         use_flips: bool = True,
@@ -235,7 +234,7 @@ class TrainPipeline(GenericPipeline):
             self,
             image: TensorCPU,
             label: TensorCPU,
-            dtm: Optional[TensorCPU] = None,
+            dtm: TensorCPU | None = None,
     ) -> Sequence[TensorGPU]:
         """Extract a random patch from the image, label, and DTM.
 
@@ -325,7 +324,7 @@ class TrainPipeline(GenericPipeline):
         self,
         image: TensorGPU,
         label: TensorGPU,
-        dtm: Optional[TensorGPU] = None,
+        dtm: TensorGPU | None = None,
     ) -> Sequence[TensorGPU]:
         """Apply random flips to the input image, labels, and DTMs.
 
@@ -372,7 +371,7 @@ class TrainPipeline(GenericPipeline):
         self,
         image: TensorGPU,
         label: TensorGPU,
-    ) -> Tuple[TensorGPU, TensorGPU]:
+    ) -> tuple[TensorGPU, TensorGPU]:
         """Apply a random zoom to the input image and labels.
 
         Apply a random zoom to the input image and label by scaling them down
@@ -405,7 +404,7 @@ class TrainPipeline(GenericPipeline):
 
         # Compute the new dimensions (depth, height, width) based on the scaling
         # factor.
-        d, h, w = [scale * x for x in self.roi_size]
+        d, h, w = (scale * x for x in self.roi_size)
 
         # Crop both the image and label using the new scaled dimensions.
         image = fn.crop(image, crop_h=h, crop_w=w, crop_d=d)
@@ -494,7 +493,7 @@ class TestPipeline(GenericPipeline):
 
     def __init__(
         self,
-        image_paths: List[str],
+        image_paths: list[str],
         **kwargs,
     ):
         super().__init__(
@@ -529,8 +528,8 @@ class EvalPipeline(GenericPipeline):
 
     def __init__(
         self,
-        image_paths: List[str],
-        label_paths: List[str],
+        image_paths: list[str],
+        label_paths: list[str],
         **kwargs,
     ):
         super().__init__(
@@ -558,13 +557,13 @@ class EvalPipeline(GenericPipeline):
 
 
 def get_training_dataset(
-    image_paths: List[str],
-    label_paths: List[str],
-    dtm_paths: Optional[List[str]],
+    image_paths: list[str],
+    label_paths: list[str],
+    dtm_paths: list[str] | None,
     batch_size: int,
-    roi_size: Tuple[int, int, int],
-    labels: Optional[List[int]],
-    oversampling: Optional[float],
+    roi_size: tuple[int, int, int],
+    labels: list[int] | None,
+    oversampling: float | None,
     seed: int,
     num_workers: int,
     rank: int,
@@ -662,8 +661,8 @@ def get_training_dataset(
 
 
 def get_validation_dataset(
-    image_paths: List[str],
-    label_paths: List[str],
+    image_paths: list[str],
+    label_paths: list[str],
     seed: int,
     num_workers: int,
     rank: int,
@@ -708,7 +707,7 @@ def get_validation_dataset(
 
 
 def get_test_dataset(
-    image_paths: List[str],
+    image_paths: list[str],
     seed: int,
     num_workers: int,
     rank: int = 0,

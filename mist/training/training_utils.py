@@ -1,6 +1,6 @@
 """Utility functions for MIST trainers."""
 from pathlib import Path
-from typing import List, Sequence, Union
+from collections.abc import Sequence
 
 
 class RunningMean:
@@ -36,11 +36,11 @@ class RunningMean:
 
 def sanity_check_fold_data(
     fold: int,
-    train_images: Sequence[Union[str, Path]],
-    train_labels: Sequence[Union[str, Path]],
-    val_images: Sequence[Union[str, Path]],
-    val_labels: Sequence[Union[str, Path]],
-    train_dtms: Sequence[Union[str, Path]],
+    train_images: Sequence[str | Path],
+    train_labels: Sequence[str | Path],
+    val_images: Sequence[str | Path],
+    val_labels: Sequence[str | Path],
+    train_dtms: Sequence[str | Path],
 ) -> None:
     """Sanity check the fold data for training and validation.
 
@@ -64,7 +64,7 @@ def sanity_check_fold_data(
     Raises:
         ValueError: If any of the checks fail, providing details on the issue.
     """
-    def _normalize(paths: Sequence[Union[str, Path]]) -> List[str]:
+    def _normalize(paths: Sequence[str | Path]) -> list[str]:
         return [str(Path(p).expanduser().resolve()) for p in paths]
 
     # Normalize everything to absolute string paths
@@ -124,7 +124,7 @@ def sanity_check_fold_data(
         )
 
     # Optional: ensure file stems (patient ids) align within each split.
-    def _stems(paths: Sequence[str]) -> List[str]:
+    def _stems(paths: Sequence[str]) -> list[str]:
         return [Path(p).stem for p in paths]
 
     if _stems(tr_img) != _stems(tr_lbl):
@@ -152,12 +152,12 @@ def sanity_check_fold_data(
 
 
 def get_npy_paths(
-    data_dir: Union[str, Path],
-    patient_ids: Sequence[Union[str, Path]],
+    data_dir: str | Path,
+    patient_ids: Sequence[str | Path],
     *,
     suffix: str = ".npy",
     must_exist: bool = True,
-) -> List[str]:
+) -> list[str]:
     """Get paths to .npy files for given patient IDs.
 
     Args:

@@ -1,6 +1,6 @@
 """Utilities for the DataDumper module."""
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any
 
 import numpy as np
 import ants
@@ -31,7 +31,7 @@ def get_dataset_size_gb(paths_df: pd.DataFrame) -> float:
     return round(total_bytes / 1e9, 4)
 
 
-def compute_shape_descriptors(coords_mm: np.ndarray) -> Dict[str, Any]:
+def compute_shape_descriptors(coords_mm: np.ndarray) -> dict[str, Any]:
     """Compute PCA-based shape descriptors from a set of 3D coordinates.
 
     Given the mm-space coordinates of all voxels belonging to a label region,
@@ -185,9 +185,9 @@ def compute_skeleton_ratio(mask: np.ndarray) -> float | None:
 
 def collect_per_patient_stats(
     paths_df: pd.DataFrame,
-    dataset_info: Dict[str, Any],
+    dataset_info: dict[str, Any],
     effective_dims: np.ndarray | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Single-pass collection of per-patient statistics for the data dump.
 
     Iterates over each patient once to collect spacings, original dimensions,
@@ -229,21 +229,21 @@ def collect_per_patient_stats(
     spacings = np.zeros((n_patients, 3))
     original_dims = np.zeros((n_patients, 3))
     foreground_fractions = np.zeros(n_patients)
-    total_fg_voxels: List[int] = []
+    total_fg_voxels: list[int] = []
 
     # Per-channel: sampled foreground intensities pooled across all patients.
-    channel_intensities: Dict[str, List[float]] = {
+    channel_intensities: dict[str, list[float]] = {
         col: [] for col in image_cols
     }
 
     # Per-label: voxel count, presence, and shape descriptors per patient.
-    label_voxel_counts: Dict[int, List[int]] = {
+    label_voxel_counts: dict[int, list[int]] = {
         lbl: [] for lbl in non_bg_labels
     }
-    label_presence: Dict[int, List[int]] = {
+    label_presence: dict[int, list[int]] = {
         lbl: [] for lbl in non_bg_labels
     }
-    label_shape_descriptors: Dict[int, List[Dict[str, Any]]] = {
+    label_shape_descriptors: dict[int, list[dict[str, Any]]] = {
         lbl: [] for lbl in non_bg_labels
     }
 
@@ -317,7 +317,7 @@ def collect_per_patient_stats(
     }
 
 
-def _axis_stats(values: np.ndarray) -> Dict[str, float]:
+def _axis_stats(values: np.ndarray) -> dict[str, float]:
     """Compute descriptive statistics for a 1D array.
 
     Args:
@@ -338,9 +338,9 @@ def _axis_stats(values: np.ndarray) -> Dict[str, float]:
 
 
 def build_image_statistics(
-    raw_stats: Dict[str, Any],
-    config: Dict[str, Any],
-) -> Dict[str, Any]:
+    raw_stats: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, Any]:
     """Build the image_statistics section of the data dump.
 
     Args:
@@ -369,7 +369,7 @@ def build_image_statistics(
         f"axis_{ax}": _axis_stats(dims[:, ax]) for ax in range(3)
     }
 
-    intensity_stats: Dict[str, Any] = {}
+    intensity_stats: dict[str, Any] = {}
     for col, vals in channel_intensities.items():
         if not vals:
             continue
@@ -425,9 +425,9 @@ def _size_category(volume_fraction_pct: float) -> str:
 
 
 def build_label_statistics(
-    raw_stats: Dict[str, Any],
-    dataset_info: Dict[str, Any],
-) -> Dict[str, Any]:
+    raw_stats: dict[str, Any],
+    dataset_info: dict[str, Any],
+) -> dict[str, Any]:
     """Build the label_statistics section of the data dump.
 
     Args:
@@ -446,9 +446,9 @@ def build_label_statistics(
         np.mean(np.prod(raw_stats["effective_dims"], axis=1))
     ) if len(raw_stats["effective_dims"]) > 0 else 1.0
 
-    per_label: Dict[str, Any] = {}
-    presence_rates: Dict[int, float] = {}
-    mean_vol_fractions: Dict[int, float] = {}
+    per_label: dict[str, Any] = {}
+    presence_rates: dict[int, float] = {}
+    mean_vol_fractions: dict[int, float] = {}
 
     for lbl in non_bg_labels:
         counts = np.array(raw_stats["label_voxel_counts"][lbl])
@@ -503,7 +503,7 @@ def build_label_statistics(
                 if skeleton_ratio_vals else None
             )
 
-            shape_info: Dict[str, Any] = {
+            shape_info: dict[str, Any] = {
                 "linearity": round(mean_lin, 4),
                 "planarity": round(mean_plan, 4),
                 "sphericity": round(mean_sph, 4),
@@ -543,7 +543,7 @@ def build_label_statistics(
         }
 
     # Aggregate statistics per final class (combining constituent labels).
-    final_class_stats: Dict[str, Any] = {}
+    final_class_stats: dict[str, Any] = {}
     for class_name, class_labels in final_classes.items():
         combined_counts = np.zeros(len(total_fg))
         combined_presence = np.zeros(len(total_fg))
@@ -603,10 +603,10 @@ def build_label_statistics(
 
 
 def generate_observations(
-    image_stats: Dict[str, Any],
-    label_stats: Dict[str, Any],
-    dataset_summary: Dict[str, Any],
-) -> List[str]:
+    image_stats: dict[str, Any],
+    label_stats: dict[str, Any],
+    dataset_summary: dict[str, Any],
+) -> list[str]:
     """Generate plain-language observations from computed statistics.
 
     These are rule-based findings intended to surface actionable insights
@@ -620,7 +620,7 @@ def generate_observations(
     Returns:
         List of plain-language observation strings.
     """
-    observations: List[str] = []
+    observations: list[str] = []
     modality = dataset_summary["modality"]
     n_patients = dataset_summary["num_patients"]
     n_channels = dataset_summary["num_channels"]

@@ -1,6 +1,6 @@
 """Tests for mist.utils.io."""
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 import json
 import pytest
 
@@ -11,7 +11,7 @@ from mist.utils import io
 def test_write_then_read_roundtrip(tmp_path: Path) -> None:
     """Writing a dict and reading it back preserves structure and types."""
     path = tmp_path / "config.json"
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "int": 7,
         "float": 3.14,
         "bool_true": True,

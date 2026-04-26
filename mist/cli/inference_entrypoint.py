@@ -1,7 +1,6 @@
 """Command line tool MIST inference on a given dataset."""
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
-from typing import Optional, List
 import argparse
 import warnings
 import pandas as pd
@@ -14,7 +13,7 @@ from mist.inference import inference_utils
 from mist.inference import inference_runners
 
 
-def _parse_inference_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def _parse_inference_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command line arguments for MIST inference."""
     p = ArgParser(
         formatter_class=ArgumentDefaultsHelpFormatter,
@@ -124,7 +123,7 @@ def run_inference(ns: argparse.Namespace) -> None:
         )
 
 
-def inference_entry(argv: Optional[List[str]] = None) -> None:
+def inference_entry(argv: list[str] | None = None) -> None:
     """Entrypoint callable from __main__ or tests."""
     ns = _parse_inference_args(argv)
     run_inference(ns)

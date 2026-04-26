@@ -1,5 +1,4 @@
 """Tests for mist.inference.inference_runners."""
-from typing import Optional
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -97,7 +96,7 @@ def noop_cuda_tensor_to(monkeypatch):
 class _DummyANTsImage:
     """Minimal stand-in for ANTsImage."""
 
-    def __init__(self, array: Optional[np.ndarray] = None):
+    def __init__(self, array: np.ndarray | None = None):
         self._array = (
             np.array(0, dtype=np.uint8) if array is None else np.asarray(array)
         )
@@ -203,7 +202,7 @@ def _prep_dirs(tmp_path: Path):
 def _df_single_case(tmp_path: Path):
     """Minimal dataframe with a single patient id + image path."""
     return pd.DataFrame(
-        [{"id": "p1", "image": str((tmp_path / "images" / "p1.nii.gz"))}]
+        [{"id": "p1", "image": str(tmp_path / "images" / "p1.nii.gz")}]
     )
 
 
@@ -688,8 +687,8 @@ def test_infer_from_dataframe_logs_errors_and_continues_then_summarizes(
 ):
     """First patient fails; second succeeds; prints error summary."""
     df = pd.DataFrame([
-        {"id": "pA", "image": str((tmp_path / "images" / "pA.nii.gz"))},
-        {"id": "pB", "image": str((tmp_path / "images" / "pB.nii.gz"))},
+        {"id": "pA", "image": str(tmp_path / "images" / "pA.nii.gz")},
+        {"id": "pB", "image": str(tmp_path / "images" / "pB.nii.gz")},
     ])
     infer_runner.predict_single.side_effect = [
         RuntimeError("boom"), _DummyANTsImage()

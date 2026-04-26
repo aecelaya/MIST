@@ -1,5 +1,6 @@
 """Registry and implementations of postprocessing transforms for MIST."""
-from typing import Callable, Dict, Any, List
+from typing import Any
+from collections.abc import Callable
 import numpy as np
 import numpy.typing as npt
 from scipy import ndimage
@@ -11,11 +12,11 @@ from mist.postprocessing.postprocessing_constants import (
 )
 
 # Registry dictionaries.
-POSTPROCESSING_TRANSFORMS: Dict[str, Callable[..., npt.NDArray[Any]]] = {}
-TRANSFORM_METADATA: Dict[str, Dict[str, Any]] = {}
+POSTPROCESSING_TRANSFORMS: dict[str, Callable[..., npt.NDArray[Any]]] = {}
+TRANSFORM_METADATA: dict[str, dict[str, Any]] = {}
 
 
-def register_transform(name: str, metadata: Dict[str, Any]) -> Callable:
+def register_transform(name: str, metadata: dict[str, Any]) -> Callable:
     """Decorator to register a postprocessing transform by name.
 
     Args:
@@ -43,7 +44,7 @@ def get_transform(name: str) -> Callable:
     return POSTPROCESSING_TRANSFORMS[name]
 
 
-def describe_transforms() -> List[Dict[str, Any]]:
+def describe_transforms() -> list[dict[str, Any]]:
     """Return structured metadata for all registered transforms.
 
     Intended for use in agent prompts. Each entry describes a transform's
@@ -78,7 +79,7 @@ def describe_transforms() -> List[Dict[str, Any]]:
 )
 def remove_small_objects(
     mask: npt.NDArray[Any],
-    labels_list: List[int],
+    labels_list: list[int],
     per_label: bool = False,
     **kwargs
 ) -> npt.NDArray[Any]:
@@ -154,7 +155,7 @@ def remove_small_objects(
 )
 def get_top_k_connected_components(
     mask: npt.NDArray[Any],
-    labels_list: List[int],
+    labels_list: list[int],
     per_label: bool = False,
     **kwargs
 ) -> npt.NDArray[Any]:
@@ -254,7 +255,7 @@ def get_top_k_connected_components(
 )
 def fill_holes_with_label(
     mask: npt.NDArray[Any],
-    labels_list: List[int],
+    labels_list: list[int],
     per_label: bool = False,
     **kwargs
 ) -> npt.NDArray[Any]:
@@ -335,7 +336,7 @@ def fill_holes_with_label(
 )
 def replace_small_objects_with_label(
     mask: npt.NDArray[Any],
-    labels_list: List[int],
+    labels_list: list[int],
     per_label: bool = True,
     **kwargs
 ) -> npt.NDArray[Any]:

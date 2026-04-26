@@ -2,7 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any
 import argparse
 import json
 import warnings
@@ -20,10 +20,10 @@ class _DummyAntsImage:
 
     def __init__(
         self,
-        arr: Optional[np.ndarray] = None,
-        spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0),
-        origin: Tuple[float, float, float] = (0.0, 0.0, 0.0),
-        direction: Tuple[float, ...] = (1.0,) * 9,
+        arr: np.ndarray | None = None,
+        spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        direction: tuple[float, ...] = (1.0,) * 9,
     ) -> None:
         self._arr = (
             np.zeros((2, 2, 2), dtype=np.float32)
@@ -35,34 +35,34 @@ class _DummyAntsImage:
         self._direction = direction
 
     @property
-    def shape(self) -> Tuple[int, int, int]:
+    def shape(self) -> tuple[int, int, int]:
         """Return image shape."""
         return tuple(self._arr.shape)
 
     @property
-    def spacing(self) -> Tuple[float, float, float]:
+    def spacing(self) -> tuple[float, float, float]:
         """Return image spacing."""
         return self._spacing
 
     @property
-    def origin(self) -> Tuple[float, float, float]:
+    def origin(self) -> tuple[float, float, float]:
         """Return image origin."""
         return self._origin
 
     @property
-    def direction(self) -> Tuple[float, ...]:
+    def direction(self) -> tuple[float, ...]:
         """Return image direction."""
         return self._direction
 
-    def set_spacing(self, s: Tuple[float, float, float]) -> None:
+    def set_spacing(self, s: tuple[float, float, float]) -> None:
         """Set image spacing."""
         self._spacing = s
 
-    def set_origin(self, o: Tuple[float, float, float]) -> None:
+    def set_origin(self, o: tuple[float, float, float]) -> None:
         """Set image origin."""
         self._origin = o
 
-    def set_direction(self, d: Tuple[float, ...]) -> None:
+    def set_direction(self, d: tuple[float, ...]) -> None:
         """Set image direction."""
         self._direction = d
 
@@ -254,7 +254,7 @@ class _PB:
         return iterable
 
 
-def _write_json(path: Path, payload: Dict[str, Any]) -> None:
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
     """Write JSON to disk."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -267,7 +267,7 @@ def _write_csv(path: Path, df: pd.DataFrame) -> None:
 
 
 @pytest.fixture
-def base_config() -> Dict[str, Any]:
+def base_config() -> dict[str, Any]:
     """Return a minimal base config for preprocessing."""
     return {
         "dataset_info": {
@@ -450,7 +450,7 @@ def test_resample_image_aniso_axis_type_error(monkeypatch):
 def test_resample_image_aniso_intermediate_called(monkeypatch):
     """Anisotropic path with int axis calls intermediate resampler."""
     dummy_before = _DummySitkImage()
-    seen: Dict[str, Any] = {}
+    seen: dict[str, Any] = {}
 
     monkeypatch.setattr(
         pp.preprocessing_utils,
@@ -623,7 +623,7 @@ def test_resample_mask_aniso_intermediate_called_for_each_label(monkeypatch):
         raising=True,
     )
 
-    calls: List[Tuple[Any, Any, Any, Any]] = []
+    calls: list[tuple[Any, Any, Any, Any]] = []
 
     def _aniso(img, ns, tgt, axis):
         calls.append((img, ns, tgt, axis))
@@ -782,7 +782,7 @@ def test_compute_dtm_zero_guards_combined(monkeypatch):
     )
 
     # Scenario A: ext_max == 0 → guard to 1.
-    recorder: List[Tuple[str, float]] = []
+    recorder: list[tuple[str, float]] = []
     monkeypatch.setattr(
         pp.sitk,
         "SignedMaurerDistanceMap",
@@ -1358,7 +1358,7 @@ def test_preprocess_dataset_sets_fg_bbox_none_when_crop_disabled(
         pp.concurrent.futures, "ProcessPoolExecutor", ThreadPoolExecutor
     )
 
-    observed: Dict[str, Any] = {}
+    observed: dict[str, Any] = {}
 
     def _fake_preprocess_example(**kwargs):
         observed["fg_bbox"] = kwargs.get("fg_bbox", "MISSING")

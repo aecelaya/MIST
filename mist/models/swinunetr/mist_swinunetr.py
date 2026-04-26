@@ -1,7 +1,7 @@
 """MIST wrapper for SwinUNETR-V2."""
 
 from collections import OrderedDict
-from typing import Any, Dict, Union
+from typing import Any
 
 import torch
 from monai.networks.nets import SwinUNETR
@@ -80,7 +80,7 @@ class MistSwinUNETR(MISTModel):
 
     def forward(
         self, x: torch.Tensor
-    ) -> Union[torch.Tensor, Dict[str, Any]]:
+    ) -> torch.Tensor | dict[str, Any]:
         """Forward pass.
 
         Args:

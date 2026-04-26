@@ -1,5 +1,4 @@
 """Tests for the DynamicUNet model in the MIST package."""
-from typing import Dict
 import pytest
 import torch
 
@@ -9,7 +8,7 @@ from mist.models.nnunet.dynamic_unet import DynamicUNet
 def create_valid_params(
         use_deep_supervision: bool = False,
         num_deep_supervision_heads: int = 1
-) -> Dict:
+) -> dict:
     """Helper to generate a valid set of parameters for a 3D UNet.
 
     In this helper, we define a network with three levels (input, decoder,

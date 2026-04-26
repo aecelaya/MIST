@@ -1,6 +1,5 @@
 """Registry for segmentation metrics used in evaluation."""
 from abc import ABC, abstractmethod
-from typing import Dict, Tuple, List
 import numpy as np
 
 # MIST imports.
@@ -32,7 +31,7 @@ class Metric(ABC):
         self,
         truth: np.ndarray,
         pred: np.ndarray,
-        spacing: Tuple[float, float, float],
+        spacing: tuple[float, float, float],
         **kwargs
     ) -> float:
         """Compute the metric.
@@ -50,7 +49,7 @@ class Metric(ABC):
 
 
 # Global registry for metrics.
-METRIC_REGISTRY: Dict[str, Metric] = {}
+METRIC_REGISTRY: dict[str, Metric] = {}
 
 
 def register_metric(cls):
@@ -67,7 +66,7 @@ def get_metric(name: str) -> Metric:
     return METRIC_REGISTRY[name]
 
 
-def list_registered_metrics() -> List[str]:
+def list_registered_metrics() -> list[str]:
     """List all registered metrics."""
     return sorted(METRIC_REGISTRY.keys())
 

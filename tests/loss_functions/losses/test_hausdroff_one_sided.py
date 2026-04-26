@@ -1,6 +1,5 @@
 """Unit tests for the HDOneSidedLoss (HDOS) loss function."""
 
-from typing import Tuple
 
 import torch
 import pytest
@@ -12,7 +11,7 @@ def _make_mock_data(
     n_classes: int = 3,
     batch_size: int = 2,
     size: int = 8,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Generates valid inputs + DTM for HDOneSidedLoss testing.
 
     Returns:

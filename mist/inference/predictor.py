@@ -1,5 +1,5 @@
 """Predictor class to chain together inference, TTA, and ensembling."""
-from typing import Callable, List, Optional, Union
+from collections.abc import Callable
 
 import torch
 
@@ -30,11 +30,11 @@ class Predictor:
 
     def __init__(
         self,
-        models: List[Callable[[torch.Tensor], torch.Tensor]],
+        models: list[Callable[[torch.Tensor], torch.Tensor]],
         inferer: AbstractInferer,
         ensembler: AbstractEnsembler,
-        tta_transforms: List[AbstractTransform],
-        device: Optional[Union[str, torch.device]] = None,
+        tta_transforms: list[AbstractTransform],
+        device: str | torch.device | None = None,
     ):
         """Initialize the predictor.
 

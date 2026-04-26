@@ -2,7 +2,6 @@
 import argparse
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
-from typing import List, Optional
 
 # MIST imports.
 from mist.cli import args as argmod
@@ -11,9 +10,9 @@ from mist.cli.preprocess_entrypoint import preprocess_entry
 from mist.cli.train_entrypoint import train_entry
 
 
-def _ns_to_argv(ns: argparse.Namespace, keys: List[str]) -> List[str]:
+def _ns_to_argv(ns: argparse.Namespace, keys: list[str]) -> list[str]:
     """Convert a subset of Namespace fields into an argv list."""
-    argv: List[str] = []
+    argv: list[str] = []
     for k in keys:
         if not hasattr(ns, k):
             continue
@@ -34,7 +33,7 @@ def _ns_to_argv(ns: argparse.Namespace, keys: List[str]) -> List[str]:
     return argv
 
 
-def _parse_run_all_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def _parse_run_all_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Build and parse args for the run-all entrypoint."""
     parser = argmod.ArgParser(
         prog="mist_run_all",
@@ -62,7 +61,7 @@ def _parse_run_all_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return ns
 
 
-def run_all_entry(argv: Optional[List[str]] = None) -> None:
+def run_all_entry(argv: list[str] | None = None) -> None:
     """Entrypoint for running analyze, preprocess, and train sequentially."""
     ns = _parse_run_all_args(argv)
 

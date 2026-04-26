@@ -1,7 +1,8 @@
 """Implement adaptive Multi-Grid Network (MGNet) architectures."""
 
 from collections import OrderedDict
-from typing import List, Sequence, Dict, Optional, Union, Any
+from typing import Any
+from collections.abc import Sequence
 
 import torch
 from torch import nn
@@ -265,7 +266,7 @@ class MGNet(MISTModel):
              if k.startswith("main_encoder.")}
         )
 
-    def _generate_sparse_w_sequence(self, max_height: int) -> List[int]:
+    def _generate_sparse_w_sequence(self, max_height: int) -> list[int]:
         """
         Generates the recursive V-cycle pattern for W-Net topology.
 
@@ -386,7 +387,7 @@ class MGNet(MISTModel):
             if module.bias is not None:
                 nn.init.constant_(module.bias, 0.0)
 
-    def forward(self, x: torch.Tensor) -> Union[torch.Tensor, Dict[str, Any]]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor | dict[str, Any]:
         """Executes the grid traversal.
 
         Flow:
@@ -405,14 +406,14 @@ class MGNet(MISTModel):
         """
         # 1. ENCODER FEATURE REGISTRY
         # Stores the history of features at every depth.
-        encoder_feature_registry: Dict[int, List[torch.Tensor]] = {
+        encoder_feature_registry: dict[int, list[torch.Tensor]] = {
             d: [] for d in range(self.num_layers)
         }
 
         # 2. NEIGHBOR PEAK REGISTRY
         # Transient buffer. Stores a feature ONLY if the node immediately to the
         # left was a local maxima (Peak).
-        neighbor_peak_registry: Dict[int, Optional[torch.Tensor]] = {
+        neighbor_peak_registry: dict[int, torch.Tensor | None] = {
             d: None for d in range(self.num_layers)
         }
 

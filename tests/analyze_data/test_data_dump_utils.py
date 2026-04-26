@@ -1,5 +1,5 @@
 """Tests for mist.analyze_data.data_dump_utils."""
-from typing import Dict, Any
+from typing import Any
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +25,7 @@ def _ants_image(arr: np.ndarray, spacing=(1.0, 1.0, 1.0)):
 
 
 def _make_paths_df(
-    mask_paths, channel_paths: Dict[str, list]
+    mask_paths, channel_paths: dict[str, list]
 ) -> pd.DataFrame:
     """Build a minimal paths DataFrame for the DataDumper's expected layout."""
     data = {
@@ -41,7 +41,7 @@ def _make_dataset_info(
     labels=(0, 1, 2),
     channels=("t1",),
     final_classes=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return a minimal dataset_info dictionary."""
     if final_classes is None:
         final_classes = {"tumor": [lbl for lbl in labels if lbl != 0]}
@@ -52,12 +52,12 @@ def _make_dataset_info(
     }
 
 
-def _make_config(resampled=(64, 64, 32)) -> Dict[str, Any]:
+def _make_config(resampled=(64, 64, 32)) -> dict[str, Any]:
     """Return a minimal MIST config dict."""
     return {"preprocessing": {"median_resampled_image_size": list(resampled)}}
 
 
-def _make_raw_stats(n=3, non_bg=(1, 2), effective_dims=None) -> Dict[str, Any]:
+def _make_raw_stats(n=3, non_bg=(1, 2), effective_dims=None) -> dict[str, Any]:
     """Build a controlled raw_stats dict for pure-function tests."""
     original = np.tile([64.0, 64.0, 32.0], (n, 1))
     return {
@@ -588,7 +588,7 @@ class TestBuildLabelStatistics:
 # generate_observations
 # ---------------------------------------------------------------------------
 
-def _base_image_stats() -> Dict[str, Any]:
+def _base_image_stats() -> dict[str, Any]:
     """Baseline image_stats with no observations triggered."""
     return {
         "spacing": {"anisotropy_ratio": 1.5, "is_anisotropic": False},
@@ -606,7 +606,7 @@ def _base_image_stats() -> Dict[str, Any]:
     }
 
 
-def _base_label_stats() -> Dict[str, Any]:
+def _base_label_stats() -> dict[str, Any]:
     """Baseline label_stats with no observations triggered."""
     return {
         "class_imbalance": {
@@ -633,7 +633,7 @@ def _base_label_stats() -> Dict[str, Any]:
     }
 
 
-def _base_summary(n=100, channels=1) -> Dict[str, Any]:
+def _base_summary(n=100, channels=1) -> dict[str, Any]:
     """Baseline dataset_summary with no observations triggered."""
     return {
         "modality": "mr",
