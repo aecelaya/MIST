@@ -702,6 +702,72 @@ mist_evaluate --config brats_eval_config.json \
               --output-csv /path/to/brats_results.csv
 ```
 
+## Ranking
+
+`mist_rank` ranks two or more evaluation result CSVs (typically the outputs of
+`mist_evaluate`) using a BraTS-style scheme. For each (patient, metric) cell
+the strategies are ranked from best (1) to worst with average tie handling,
+then aggregated by mean rank per strategy.
+
+The tool is generic: it can rank any group of result CSVs that share the same
+patient set and metric columns. Common use cases include comparing several
+trained models, several postprocessing strategies, or several agent-proposed
+configurations.
+
+`mist_rank` infers each metric's direction (whether higher or lower values are
+better) from MIST's metric registry, so no extra configuration is needed for
+CSVs produced by `mist_evaluate`. Non-MIST metric columns can be handled by
+supplying a JSON file via `--metric-direction-overrides`.
+
+The `mist_rank` command takes the following arguments:
+
+- `--results` (**required**): Two or more paths to evaluation result CSVs.
+  All CSVs must share the same id column and metric columns.
+- `--output-csv` (**required**): Path where the summary ranking CSV will be
+  written. Columns: `strategy`, `average_rank`.
+- `--names` *(optional)*: Friendly labels, one per `--results` CSV in the same
+  order. Defaults to the file stem of each results CSV.
+- `--output-detailed-csv` *(optional)*: Path for an additional per-metric
+  breakdown CSV containing mean ranks per strategy per metric column.
+- `--metric-direction-overrides` *(optional)*: Path to a JSON file mapping
+  metric column name to `"higher"` or `"lower"`. Required only for columns
+  whose suffix does not match a registered MIST metric.
+- `--id-column` *(optional)*: Name of the column identifying each patient.
+  *(default: `id`)*
+
+Aggregate summary rows automatically appended by `mist_evaluate` (`Mean`,
+`Std`, `25th Percentile`, `Median`, `75th Percentile`) are stripped before
+ranking, so result CSVs can be passed in directly without any preprocessing.
+
+### Example
+
+Rank three model evaluations:
+
+```console
+mist_rank --results results_modelA.csv results_modelB.csv results_modelC.csv \
+          --names modelA modelB modelC \
+          --output-csv ranked_summary.csv \
+          --output-detailed-csv ranked_per_metric.csv
+```
+
+### Direction overrides example
+
+If your CSV contains a custom metric whose name is not in the MIST registry,
+provide its direction explicitly:
+
+```json
+{
+  "WT_my_custom_metric": "higher",
+  "WT_distance_to_centerline": "lower"
+}
+```
+
+```console
+mist_rank --results results_a.csv results_b.csv \
+          --output-csv ranked.csv \
+          --metric-direction-overrides directions.json
+```
+
 ## Converting CSV and MSD Data
 
 Several popular formats exist for different datasets, like the Medical
