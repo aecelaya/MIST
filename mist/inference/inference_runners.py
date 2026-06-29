@@ -62,8 +62,9 @@ def _build_predictor(
 
     inferer_params["patch_size"] = mist_configuration["spatial_config"]["patch_size"]
     inferer_params["device"] = device
-    inferer_params["sw_batch_size"] = (
-        2 * mist_configuration["training"]["batch_size_per_gpu"]
+    inferer_params.setdefault(
+        "sw_batch_size",
+        2 * mist_configuration["training"]["batch_size_per_gpu"],
     )
     inferer = get_inferer(inferer_name)(**inferer_params)
     ensembler = get_ensembler(ensembler_strategy)
@@ -271,7 +272,8 @@ def test_on_fold(
                     foreground_bounding_box=foreground_bounding_box,
                 )
             except (FileNotFoundError, RuntimeError, ValueError) as e:
-                error_messages.append(f"Prediction failed for {patient_id}: {str(e)}")
+                error_messages.append(
+                    f"Prediction failed for {patient_id}: {str(e)}")
             else:
                 # Write prediction as .nii.gz file.
                 ants.image_write(prediction, filename)
@@ -337,7 +339,8 @@ def infer_from_dataframe(
     )
 
     # Set up the predictor for inference.
-    predictor = _build_predictor(mist_configuration, models=models_list, device=device)
+    predictor = _build_predictor(
+        mist_configuration, models=models_list, device=device)
 
     # If a postprocess strategy file is provided, check if it exists and
     # initialize the postprocessor.
@@ -366,7 +369,8 @@ def infer_from_dataframe(
         for patient_index in pb.track(range(len(paths_dataframe))):
             patient = paths_dataframe.iloc[patient_index].to_dict()
             patient_id = patient["id"]
-            prediction_filename = str(Path(output_directory) / f"{patient_id}.nii.gz")
+            prediction_filename = str(
+                Path(output_directory) / f"{patient_id}.nii.gz")
             try:
                 # Validate the input patient data.
                 anchor_image, image_paths = inference_utils.validate_inference_images(
@@ -407,7 +411,8 @@ def infer_from_dataframe(
                     predictor=predictor,
                     # preprocess_example returns Dict[str, Any]; value type is
                     # not narrowed.
-                    foreground_bounding_box=preprocessed_example["fg_bbox"],  # type: ignore[index]
+                    # type: ignore[index]
+                    foreground_bounding_box=preprocessed_example["fg_bbox"],
                 )
 
                 # Apply postprocessing if a strategy is provided.
@@ -424,7 +429,8 @@ def infer_from_dataframe(
                     if postprocessing_error_messages:
                         error_messages.extend(postprocessing_error_messages)
             except (FileNotFoundError, RuntimeError, ValueError) as e:
-                error_messages.append(f"Prediction failed for {patient_id}: {str(e)}")
+                error_messages.append(
+                    f"Prediction failed for {patient_id}: {str(e)}")
                 continue
             else:
                 # Write prediction as .nii.gz file.
@@ -436,7 +442,8 @@ def infer_from_dataframe(
     # Print a summary of the inference results. If there are any error or
     # warning messages, print them. Otherwise, print a success message.
     if error_messages:
-        print_section_header("Inference completed with the following messages:")
+        print_section_header(
+            "Inference completed with the following messages:")
         for message in error_messages:
             print_error(message)
     else:
