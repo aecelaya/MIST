@@ -113,7 +113,8 @@ Below is an example of a valid `config.json` file.
       "name": "sliding_window",
       "params": {
         "patch_blend_mode": "gaussian",
-        "patch_overlap": 0.5
+        "patch_overlap": 0.5,
+        "sw_batch_size": 4
       }
     },
     "ensemble": {
@@ -162,7 +163,7 @@ a different part of the MIST pipeline:
 | `preprocessing`  | Defines how raw images are resampled, cropped, and normalized before training.                       |
 | `model`          | Specifies the model architecture and its hyperparameters (`in_channels`, `out_channels`, and any architecture-specific params such as `kernel_size` for MedNeXt). |
 | `training`       | Controls training loop, cross-validation folds, loss function, optimizer, and augmentations.         |
-| `inference`      | Settings for inference, including sliding-window parameters, ensembling, and test-time augmentation. `patch_overlap` must be in `[0, 1)` — a value of `1.0` is invalid. |
+| `inference`      | Settings for inference, including sliding-window parameters, ensembling, and test-time augmentation. `patch_overlap` must be in `[0, 1)` — a value of `1.0` is invalid. `sw_batch_size` controls how many patches are processed per forward pass during sliding-window inference; it defaults to `2 × batch_size_per_gpu` and can be overridden here. |
 | `evaluation`     | Metrics and class definitions for model evaluation.                                                  |
 
 ## Patch size selection
