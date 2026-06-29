@@ -91,6 +91,7 @@ def run_all_entry(argv: list[str] | None = None) -> None:
         "loss",
         "composite_loss_weighting",
         "epochs",
+        "warmup_epochs",
         "batch_size_per_gpu",
         "learning_rate",
         "lr_scheduler",

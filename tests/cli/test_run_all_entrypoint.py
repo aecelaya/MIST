@@ -42,6 +42,7 @@ def _patch_minimal_cli(monkeypatch) -> None:
         parser.add_argument("--loss", type=str)
         parser.add_argument("--composite-loss-weighting", type=str)
         parser.add_argument("--epochs", type=int)
+        parser.add_argument("--warmup-epochs", type=int)
         parser.add_argument("--batch-size-per-gpu", type=int)
         parser.add_argument("--learning-rate", type=float)
         parser.add_argument("--lr-scheduler", type=str)
@@ -249,6 +250,7 @@ def test_run_all_entry_forwards_subsets_correctly(monkeypatch, tmp_path):
         "loss",
         "composite_loss_weighting",
         "epochs",
+        "warmup_epochs",
         "batch_size_per_gpu",
         "learning_rate",
         "lr_scheduler",
@@ -317,6 +319,7 @@ def test_run_all_entry_handles_false_flags_and_empty_lists(monkeypatch):
         "loss",
         "composite_loss_weighting",
         "epochs",
+        "warmup_epochs",
         "batch_size_per_gpu",
         "learning_rate",
         "lr_scheduler",
@@ -336,6 +339,30 @@ def test_run_all_entry_handles_false_flags_and_empty_lists(monkeypatch):
     assert calls["analyze"] == expected_an
     assert calls["preprocess"] == expected_pre
     assert calls["train"] == expected_tr
+
+
+def test_run_all_entry_passes_warmup_epochs_to_train(monkeypatch):
+    """--warmup-epochs is forwarded to the train stage."""
+    _patch_minimal_cli(monkeypatch)
+
+    captured_train_argv = []
+    monkeypatch.setattr(entry, "analyze_entry", lambda _: None, raising=True)
+    monkeypatch.setattr(entry, "preprocess_entry", lambda _: None, raising=True)
+    monkeypatch.setattr(
+        entry,
+        "train_entry",
+        lambda a: captured_train_argv.extend(a),
+        raising=True,
+    )
+
+    entry.run_all_entry(
+        argv=["--data", "d.json", "--results", "r", "--numpy", "n",
+              "--warmup-epochs", "0"]
+    )
+
+    assert "--warmup-epochs" in captured_train_argv
+    idx = captured_train_argv.index("--warmup-epochs")
+    assert captured_train_argv[idx + 1] == "0"
 
 
 def test_run_all_entry_forwards_num_workers_analyze(monkeypatch):
