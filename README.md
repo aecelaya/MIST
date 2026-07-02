@@ -5,11 +5,21 @@ Medical Imaging Segmentation Toolkit
 [![Docs](https://img.shields.io/badge/docs-passing-brightgreen?style=flat)](https://mist-medical.readthedocs.io/en/latest/)
 ![GitHub Repo stars](https://img.shields.io/github/stars/mist-medical/MIST?style=flat)
 ![Coverage](coverage.svg)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1pe-lqDCuKK41um-S8L0nRSvJ4qM5DTCe)
 
 MIST is a simple, scalable, end-to-end framework for 3D medical image
 segmentation. It handles everything from raw NIfTI files to trained models and
 evaluated predictions, with sensible defaults that work well out of the box and
 a configuration file for when you need more control.
+
+> [!TIP]
+> **Try MIST in your browser — no setup required.** The
+> [**end-to-end Colab demo**](https://colab.research.google.com/drive/1pe-lqDCuKK41um-S8L0nRSvJ4qM5DTCe)
+> runs the whole pipeline — analyze → preprocess → train → evaluate → predict →
+> postprocess → rank → visualize — on a heart MRI dataset using a free Colab T4
+> GPU.
+>
+> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1pe-lqDCuKK41um-S8L0nRSvJ4qM5DTCe)
 
 ## Installation
 
@@ -137,6 +147,11 @@ Full documentation, including configuration reference and advanced topics, is at
 
 ## What's New
 
+* July 2026 — **Interactive Colab demo** — run the full MIST pipeline end-to-end
+  on a free Colab GPU with the
+  [heart segmentation notebook](https://colab.research.google.com/drive/1pe-lqDCuKK41um-S8L0nRSvJ4qM5DTCe):
+  analysis, training, evaluation, inference, postprocessing, and BraTS-style
+  ranking, all in the browser with no local setup.
 * June 2026 — **Official Docker image** — `mistmedical/mist:latest` ships a
   CUDA 12.8 build. Requires NVIDIA driver ≥ 525.x.
 * June 2026 — **2.0.1 release candidate** — BF16 automatic mixed precision
