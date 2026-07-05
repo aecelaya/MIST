@@ -1,10 +1,66 @@
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 # MIST imports.
 from mist.training import training_utils as tu
+
+
+def _summary_config() -> dict[str, Any]:
+    """Minimal config with the keys training_summary_rows reads."""
+    return {
+        "model": {"architecture": "nnunet-pocket"},
+        "spatial_config": {"patch_size": [64, 64, 48]},
+        "training": {"amp": True, "batch_size_per_gpu": 2, "epochs": 5},
+    }
+
+
+def test_training_summary_rows_labels_and_values():
+    """Rows report the expected model, params, GPUs, batch, patch, and epochs."""
+    rows = tu.training_summary_rows(_summary_config(), 683_412, world_size=1)
+    values = dict(rows)
+    assert values["Model"] == "nnunet-pocket"
+    assert values["AMP"] == "BF16"
+    assert values["GPUs"] == "1"
+    assert values["Global batch size"] == "2 (2/GPU × 1)"
+    assert values["Patch size"] == "64 × 64 × 48"
+    assert values["Epochs"] == "5"
+    assert values["Parameters"] == "0.68M (683,412)"
+
+
+def test_training_summary_rows_amp_off_label():
+    """AMP disabled is reported as 'off (FP32)'."""
+    config = _summary_config()
+    config["training"]["amp"] = False
+    values = dict(tu.training_summary_rows(config, 1000, world_size=1))
+    assert values["AMP"] == "off (FP32)"
+
+
+def test_training_summary_rows_multi_gpu_global_batch():
+    """Global batch size scales with world size."""
+    values = dict(tu.training_summary_rows(_summary_config(), 1000, world_size=4))
+    assert values["GPUs"] == "4"
+    assert values["Global batch size"] == "8 (2/GPU × 4)"
+
+
+def test_training_summary_rows_world_size_zero_treated_as_one():
+    """A world size of 0 (CPU) is treated as a single device."""
+    values = dict(tu.training_summary_rows(_summary_config(), 1000, world_size=0))
+    assert values["GPUs"] == "1"
+    assert values["Global batch size"] == "2 (2/GPU × 1)"
+
+
+def test_training_summary_rows_order_is_stable():
+    """Row order is deterministic for consistent display."""
+    labels = [label for label, _ in tu.training_summary_rows(
+        _summary_config(), 1000, world_size=1
+    )]
+    assert labels == [
+        "Model", "Parameters", "AMP", "GPUs",
+        "Global batch size", "Patch size", "Epochs",
+    ]
 
 
 def test_running_mean_initial_state():

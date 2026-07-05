@@ -16,6 +16,7 @@ import rich
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
+from rich.table import Table
 from sklearn.model_selection import train_test_split
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -495,20 +496,40 @@ class BaseTrainer(ABC):
                 math.ceil(len(train_images) / max(1, self.batch_size)),
             )
 
-    def build_components(self, rank: int, world_size: int) -> dict[str, Any]:
-        """Build the model, loss function, and optimizer components."""
-        training = self.config["training"]
+    def _build_model(self) -> nn.Module:
+        """Construct the model from the configuration (before device placement).
 
-        # Build the model based on the architecture and parameters specified in
-        # the configuration file. Merge spatial_config so adaptive architectures
-        # receive patch_size and target_spacing alongside model-specific params.
+        Merges spatial_config so adaptive architectures receive patch_size and
+        target_spacing alongside model-specific params.
+        """
         model_kwargs = {
             **self.config["model"]["params"],
             **self.config["spatial_config"],
         }
-        model = get_model_from_registry(
+        return get_model_from_registry(
             self.config["model"]["architecture"], **model_kwargs
         )
+
+    def _print_training_summary(self, world_size: int) -> None:
+        """Print a one-time summary of the training configuration (rank 0)."""
+        model = self._build_model()
+        num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        rows = training_utils.training_summary_rows(
+            self.config, num_params, world_size
+        )
+        table = Table(title="Training configuration", show_header=False)
+        table.add_column(style="bold")
+        table.add_column()
+        for label, value in rows:
+            table.add_row(label, value)
+        self.console.print(table)
+
+    def build_components(self, rank: int, world_size: int) -> dict[str, Any]:
+        """Build the model, loss function, and optimizer components."""
+        training = self.config["training"]
+
+        # Build the model from the configuration.
+        model = self._build_model()
 
         # Load pretrained encoder weights if requested. This runs on every rank
         # so each process starts from the same initialization.
@@ -930,9 +951,10 @@ class BaseTrainer(ABC):
 
     def run_cross_validation(self, rank: int, world_size: int) -> None:
         """Run cross-validation for selected folds."""
-        # Display the start of training message.
+        # Display the start of training message and a run summary.
         if rank == 0:
             print_section_header("Starting training")
+            self._print_training_summary(world_size)
 
         for fold in self.config["training"]["folds"]:
             # Skip folds that are already complete when resuming.
