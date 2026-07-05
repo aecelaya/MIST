@@ -2,7 +2,7 @@ Getting Started
 =====
 
 !!! tip "Prefer to try before installing?"
-    The **[end-to-end Colab demo](https://colab.research.google.com/drive/1pe-lqDCuKK41um-S8L0nRSvJ4qM5DTCe)**
+    The **[end-to-end Colab demo](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_heart_demo.ipynb)**
     runs the entire pipeline on a free GPU in your browser — no local setup
     required. It's the fastest way to see how MIST goes from raw NIfTI files to
     trained models, predictions, and evaluation.

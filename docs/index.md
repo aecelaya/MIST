@@ -7,12 +7,12 @@ evaluated predictions, with sensible defaults that work well out of the box and
 a configuration file for when you need more control.
 
 !!! tip "Try MIST in your browser"
-    The **[end-to-end Colab demo](https://colab.research.google.com/drive/1pe-lqDCuKK41um-S8L0nRSvJ4qM5DTCe)**
+    The **[end-to-end Colab demo](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_heart_demo.ipynb)**
     runs the whole pipeline — analyze → preprocess → train → evaluate → predict →
     postprocess → rank → visualize — on a heart MRI dataset using a free Colab T4
     GPU, with no local setup required.
 
-    [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1pe-lqDCuKK41um-S8L0nRSvJ4qM5DTCe)
+    [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_heart_demo.ipynb)
 
 ## Installation
 
@@ -54,7 +54,7 @@ pip install mist-medical
 
 * July 2026 — **Interactive Colab demo** — run the full MIST pipeline end-to-end
   on a free Colab GPU with the
-  [heart segmentation notebook](https://colab.research.google.com/drive/1pe-lqDCuKK41um-S8L0nRSvJ4qM5DTCe):
+  [heart segmentation notebook](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_heart_demo.ipynb):
   analysis, training, evaluation, inference, postprocessing, and BraTS-style
   ranking, all in the browser with no local setup.
 * June 2026 — **Official Docker image** — `mistmedical/mist:latest` ships a
