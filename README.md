@@ -5,7 +5,6 @@ Medical Imaging Segmentation Toolkit
 [![Docs](https://img.shields.io/badge/docs-passing-brightgreen?style=flat)](https://mist-medical.readthedocs.io/en/latest/)
 ![GitHub Repo stars](https://img.shields.io/github/stars/mist-medical/MIST?style=flat)
 ![Coverage](coverage.svg)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1pe-lqDCuKK41um-S8L0nRSvJ4qM5DTCe)
 
 MIST is a simple, scalable, end-to-end framework for 3D medical image
 segmentation. It handles everything from raw NIfTI files to trained models and
