@@ -16,11 +16,22 @@ def test_bf16_supported_false_without_cuda(monkeypatch) -> None:
     assert hardware.bf16_supported() is False
 
 
-def test_bf16_supported_true_when_cuda_and_bf16(monkeypatch) -> None:
-    """bf16_supported is True when CUDA is available and BF16 is supported."""
+def test_bf16_supported_true_on_ampere(monkeypatch) -> None:
+    """bf16_supported is True on Ampere or newer (compute capability >= 8)."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (8, 0))
     assert hardware.bf16_supported() is True
+
+
+def test_bf16_supported_false_on_pre_ampere(monkeypatch) -> None:
+    """bf16_supported is False on pre-Ampere GPUs (e.g. T4, SM 7.5).
+
+    Regression guard: torch.cuda.is_bf16_supported() reports True on a T4 via
+    software emulation, so the capability check must be used instead.
+    """
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (7, 5))
+    assert hardware.bf16_supported() is False
 
 
 def test_resolve_amp_not_requested_returns_false() -> None:
@@ -31,9 +42,9 @@ def test_resolve_amp_not_requested_returns_false() -> None:
 
 
 def test_resolve_amp_supported_returns_true(monkeypatch) -> None:
-    """A True request on BF16-capable hardware resolves to True."""
+    """A True request on Ampere+ hardware resolves to True."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (8, 0))
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         assert hardware.resolve_amp(True) is True
@@ -49,7 +60,7 @@ def test_resolve_amp_no_cuda_falls_back_with_warning(monkeypatch) -> None:
 def test_resolve_amp_pre_ampere_falls_back_with_device_name(monkeypatch) -> None:
     """A True request on a pre-Ampere GPU downgrades and names the device."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (7, 5))
     monkeypatch.setattr(torch.cuda, "get_device_name", lambda idx=0: "Tesla T4")
     with pytest.warns(UserWarning, match="Tesla T4"):
         assert hardware.resolve_amp(True) is False
@@ -58,7 +69,7 @@ def test_resolve_amp_pre_ampere_falls_back_with_device_name(monkeypatch) -> None
 def test_resolve_amp_warn_false_is_silent(monkeypatch) -> None:
     """warn=False suppresses the downgrade warning."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (7, 5))
     monkeypatch.setattr(torch.cuda, "get_device_name", lambda idx=0: "Tesla T4")
     with warnings.catch_warnings():
         warnings.simplefilter("error")

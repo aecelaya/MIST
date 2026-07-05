@@ -15,8 +15,17 @@ import torch
 
 
 def bf16_supported() -> bool:
-    """Return True if CUDA is available and the current device supports BF16."""
-    return torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+    """Return True if the current CUDA device *natively* supports BF16.
+
+    Checks the compute capability (Ampere / SM 8.0 or newer) rather than
+    ``torch.cuda.is_bf16_supported()``, which by default returns True on
+    pre-Ampere GPUs (T4, V100) via slow software emulation — which would defeat
+    the FP32 fallback this module exists to provide.
+    """
+    if not torch.cuda.is_available():
+        return False
+    major, _ = torch.cuda.get_device_capability()
+    return major >= 8
 
 
 def resolve_amp(requested: bool, *, warn: bool = True) -> bool:

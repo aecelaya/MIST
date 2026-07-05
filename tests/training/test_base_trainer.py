@@ -169,7 +169,7 @@ def patch_paths(monkeypatch):
 def patch_cuda_and_moves(monkeypatch):
     """Patch CUDA availability and device moves so tests run CPU-only."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True, raising=False)
-    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True, raising=False)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (8, 0), raising=False)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1, raising=False)
     monkeypatch.setattr(torch.cuda, "set_device", lambda idx: None, raising=False)
 
