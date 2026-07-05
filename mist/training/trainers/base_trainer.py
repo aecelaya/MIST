@@ -37,7 +37,7 @@ from mist.training import training_utils
 from mist.training.lr_schedulers.lr_scheduler_registry import get_lr_scheduler
 from mist.training.optimizers.optimizer_registry import get_optimizer
 from mist.training.trainers.trainer_constants import TrainerConstants
-from mist.utils import io, progress_bar
+from mist.utils import hardware, io, progress_bar
 from mist.utils.console import (
     print_error,
     print_info,
@@ -245,6 +245,15 @@ class BaseTrainer(ABC):
         # Overwrite the validation percentage if specified in command line.
         if self.mist_args.val_percent is not None:
             self.config["training"]["val_percent"] = float(self.mist_args.val_percent)
+
+        # Resolve AMP against the current hardware. BF16 autocast is only
+        # hardware-accelerated on Ampere or newer GPUs; downgrade to FP32 on
+        # pre-Ampere/CPU. Resolving here (once, in the parent process) persists
+        # the effective value to config.json so every training step and all
+        # downstream inference read a hardware-appropriate setting.
+        self.config["training"]["amp"] = hardware.resolve_amp(
+            self.config["training"]["amp"]
+        )
 
         # Write the updated configuration to the config.json file.
         io.write_json_file(self.config_json, self.config)

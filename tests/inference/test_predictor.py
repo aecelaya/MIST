@@ -232,16 +232,21 @@ def test_predictor_use_amp_defaults_to_false():
     assert predictor.use_amp is False
 
 
-def test_predictor_use_amp_stored(monkeypatch):
-    """use_amp=True is stored on the predictor."""
+def test_predictor_use_amp_resolved_against_hardware(monkeypatch):
+    """use_amp=True is honored on BF16-capable hardware and downgraded otherwise."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+    assert _make_predictor(use_amp=True).use_amp is True
+
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    predictor = _make_predictor(use_amp=True)
-    assert predictor.use_amp is True
+    with pytest.warns(UserWarning, match="BF16"):
+        assert _make_predictor(use_amp=True).use_amp is False
 
 
 def test_predictor_use_amp_calls_autocast_when_cuda_available(monkeypatch):
-    """use_amp=True with CUDA available enters torch.autocast."""
+    """use_amp=True with BF16-capable CUDA enters torch.autocast."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
 
     entered = []
 
@@ -277,7 +282,9 @@ def test_predictor_use_amp_skips_autocast_when_cuda_unavailable(monkeypatch):
 
     monkeypatch.setattr(torch, "autocast", lambda **_: _FakeAutocast())
 
-    predictor = _make_predictor(use_amp=True)
+    # Requesting AMP without a CUDA device downgrades to FP32 and warns.
+    with pytest.warns(UserWarning, match="BF16"):
+        predictor = _make_predictor(use_amp=True)
     predictor(torch.ones(1, 1, 4, 4, 4))
 
     assert not autocast_entered, "torch.autocast should not be entered without CUDA"

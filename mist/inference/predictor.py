@@ -1,6 +1,5 @@
 """Predictor class to chain together inference, TTA, and ensembling."""
 
-import contextlib
 from collections.abc import Callable
 
 import torch
@@ -9,6 +8,7 @@ from mist.inference.ensemblers.base import AbstractEnsembler
 from mist.inference.inference_utils import get_default_device
 from mist.inference.inferers.base import AbstractInferer
 from mist.inference.tta.transforms import AbstractTransform
+from mist.utils import hardware
 
 
 class Predictor:
@@ -59,7 +59,10 @@ class Predictor:
         self.ensembler = ensembler
         self.tta_transforms = tta_transforms
         self.device = device or get_default_device()
-        self.use_amp = use_amp
+        # Resolve AMP against the current hardware so a config trained on an
+        # Ampere GPU (amp=True) still falls back to FP32 when inference runs on
+        # a pre-Ampere card or CPU.
+        self.use_amp = hardware.resolve_amp(use_amp)
 
     def __call__(self, image: torch.Tensor) -> torch.Tensor:
         """Call the predictor like a function."""
@@ -77,11 +80,7 @@ class Predictor:
         image = image.to(self.device)
         all_predictions = []
 
-        amp_context = (
-            torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-            if self.use_amp and torch.cuda.is_available()
-            else contextlib.nullcontext()
-        )
+        amp_context = hardware.autocast_context(self.use_amp)
 
         with amp_context:
             for model in self.models:
