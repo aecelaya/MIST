@@ -50,12 +50,13 @@ jobs:
     # (single source of truth — including the torch version constraint) rather
     # than a hand-maintained list that can drift. Only the test-time tools that
     # are not runtime dependencies are listed explicitly.
-    # setuptools is listed explicitly because coverage-badge imports
-    # pkg_resources, which Python >= 3.12 environments no longer bundle.
+    # setuptools<81 is required because coverage-badge imports pkg_resources,
+    # which Python >= 3.12 environments no longer bundle and setuptools >= 81
+    # no longer ships.
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e . pytest-cov coverage-badge setuptools
+        pip install -e . pytest-cov coverage-badge "setuptools<81"
 
     # Run the full suite under coverage. term-missing prints uncovered lines in
     # the log; the xml report feeds coverage-badge, which renders coverage.svg.
