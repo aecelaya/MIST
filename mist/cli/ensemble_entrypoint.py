@@ -6,7 +6,6 @@ from pathlib import Path
 
 import SimpleITK as sitk
 
-import mist.inference.label_ensemblers  # noqa: F401 — triggers registration
 from mist.inference.label_ensemblers.label_ensembler_registry import (
     get_label_ensembler,
     list_label_ensemblers,

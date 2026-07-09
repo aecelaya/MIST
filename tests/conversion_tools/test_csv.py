@@ -57,7 +57,7 @@ def patch_utils(monkeypatch):
     monkeypatch.setattr(
         conversion_utils,
         "copy_image_from_source_to_dest",
-        lambda src, dst: shutil.copy(src, dst),
+        shutil.copy,
     )
 
     def fake_write_json_file(path, data):

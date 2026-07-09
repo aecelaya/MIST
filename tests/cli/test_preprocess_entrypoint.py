@@ -127,9 +127,6 @@ def test_preprocess_entry_integration_parsing_and_run(tmp_path, monkeypatch):
         observed["called"] = True
         observed["ns"] = ns
 
-    def _fake_set_warning_levels():
-        observed["set_warn"] = True
-
     real_prepare = entry._prepare_preprocess_dirs
 
     def _wrapped_prepare(ns):

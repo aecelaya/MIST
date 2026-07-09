@@ -294,7 +294,7 @@ def test_train_entry_happy_path_no_test_empty_eval(tmp_path, monkeypatch):
 
     # GPU availability
     monkeypatch.setattr(entry.torch.cuda, "device_count", lambda: 1, raising=True)
-    monkeypatch.setattr(entry.torch, "no_grad", lambda: _NoGrad(), raising=True)
+    monkeypatch.setattr(entry.torch, "no_grad", _NoGrad, raising=True)
 
     # Trainer stub.
     created = {}
@@ -390,7 +390,7 @@ def test_train_entry_happy_path_with_eval_and_test_infer(tmp_path, monkeypatch):
 
     # GPU availability.
     monkeypatch.setattr(entry.torch.cuda, "device_count", lambda: 2, raising=True)
-    monkeypatch.setattr(entry.torch, "no_grad", lambda: _NoGrad(), raising=True)
+    monkeypatch.setattr(entry.torch, "no_grad", _NoGrad, raising=True)
 
     # Trainer stub.
     trainer = _DummyTrainer(argparse.Namespace())
@@ -421,7 +421,7 @@ def test_train_entry_happy_path_with_eval_and_test_infer(tmp_path, monkeypatch):
 
     def _mk_eval(filepaths_dataframe, evaluation_config, output_csv_path):
         class _E:
-            def run(self_nonlocal, max_workers=None):
+            def run(self, max_workers=None):
                 runs["called"] = True
                 Path(output_csv_path).write_text("metric,value\n")
 

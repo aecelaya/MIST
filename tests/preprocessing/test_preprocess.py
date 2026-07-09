@@ -136,16 +136,19 @@ class _DummySitkImage:
         self._direction = tuple(d)
 
     def __lt__(self, other):
-        """Less than comparison for sorting."""
+        """Element-wise comparison returning a mask image, like SimpleITK."""
         return _DummySitkImage(
             self._size, self._spacing, self._origin, self._direction, self._pixel_id
         )
 
     def __gt__(self, other):
-        """Greater than comparison for sorting."""
+        """Element-wise comparison returning a mask image, like SimpleITK."""
         return _DummySitkImage(
             self._size, self._spacing, self._origin, self._direction, self._pixel_id
         )
+
+    __le__ = __lt__
+    __ge__ = __gt__
 
     def __imul__(self, other):
         """In-place multiplication for scaling."""
@@ -183,12 +186,15 @@ class _DummyDTM:
         self._direction = (1.0,) * 9
 
     def __lt__(self, other):
-        """Less than comparison for sorting."""
+        """Element-wise comparison returning a mask image, like SimpleITK."""
         return _DummyDTM("int_mask", self._divlog)
 
     def __gt__(self, other):
-        """Greater than comparison for sorting."""
+        """Element-wise comparison returning a mask image, like SimpleITK."""
         return _DummyDTM("ext_mask", self._divlog)
+
+    __le__ = __lt__
+    __ge__ = __gt__
 
     def __imul__(self, other):
         """In-place multiplication for scaling."""
@@ -459,7 +465,7 @@ def test_resample_image_aniso_intermediate_called(monkeypatch):
         _aniso_intermediate,
         raising=True,
     )
-    monkeypatch.setattr(pp.sitk, "Transform", lambda: object(), raising=True)
+    monkeypatch.setattr(pp.sitk, "Transform", object, raising=True)
     monkeypatch.setattr(pp.sitk, "Resample", lambda *_a, **_k: object(), raising=True)
 
     final_ants = object()
