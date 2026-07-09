@@ -245,6 +245,6 @@ def convert_msd(
     output_json_path = dest / "dataset.json"
     print_info(f"MIST dataset parameters written to {output_json_path}")
     console.print(dataset_json)
-    print_info("Please add task, modality, labels, and final classes to parameters.")
+    print_info("Please verify task, modality, labels, and final classes.")
 
     io.write_json_file(output_json_path, dataset_json)

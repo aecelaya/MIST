@@ -2,6 +2,45 @@
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
+
+
+def _format_parameter_count(num_params: int) -> str:
+    """Format a parameter count as e.g. '0.68M (683,412)'."""
+    return f"{num_params / 1e6:.2f}M ({num_params:,})"
+
+
+def training_summary_rows(
+    config: dict[str, Any],
+    num_params: int,
+    world_size: int,
+) -> list[tuple[str, str]]:
+    """Build (label, value) rows summarizing a training run for display.
+
+    Args:
+        config: The resolved MIST configuration.
+        num_params: Number of trainable parameters in the model.
+        world_size: Number of processes/GPUs participating in training.
+
+    Returns:
+        Ordered list of (label, value) rows.
+    """
+    training = config["training"]
+    num_gpus = max(1, world_size)
+    per_gpu = training["batch_size_per_gpu"]
+    global_batch = per_gpu * num_gpus
+    patch_size = " × ".join(
+        str(dim) for dim in config["spatial_config"]["patch_size"]
+    )
+    return [
+        ("Model", str(config["model"]["architecture"])),
+        ("Parameters", _format_parameter_count(num_params)),
+        ("AMP", "BF16" if training["amp"] else "off (FP32)"),
+        ("GPUs", str(num_gpus)),
+        ("Global batch size", f"{global_batch} ({per_gpu}/GPU × {num_gpus})"),
+        ("Patch size", patch_size),
+        ("Epochs", str(training["epochs"])),
+    ]
 
 
 class RunningMean:

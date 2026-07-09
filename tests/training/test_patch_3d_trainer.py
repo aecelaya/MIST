@@ -69,6 +69,7 @@ def no_op_autocast() -> Any:
 def patch_cuda(monkeypatch):
     """Pretend CUDA exists and make .to(...) a no-op (CPU-only tests)."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True, raising=False)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (8, 0), raising=False)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1, raising=False)
     monkeypatch.setattr(torch.cuda, "set_device", lambda _i: None, raising=False)
     monkeypatch.setattr(nn.Module, "to", lambda self, *a, **k: self, raising=False)

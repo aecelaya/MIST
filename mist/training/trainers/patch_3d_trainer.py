@@ -1,6 +1,5 @@
 """3D patch trainer for MIST built on top of BaseTrainer."""
 
-import contextlib
 from typing import Any
 
 import torch
@@ -9,6 +8,7 @@ from monai.inferers import sliding_window_inference
 from mist.data_loading import dali_loader
 from mist.training.trainers.base_trainer import BaseTrainer
 from mist.training.trainers.trainer_constants import TrainerConstants as constants
+from mist.utils import hardware
 
 
 class Patch3DTrainer(BaseTrainer):
@@ -119,11 +119,7 @@ class Patch3DTrainer(BaseTrainer):
         )
         amp_enabled = self.config["training"]["amp"]
 
-        amp_context = (
-            torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-            if amp_enabled
-            else contextlib.nullcontext()
-        )
+        amp_context = hardware.autocast_context(amp_enabled)
 
         optimizer.zero_grad()
         with amp_context:
@@ -179,11 +175,7 @@ class Patch3DTrainer(BaseTrainer):
 
         # Perform sliding window inference for validation.
         sw_batch_size = 2 * self.config["training"]["batch_size_per_gpu"]
-        amp_context = (
-            torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-            if self.config["training"]["amp"]
-            else contextlib.nullcontext()
-        )
+        amp_context = hardware.autocast_context(self.config["training"]["amp"])
         with amp_context:
             pred = sliding_window_inference(
                 inputs=image,
