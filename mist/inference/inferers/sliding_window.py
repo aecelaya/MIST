@@ -78,6 +78,26 @@ class SlidingWindowInferer(AbstractInferer):
         # Set the device for inference.
         self.device = device or get_default_device()
 
+    def __eq__(self, other: object) -> bool:
+        """Compare inferers including their sliding window configuration.
+
+        The base class compares by registry name only, which would make two
+        sliding window inferers with different patch sizes or overlap equal.
+        """
+        return (
+            super().__eq__(other)
+            and isinstance(other, SlidingWindowInferer)
+            and self.patch_size == other.patch_size
+            and self.sw_batch_size == other.sw_batch_size
+            and self.patch_overlap == other.patch_overlap
+            and self.patch_blend_mode == other.patch_blend_mode
+            and self.device == other.device
+        )
+
+    # Defining __eq__ would otherwise set __hash__ to None; keep the base
+    # class's name-based hash (equal objects still hash equal).
+    __hash__ = AbstractInferer.__hash__
+
     def infer(
         self,
         image: torch.Tensor,

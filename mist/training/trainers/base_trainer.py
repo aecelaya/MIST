@@ -148,6 +148,8 @@ class BaseTrainer(ABC):
             if dist.is_initialized():
                 rank = dist.get_rank()
         except (AttributeError, RuntimeError, ValueError, TypeError):
+            # torch.distributed may be unavailable or not yet initialized;
+            # keep the rank read from the RANK environment variable above.
             pass
 
         final_seed = int(seed) + int(rank)
