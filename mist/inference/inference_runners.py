@@ -411,8 +411,9 @@ def infer_from_dataframe(
                     predictor=predictor,
                     # preprocess_example returns Dict[str, Any]; value type is
                     # not narrowed.
-                    # type: ignore[index]
-                    foreground_bounding_box=preprocessed_example["fg_bbox"],
+                    foreground_bounding_box=(
+                        preprocessed_example["fg_bbox"]  # type: ignore[index]
+                    ),
                 )
 
                 # Apply postprocessing if a strategy is provided.
