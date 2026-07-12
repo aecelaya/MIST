@@ -1,11 +1,13 @@
 """Command line tool to ensemble predictions from multiple MIST models."""
 
 import argparse
+import concurrent.futures
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
 
 import SimpleITK as sitk
 
+from mist.cli.args import ArgParser, positive_int
 from mist.inference.label_ensemblers.label_ensembler_registry import (
     get_label_ensembler,
     list_label_ensemblers,
@@ -18,14 +20,14 @@ def _parse_ensemble_args(
     argv: list[str] | None = None,
 ) -> argparse.Namespace:
     """Parse CLI arguments for mist_ensemble."""
-    parser = argparse.ArgumentParser(
+    parser = ArgParser(
         formatter_class=ArgumentDefaultsHelpFormatter,
         description=(
             "Combine predictions from multiple MIST models into a single "
             "consensus segmentation."
         ),
     )
-    parser.add_argument(
+    parser.arg(
         "--predictions",
         nargs="+",
         required=True,
@@ -35,18 +37,24 @@ def _parse_ensemble_args(
             "directories must contain the same set of patient files."
         ),
     )
-    parser.add_argument(
+    parser.arg(
         "--output",
         type=str,
         required=True,
         help="Directory where the consensus predictions will be written.",
     )
-    parser.add_argument(
+    parser.arg(
         "--ensemble-backend",
         type=str,
         choices=list_label_ensemblers(),
         default="staple",
         help="Algorithm used to combine label maps.",
+    )
+    parser.arg(
+        "--num-workers-ensemble",
+        type=positive_int,
+        default=1,
+        help="Number of parallel workers for ensembling.",
     )
     return parser.parse_args(argv)
 
@@ -108,6 +116,41 @@ def _get_patient_ids(dirs: list[Path]) -> list[str]:
     return sorted(reference_ids)
 
 
+def _ensemble_single_patient(
+    patient_id: str,
+    dirs: list[Path],
+    ensemble_backend: str,
+    output_dir: Path,
+) -> str | None:
+    """Ensemble one patient's label maps and write the consensus to disk.
+
+    Rebuilds the ensembler from its registry name rather than accepting an
+    instance, so this function can be sent to a worker process.
+
+    Args:
+        patient_id: Patient identifier shared across all prediction dirs.
+        dirs: Resolved prediction directories.
+        ensemble_backend: Name of the registered label ensembler to use.
+        output_dir: Directory where the consensus prediction is written.
+
+    Returns:
+        An error message string on failure, or None on success.
+    """
+    try:
+        ensembler = get_label_ensembler(ensemble_backend)
+        label_maps = [
+            sitk.ReadImage(str(d / f"{patient_id}.nii.gz")) for d in dirs
+        ]
+        consensus = ensembler(label_maps)
+        sitk.WriteImage(
+            consensus,
+            str(output_dir / f"{patient_id}.nii.gz"),
+        )
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        return f"Ensemble failed for {patient_id}: {str(e)}"
+
+
 def run_ensemble(ns: argparse.Namespace) -> None:
     """Load inputs, run the ensemble, and write output predictions.
 
@@ -120,22 +163,30 @@ def run_ensemble(ns: argparse.Namespace) -> None:
     output_dir = Path(ns.output).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    ensembler = get_label_ensembler(ns.ensemble_backend)
     error_messages = []
 
-    with progress_bar.get_progress_bar("Ensembling predictions") as pb:
-        for patient_id in pb.track(patient_ids):
-            try:
-                label_maps = [
-                    sitk.ReadImage(str(d / f"{patient_id}.nii.gz")) for d in dirs
-                ]
-                consensus = ensembler(label_maps)
-                sitk.WriteImage(
-                    consensus,
-                    str(output_dir / f"{patient_id}.nii.gz"),
-                )
-            except Exception as e:  # pylint: disable=broad-except
-                error_messages.append(f"Ensemble failed for {patient_id}: {str(e)}")
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=ns.num_workers_ensemble
+    ) as executor:
+        future_to_patient = {
+            executor.submit(
+                _ensemble_single_patient,
+                patient_id,
+                dirs,
+                ns.ensemble_backend,
+                output_dir,
+            ): patient_id
+            for patient_id in patient_ids
+        }
+
+        with progress_bar.get_progress_bar("Ensembling predictions") as pb:
+            for future in pb.track(
+                concurrent.futures.as_completed(future_to_patient),
+                total=len(patient_ids),
+            ):
+                error_message = future.result()
+                if error_message:
+                    error_messages.append(error_message)
 
     if error_messages:
         for message in error_messages:

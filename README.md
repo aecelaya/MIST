@@ -146,6 +146,9 @@ Full documentation, including configuration reference and advanced topics, is at
 
 ## What's New
 
+* July 2026 — **Parallel ensembling** — `mist_ensemble` now accepts
+  `--num-workers-ensemble` to combine predictions across patients in parallel
+  worker processes.
 * July 2026 — **Interactive Colab demo** — run the full MIST pipeline end-to-end
   on a free Colab GPU with the
   [heart segmentation notebook](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_heart_demo.ipynb):

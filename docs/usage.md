@@ -421,6 +421,7 @@ The `mist_ensemble` command uses the following arguments:
   predictions, one file per patient named `<patient_id>.nii.gz`.
 - `--output`: (**required**) Directory where consensus predictions will be written.
 - `--ensemble-backend`: Algorithm used to combine label maps. *(default: `staple`)*
+- `--num-workers-ensemble`: Number of parallel workers for ensembling. *(default: `1`)*
 
 ### Ensemble backends
 
@@ -438,7 +439,8 @@ mist_ensemble --predictions /path/to/pred_dice \
                             /path/to/pred_ce \
                             /path/to/pred_hdos \
               --output /path/to/ensemble_output \
-              --ensemble-backend staple
+              --ensemble-backend staple \
+              --num-workers-ensemble 8
 ```
 
 ## Postprocessing

@@ -72,6 +72,58 @@ def test_parse_ensemble_args_majority_vote(tmp_path):
     assert ns.ensemble_backend == "majority_vote"
 
 
+def test_parse_ensemble_args_num_workers_default(tmp_path):
+    """Default number of ensemble workers should be 1."""
+    d1 = _make_pred_dir(tmp_path, "p1", ["a"])
+    d2 = _make_pred_dir(tmp_path, "p2", ["a"])
+    ns = _parse_ensemble_args(
+        [
+            "--predictions",
+            d1,
+            d2,
+            "--output",
+            str(tmp_path / "out"),
+        ]
+    )
+    assert ns.num_workers_ensemble == 1
+
+
+def test_parse_ensemble_args_num_workers_custom(tmp_path):
+    """--num-workers-ensemble should be parsed correctly."""
+    d1 = _make_pred_dir(tmp_path, "p1", ["a"])
+    d2 = _make_pred_dir(tmp_path, "p2", ["a"])
+    ns = _parse_ensemble_args(
+        [
+            "--predictions",
+            d1,
+            d2,
+            "--output",
+            str(tmp_path / "out"),
+            "--num-workers-ensemble",
+            "4",
+        ]
+    )
+    assert ns.num_workers_ensemble == 4
+
+
+def test_parse_ensemble_args_num_workers_non_positive_raises(tmp_path):
+    """--num-workers-ensemble must be a positive integer."""
+    d1 = _make_pred_dir(tmp_path, "p1", ["a"])
+    d2 = _make_pred_dir(tmp_path, "p2", ["a"])
+    with pytest.raises(SystemExit):
+        _parse_ensemble_args(
+            [
+                "--predictions",
+                d1,
+                d2,
+                "--output",
+                str(tmp_path / "out"),
+                "--num-workers-ensemble",
+                "0",
+            ]
+        )
+
+
 # ---------------------------------------------------------------------------
 # _validate_prediction_dirs tests
 # ---------------------------------------------------------------------------
@@ -211,6 +263,32 @@ def test_run_ensemble_output_values_correct(tmp_path):
         sitk.ReadImage(str(tmp_path / "out" / f"{pid}.nii.gz"))
     )
     assert np.array_equal(result, foreground)
+
+
+def test_run_ensemble_multiple_workers_produces_output(tmp_path):
+    """run_ensemble with num_workers_ensemble > 1 should still write all files."""
+    pids = ["p1", "p2", "p3", "p4"]
+    d1 = _make_pred_dir(tmp_path, "pred1", pids, value=1)
+    d2 = _make_pred_dir(tmp_path, "pred2", pids, value=1)
+    out = str(tmp_path / "out")
+
+    ns = _parse_ensemble_args(
+        [
+            "--predictions",
+            d1,
+            d2,
+            "--output",
+            out,
+            "--ensemble-backend",
+            "majority_vote",
+            "--num-workers-ensemble",
+            "2",
+        ]
+    )
+    run_ensemble(ns)
+
+    for pid in pids:
+        assert (tmp_path / "out" / f"{pid}.nii.gz").exists()
 
 
 def test_ensemble_entry_runs_without_error(tmp_path):
