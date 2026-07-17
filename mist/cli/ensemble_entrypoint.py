@@ -5,12 +5,10 @@ import concurrent.futures
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
 
-import ants
 import numpy as np
 import SimpleITK as sitk
 
 from mist.cli.args import ArgParser, positive_int
-from mist.inference import inference_utils
 from mist.inference.label_ensemblers.label_ensembler_registry import (
     get_label_ensembler,
     list_label_ensemblers,
@@ -227,6 +225,12 @@ def _ensemble_single_patient_probabilities(
     Returns:
         An error message string on failure, or None on success.
     """
+    # Imported lazily: 'ants' pulls in torch/scikit-learn, which the default
+    # 'labels' mode (and 'mist_ensemble --help') has no need to import.
+    import ants
+
+    from mist.inference import inference_utils
+
     try:
         ensembler = get_probability_ensembler(probability_ensemble_backend)
         probability_images = [
