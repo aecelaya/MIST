@@ -381,6 +381,11 @@ The `mist_predict` command uses the following arguments:
 integer ID of a specific GPU (i.e., `1`). *(default: `cuda`)*.
 - `--postprocess-strategy`: Path to postprocessing strategy JSON file. See below
 for more details on defining postprocessing strategies in MIST.
+- `--output-probs`: If set, also write each patient's final (post fold/TTA-ensemble,
+  pre-argmax) softmax probability volume, restored to the original image's
+  space. See [Output layout](#output-layout) below for where these files
+  are written. Use this to later combine probabilities across multiple
+  models with `mist_ensemble --input-type probabilities`. *(default: off)*
 
 For CSV formatted data, the CSV file must, at a minimum, have an `id` column
 with the new patient IDs and one column for each image type. For example, for
@@ -389,6 +394,36 @@ the BraTS dataset, our CSV header would look like the following.
 | id         | t1               | t2               | tc               | fl               |
 |------------|------------------|------------------|------------------|------------------|
 | Patient ID | Path to t1 image | Path to t2 image | Path to tc image | Path to fl image |
+
+### Output layout
+
+By default, `mist_predict` writes one discrete segmentation NIfTI per patient
+directly under `--output`:
+
+```
+output/
+└── <patient_id>.nii.gz   # discrete segmentation (one per patient)
+```
+
+When `--output-probs` is set, the discrete predictions and the probability
+volumes are written to parallel, symmetric subdirectories instead:
+
+```
+output/
+├── discrete/
+│   └── <patient_id>.nii.gz        # discrete segmentation (one per patient)
+└── probabilities/
+    └── <patient_id>.nii.gz        # softmax probability volume (multi-component)
+```
+
+Each probability NIfTI is a multi-component volume of shape `(D, H, W, C)`,
+where `C` is the number of classes (`model.params.out_channels` in
+`config.json`). Component `i` holds the probability of training class index
+`i` (0-indexed) — it is **not** remapped to the original dataset label values
+the way the discrete output is. The volume is already resampled back into the
+original image's space, so probability volumes from separate `mist_predict`
+runs for the same patient are directly comparable voxel-for-voxel, which is
+what `mist_ensemble --input-type probabilities` relies on.
 
 ### Example
 
@@ -405,34 +440,55 @@ mist_predict --models-dir /path/to/models \
 
 ## Ensembling predictions from multiple models
 
-`mist_ensemble` combines discrete NIfTI predictions from two or more separately
-trained MIST models into a single consensus segmentation. This is useful when
-you have trained models with different loss functions, architectures, or random
-seeds and want to combine them without re-running inference.
+`mist_ensemble` combines predictions from two or more separately trained MIST
+models into a single consensus segmentation. This is useful when you have
+trained models with different loss functions, architectures, or random seeds
+and want to combine them without re-running inference. It supports two input
+types, selected via `--input-type`:
+
+- **`labels`** *(default)* — combines discrete, post-argmax NIfTI label maps
+  (e.g. the default output of `mist_predict`) via STAPLE or majority vote.
+- **`probabilities`** — combines continuous, pre-argmax softmax probability
+  volumes (written by `mist_predict --output-probs`) by averaging, then
+  argmaxing once at the end. This preserves each model's confidence
+  information, which majority vote/STAPLE discard by operating on already
+  discretized labels.
 
 !!! note
-    `mist_ensemble` operates on label maps (post-argmax NIfTI files), not on
-    softmax outputs. Each input directory should contain one `.nii.gz` file per
-    patient. All directories must contain the same set of patient files.
+    Each input directory should contain one `.nii.gz` file per patient. All
+    directories must contain the same set of patient files. For
+    `--input-type probabilities`, point `--predictions` at the
+    `probabilities/` subdirectories written by `mist_predict --output-probs`
+    — not the `discrete/` ones.
 
 The `mist_ensemble` command uses the following arguments:
 
 - `--predictions`: (**required**) Two or more directories containing NIfTI
   predictions, one file per patient named `<patient_id>.nii.gz`.
 - `--output`: (**required**) Directory where consensus predictions will be written.
-- `--ensemble-backend`: Algorithm used to combine label maps. *(default: `staple`)*
+- `--input-type`: Whether `--predictions` contains discrete label maps or
+  probability volumes. *(default: `labels`)*
+- `--config`: Path to a MIST `config.json`. **Required** when
+  `--input-type probabilities`; used to remap class indices back to the
+  original dataset labels. All ensembled models must share the same output
+  label space — `mist_ensemble` only sees this one config, not each model's own.
+- `--ensemble-backend`: Algorithm used to combine label maps
+  (`--input-type labels` only). *(default: `staple`)*
+- `--probability-ensemble-backend`: Algorithm used to combine probability
+  volumes (`--input-type probabilities` only). *(default: `mean`)*
 - `--num-workers-ensemble`: Number of parallel workers for ensembling. *(default: `1`)*
 
 ### Ensemble backends
 
-| Backend | Description |
-|---|---|
-| `staple` | STAPLE (Simultaneous Truth and Performance Level Estimation) — estimates each model's per-label sensitivity and specificity via EM to produce a principled consensus. Works for binary and multi-class label maps. |
-| `majority_vote` | Assigns each voxel the label that appears most frequently across all inputs. Faster and simpler than STAPLE; useful as a sanity-check baseline. Ties are broken by assigning label 0 (background). |
+| Backend | Input type | Description |
+|---|---|---|
+| `staple` | `labels` | STAPLE (Simultaneous Truth and Performance Level Estimation) — estimates each model's per-label sensitivity and specificity via EM to produce a principled consensus. Works for binary and multi-class label maps. |
+| `majority_vote` | `labels` | Assigns each voxel the label that appears most frequently across all inputs. Faster and simpler than STAPLE; useful as a sanity-check baseline. Ties are broken by assigning label 0 (background). |
+| `mean` | `probabilities` | Element-wise average of the per-class probability volumes, followed by a single argmax. |
 
 ### Example
 
-Combine predictions from three models trained with different loss functions.
+Combine label-map predictions from three models trained with different loss functions.
 
 ```console
 mist_ensemble --predictions /path/to/pred_dice \
@@ -441,6 +497,17 @@ mist_ensemble --predictions /path/to/pred_dice \
               --output /path/to/ensemble_output \
               --ensemble-backend staple \
               --num-workers-ensemble 8
+```
+
+Combine probability volumes from two separately trained models (each run with
+`mist_predict --output-probs`).
+
+```console
+mist_ensemble --predictions /path/to/model_a/probabilities \
+                            /path/to/model_b/probabilities \
+              --output /path/to/ensemble_output \
+              --input-type probabilities \
+              --config /path/to/model_a/config.json
 ```
 
 ## Postprocessing

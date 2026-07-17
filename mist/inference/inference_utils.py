@@ -140,6 +140,84 @@ def back_to_original_space(
     return prediction
 
 
+def probabilities_back_to_original_space(
+    raw_probabilities: npt.NDArray[Any],
+    original_ants_image: ants.core.ants_image.ANTsImage,
+    target_spacing: tuple[float, float, float],
+    foreground_bounding_box: dict[str, Any] | None,
+) -> ants.core.ants_image.ANTsImage:
+    """Place a per-class probability volume back into original image space.
+
+    Mirrors back_to_original_space, but restores a continuous, multi-channel
+    (C, D, H, W) probability volume (the pre-argmax softmax output) instead
+    of a single discrete label mask. Each channel is resampled independently
+    with continuous interpolation via preprocess.resample_image, rather than
+    the label-aware preprocess.resample_mask used for discrete masks, and the
+    restored channels are merged back into one multi-component image instead
+    of being collapsed with argmax.
+
+    Args:
+        raw_probabilities: The per-class probability volume to place back
+            into the original image space, of shape (C, D, H, W).
+        original_ants_image: The original ANTs image.
+        target_spacing: The spacing used for training. This can be found in
+            the MIST configuration JSON file.
+        foreground_bounding_box: The foreground bounding box. If we crop
+            images as part of preprocessing, we need to pad back to the
+            original size. See back_to_original_space for the expected keys.
+
+    Returns:
+        A multi-component ANTs image of shape (D, H, W, C), in the original
+        image's space, spacing, orientation, and header, with channels in
+        the same order as raw_probabilities.
+    """
+    # Enforce size for cropped images, mirroring back_to_original_space.
+    if foreground_bounding_box is not None:
+        new_size = [
+            foreground_bounding_box["x_end"] - foreground_bounding_box["x_start"] + 1,
+            foreground_bounding_box["y_end"] - foreground_bounding_box["y_start"] + 1,
+            foreground_bounding_box["z_end"] - foreground_bounding_box["z_start"] + 1,
+        ]
+    else:
+        new_size = original_ants_image.shape
+
+    restored_channels = []
+    for channel in raw_probabilities:
+        channel_image: ants.core.ants_image.ANTsImage = ants.from_numpy(
+            data=channel, spacing=target_spacing
+        )
+
+        # Reorient the channel to match the original image's orientation.
+        channel_image = ants.reorient_image2(
+            channel_image, ants.get_orientation(original_ants_image)
+        )
+        channel_image.set_direction(original_ants_image.direction)
+
+        # Resample to the original image's spacing using continuous
+        # interpolation.
+        channel_image = preprocess.resample_image(
+            channel_image,
+            target_spacing=original_ants_image.spacing,
+            new_size=np.array(new_size, dtype="int").tolist(),
+        )
+
+        # Appropriately pad back to original size if necessary.
+        if foreground_bounding_box is not None:
+            channel_image = decrop_from_fg(channel_image, foreground_bounding_box)
+
+        restored_channels.append(channel_image)
+
+    # Merge the restored channels into one multi-component image and copy
+    # the original image's header (spacing, origin, direction) onto it.
+    probabilities: ants.core.ants_image.ANTsImage = ants.merge_channels(
+        restored_channels
+    )
+    probabilities.set_spacing(original_ants_image.spacing)
+    probabilities.set_origin(original_ants_image.origin)
+    probabilities.set_direction(original_ants_image.direction)
+    return probabilities
+
+
 def load_test_time_models(
     models_dir: str,
     mist_config: dict,

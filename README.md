@@ -131,7 +131,7 @@ weighted by a scheduled alpha. Schedules: `constant`, `linear`, `cosine`.
 | `mist_preprocess` | Preprocess images into NumPy arrays |
 | `mist_train` | Train models |
 | `mist_predict` | Run inference on new data |
-| `mist_ensemble` | Combine predictions from multiple models via STAPLE or majority vote |
+| `mist_ensemble` | Combine predictions from multiple models via STAPLE, majority vote, or probability averaging |
 | `mist_evaluate` | Evaluate predictions against ground truth |
 | `mist_postprocess` | Apply postprocessing strategies |
 | `mist_rank` | Rank multiple evaluation result CSVs BraTS-style |
@@ -146,6 +146,11 @@ Full documentation, including configuration reference and advanced topics, is at
 
 ## What's New
 
+* July 2026 — **Probability-level ensembling** — `mist_predict --output-probs`
+  writes each model's final softmax probability volume alongside its discrete
+  prediction; `mist_ensemble --input-type probabilities` averages probability
+  volumes from separately trained models before a single argmax, preserving
+  confidence information that STAPLE/majority vote discard.
 * July 2026 — **Parallel ensembling** — `mist_ensemble` now accepts
   `--num-workers-ensemble` to combine predictions across patients in parallel
   worker processes.

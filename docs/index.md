@@ -52,6 +52,11 @@ pip install mist-medical
 
 ## What's New
 
+* July 2026 — **Probability-level ensembling** — `mist_predict --output-probs`
+  writes each model's final softmax probability volume alongside its discrete
+  prediction; `mist_ensemble --input-type probabilities` averages probability
+  volumes from separately trained models before a single argmax, preserving
+  confidence information that STAPLE/majority vote discard.
 * July 2026 — **Parallel ensembling** — `mist_ensemble` now accepts
   `--num-workers-ensemble` to combine predictions across patients in parallel
   worker processes.

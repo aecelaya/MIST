@@ -5,14 +5,21 @@ import concurrent.futures
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
 
+import ants
+import numpy as np
 import SimpleITK as sitk
 
 from mist.cli.args import ArgParser, positive_int
+from mist.inference import inference_utils
 from mist.inference.label_ensemblers.label_ensembler_registry import (
     get_label_ensembler,
     list_label_ensemblers,
 )
-from mist.utils import progress_bar
+from mist.inference.probability_ensemblers.probability_ensembler_registry import (
+    get_probability_ensembler,
+    list_probability_ensemblers,
+)
+from mist.utils import io, progress_bar
 from mist.utils.console import print_error, print_success
 
 
@@ -34,7 +41,10 @@ def _parse_ensemble_args(
         help=(
             "Two or more directories, each containing NIfTI predictions "
             "(one file per patient, named <patient_id>.nii.gz). All "
-            "directories must contain the same set of patient files."
+            "directories must contain the same set of patient files. For "
+            "--input-type probabilities, these should be the "
+            "'probabilities/' subdirectories written by "
+            "'mist_predict --output-probs'."
         ),
     )
     parser.arg(
@@ -44,11 +54,46 @@ def _parse_ensemble_args(
         help="Directory where the consensus predictions will be written.",
     )
     parser.arg(
+        "--input-type",
+        type=str,
+        choices=["labels", "probabilities"],
+        default="labels",
+        help=(
+            "Whether --predictions contains discrete label maps (combined "
+            "via --ensemble-backend, e.g. STAPLE or majority vote) or "
+            "continuous per-class probability volumes written by "
+            "'mist_predict --output-probs' (combined via "
+            "--probability-ensemble-backend, then argmaxed)."
+        ),
+    )
+    parser.arg(
+        "--config",
+        type=str,
+        default=None,
+        help=(
+            "Path to a MIST config.json. Required when --input-type is "
+            "'probabilities', and used to remap class indices back to the "
+            "original dataset labels. All ensembled models must share the "
+            "same output label space (mist_ensemble only sees one config, "
+            "not each model's own)."
+        ),
+    )
+    parser.arg(
         "--ensemble-backend",
         type=str,
         choices=list_label_ensemblers(),
         default="staple",
-        help="Algorithm used to combine label maps.",
+        help="Algorithm used to combine label maps (--input-type labels).",
+    )
+    parser.arg(
+        "--probability-ensemble-backend",
+        type=str,
+        choices=list_probability_ensemblers(),
+        default="mean",
+        help=(
+            "Algorithm used to combine probability volumes "
+            "(--input-type probabilities)."
+        ),
     )
     parser.arg(
         "--num-workers-ensemble",
@@ -56,7 +101,10 @@ def _parse_ensemble_args(
         default=1,
         help="Number of parallel workers for ensembling.",
     )
-    return parser.parse_args(argv)
+    ns = parser.parse_args(argv)
+    if ns.input_type == "probabilities" and ns.config is None:
+        parser.error("--config is required when --input-type is 'probabilities'.")
+    return ns
 
 
 def _validate_prediction_dirs(prediction_dirs: list[str]) -> list[Path]:
@@ -151,6 +199,78 @@ def _ensemble_single_patient(
         return f"Ensemble failed for {patient_id}: {str(e)}"
 
 
+def _ensemble_single_patient_probabilities(
+    patient_id: str,
+    dirs: list[Path],
+    probability_ensemble_backend: str,
+    output_dir: Path,
+    original_labels: list[int],
+    n_classes: int,
+) -> str | None:
+    """Ensemble one patient's probability volumes and write the consensus.
+
+    Rebuilds the ensembler from its registry name rather than accepting an
+    instance, so this function can be sent to a worker process.
+
+    Args:
+        patient_id: Patient identifier shared across all prediction dirs.
+        dirs: Resolved prediction directories, each containing multi-
+            component probability NIfTIs written by
+            'mist_predict --output-probs'.
+        probability_ensemble_backend: Name of the registered probability
+            ensembler to use.
+        output_dir: Directory where the consensus prediction is written.
+        original_labels: Dataset label values to remap the argmaxed class
+            indices to (e.g. [0, 1, 2, 4]).
+        n_classes: Expected number of channels in each probability volume.
+
+    Returns:
+        An error message string on failure, or None on success.
+    """
+    try:
+        ensembler = get_probability_ensembler(probability_ensemble_backend)
+        probability_images = [
+            ants.image_read(str(d / f"{patient_id}.nii.gz")) for d in dirs
+        ]
+        probability_volumes = [img.numpy() for img in probability_images]
+
+        reference_shape = probability_volumes[0].shape
+        for d, volume in zip(dirs, probability_volumes, strict=True):
+            if volume.shape != reference_shape:
+                return (
+                    f"Ensemble failed for {patient_id}: probability volume in "
+                    f"{d} has shape {volume.shape}, expected {reference_shape}."
+                )
+            if volume.shape[-1] != n_classes:
+                return (
+                    f"Ensemble failed for {patient_id}: probability volume in "
+                    f"{d} has {volume.shape[-1]} channels, but --config "
+                    f"expects {n_classes}."
+                )
+
+        consensus = ensembler(probability_volumes)
+        consensus_labels = np.argmax(consensus, axis=-1)
+        consensus_labels = inference_utils.remap_mask_labels(
+            consensus_labels, original_labels
+        )
+
+        # Build a fresh scalar image and copy the header (spacing, origin,
+        # direction) from one of the inputs; all inputs are already in a
+        # common (original image) space, courtesy of
+        # 'mist_predict --output-probs'.
+        consensus_image = ants.from_numpy(consensus_labels.astype(np.float32))
+        consensus_image.set_spacing(probability_images[0].spacing)
+        consensus_image.set_origin(probability_images[0].origin)
+        consensus_image.set_direction(probability_images[0].direction)
+        ants.image_write(
+            consensus_image.astype("uint8"),
+            str(output_dir / f"{patient_id}.nii.gz"),
+        )
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        return f"Ensemble failed for {patient_id}: {str(e)}"
+
+
 def run_ensemble(ns: argparse.Namespace) -> None:
     """Load inputs, run the ensemble, and write output predictions.
 
@@ -165,16 +285,25 @@ def run_ensemble(ns: argparse.Namespace) -> None:
 
     error_messages = []
 
+    if ns.input_type == "probabilities":
+        config = io.read_json_file(str(Path(ns.config).expanduser().resolve()))
+        n_classes = config["model"]["params"]["out_channels"]
+        original_labels = config["dataset_info"]["labels"]
+        ensemble_fn = _ensemble_single_patient_probabilities
+        ensemble_args = (ns.probability_ensemble_backend, output_dir, original_labels, n_classes)
+    else:
+        ensemble_fn = _ensemble_single_patient
+        ensemble_args = (ns.ensemble_backend, output_dir)
+
     with concurrent.futures.ProcessPoolExecutor(
         max_workers=ns.num_workers_ensemble
     ) as executor:
         future_to_patient = {
             executor.submit(
-                _ensemble_single_patient,
+                ensemble_fn,
                 patient_id,
                 dirs,
-                ns.ensemble_backend,
-                output_dir,
+                *ensemble_args,
             ): patient_id
             for patient_id in patient_ids
         }

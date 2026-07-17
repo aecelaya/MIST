@@ -40,6 +40,31 @@ def test_parse_inference_args_ok(tmp_path, monkeypatch):
     assert ns.output == str(out)
     assert ns.device == "cpu"
     assert ns.postprocess_strategy is None
+    assert ns.output_probs is False
+
+
+def test_parse_inference_args_output_probs_flag(tmp_path):
+    """Test _parse_inference_args sets output_probs when --output-probs is passed."""
+    models = tmp_path / "models"
+    cfg = tmp_path / "config.json"
+    paths = tmp_path / "paths.csv"
+    out = tmp_path / "out"
+
+    ns = entry._parse_inference_args(
+        [
+            "--models-dir",
+            str(models),
+            "--config",
+            str(cfg),
+            "--paths-csv",
+            str(paths),
+            "--output",
+            str(out),
+            "--output-probs",
+        ]
+    )
+
+    assert ns.output_probs is True
 
 
 def test_parse_inference_args_missing_required_raises(tmp_path):
@@ -223,6 +248,7 @@ def test_run_inference_calls_infer_with_expected_args(tmp_path, monkeypatch):
         output=str(out),
         device="cuda",  # Will fall back to CPU.
         postprocess_strategy=None,
+        output_probs=True,
     )
 
     entry.run_inference(ns)
@@ -238,6 +264,7 @@ def test_run_inference_calls_infer_with_expected_args(tmp_path, monkeypatch):
     assert captured["postprocessing_strategy_filepath"] is None
     assert isinstance(captured["device"], entry.torch.device)
     assert captured["device"].type in ("cpu", "cuda")  # Depending on env mock.
+    assert captured["output_probs"] is True
 
 
 def test_run_inference_with_postprocess_strategy(tmp_path, monkeypatch):
@@ -274,11 +301,13 @@ def test_run_inference_with_postprocess_strategy(tmp_path, monkeypatch):
         output=str(out),
         device="cpu",
         postprocess_strategy=str(pps),
+        output_probs=False,
     )
 
     entry.run_inference(ns)
 
     assert got["postprocessing_strategy_filepath"] == str(pps.resolve())
+    assert got["output_probs"] is False
 
 
 def test_inference_entry_integration(monkeypatch):
@@ -294,6 +323,7 @@ def test_inference_entry_integration(monkeypatch):
             output="/o",
             device="cpu",
             postprocess_strategy=None,
+            output_probs=False,
         )
 
     def _run(ns):

@@ -1,5 +1,8 @@
 """Tests for mist_ensemble CLI entrypoint."""
 
+import json
+
+import ants
 import numpy as np
 import pytest
 import SimpleITK as sitk
@@ -31,6 +34,41 @@ def _make_pred_dir(tmp_path, name: str, patient_ids: list[str], value: int = 1) 
         arr = np.full((4, 4, 4), value, dtype=np.uint8)
         _write_label_map(d / f"{pid}.nii.gz", arr)
     return str(d)
+
+
+def _write_probability_volume(
+    path, channel_values: list[float], shape: tuple[int, int, int] = (4, 4, 4)
+) -> None:
+    """Write a multi-component NIfTI with constant per-channel probabilities."""
+    channels = [
+        ants.from_numpy(np.full(shape, v, dtype=np.float32)) for v in channel_values
+    ]
+    merged = ants.merge_channels(channels)
+    ants.image_write(merged, str(path))
+
+
+def _make_prob_dir(
+    tmp_path, name: str, patient_channel_values: dict[str, list[float]]
+) -> str:
+    """Create a probability directory with one multi-component NIfTI per patient."""
+    d = tmp_path / name
+    d.mkdir()
+    for pid, values in patient_channel_values.items():
+        _write_probability_volume(d / f"{pid}.nii.gz", values)
+    return str(d)
+
+
+def _write_config(path, out_channels: int, labels: list[int]) -> None:
+    """Write a minimal MIST config.json with just the fields ensemble needs."""
+    path.write_text(
+        json.dumps(
+            {
+                "model": {"params": {"out_channels": out_channels}},
+                "dataset_info": {"labels": labels},
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +142,59 @@ def test_parse_ensemble_args_num_workers_custom(tmp_path):
         ]
     )
     assert ns.num_workers_ensemble == 4
+
+
+def test_parse_ensemble_args_input_type_default_labels(tmp_path):
+    """Default --input-type is 'labels', and --config is not required."""
+    d1 = _make_pred_dir(tmp_path, "p1", ["a"])
+    d2 = _make_pred_dir(tmp_path, "p2", ["a"])
+    ns = _parse_ensemble_args(
+        ["--predictions", d1, d2, "--output", str(tmp_path / "out")]
+    )
+    assert ns.input_type == "labels"
+    assert ns.config is None
+    assert ns.probability_ensemble_backend == "mean"
+
+
+def test_parse_ensemble_args_probabilities_requires_config(tmp_path):
+    """--input-type probabilities without --config should raise SystemExit."""
+    d1 = _make_pred_dir(tmp_path, "p1", ["a"])
+    d2 = _make_pred_dir(tmp_path, "p2", ["a"])
+    with pytest.raises(SystemExit):
+        _parse_ensemble_args(
+            [
+                "--predictions",
+                d1,
+                d2,
+                "--output",
+                str(tmp_path / "out"),
+                "--input-type",
+                "probabilities",
+            ]
+        )
+
+
+def test_parse_ensemble_args_probabilities_with_config_ok(tmp_path):
+    """--input-type probabilities with --config parses successfully."""
+    d1 = _make_pred_dir(tmp_path, "p1", ["a"])
+    d2 = _make_pred_dir(tmp_path, "p2", ["a"])
+    config_path = tmp_path / "config.json"
+    _write_config(config_path, out_channels=2, labels=[0, 1])
+    ns = _parse_ensemble_args(
+        [
+            "--predictions",
+            d1,
+            d2,
+            "--output",
+            str(tmp_path / "out"),
+            "--input-type",
+            "probabilities",
+            "--config",
+            str(config_path),
+        ]
+    )
+    assert ns.input_type == "probabilities"
+    assert ns.config == str(config_path)
 
 
 def test_parse_ensemble_args_num_workers_non_positive_raises(tmp_path):
@@ -309,6 +400,128 @@ def test_ensemble_entry_runs_without_error(tmp_path):
     )
 
     assert (tmp_path / "entry_out" / "p1.nii.gz").exists()
+
+
+# ---------------------------------------------------------------------------
+# run_ensemble probabilities-mode tests
+# ---------------------------------------------------------------------------
+
+
+def test_run_ensemble_probabilities_mode_produces_expected_labels(tmp_path):
+    """Probability-mode ensembling averages, argmaxes, and remaps labels."""
+    config_path = tmp_path / "config.json"
+    _write_config(config_path, out_channels=2, labels=[0, 2])
+
+    # Both directories favor class index 1 (mean: [0.25, 0.75] -> argmax 1),
+    # which should be remapped to original label value 2.
+    d1 = _make_prob_dir(tmp_path, "probs1", {"p1": [0.2, 0.8]})
+    d2 = _make_prob_dir(tmp_path, "probs2", {"p1": [0.3, 0.7]})
+    out = str(tmp_path / "out")
+
+    ns = _parse_ensemble_args(
+        [
+            "--predictions",
+            d1,
+            d2,
+            "--output",
+            out,
+            "--input-type",
+            "probabilities",
+            "--config",
+            str(config_path),
+        ]
+    )
+    run_ensemble(ns)
+
+    result = ants.image_read(str(tmp_path / "out" / "p1.nii.gz")).numpy()
+    assert np.all(result == 2)
+
+
+def test_run_ensemble_probabilities_mode_multiple_workers_produces_output(tmp_path):
+    """Probability-mode ensembling respects --num-workers-ensemble."""
+    config_path = tmp_path / "config.json"
+    _write_config(config_path, out_channels=2, labels=[0, 1])
+
+    pids = ["p1", "p2", "p3"]
+    d1 = _make_prob_dir(tmp_path, "probs1", {pid: [0.6, 0.4] for pid in pids})
+    d2 = _make_prob_dir(tmp_path, "probs2", {pid: [0.6, 0.4] for pid in pids})
+    out = str(tmp_path / "out")
+
+    ns = _parse_ensemble_args(
+        [
+            "--predictions",
+            d1,
+            d2,
+            "--output",
+            out,
+            "--input-type",
+            "probabilities",
+            "--config",
+            str(config_path),
+            "--num-workers-ensemble",
+            "2",
+        ]
+    )
+    run_ensemble(ns)
+
+    for pid in pids:
+        assert (tmp_path / "out" / f"{pid}.nii.gz").exists()
+
+
+def test_run_ensemble_probabilities_shape_mismatch_reported_not_raised(tmp_path):
+    """A shape mismatch between directories is reported per-patient, not fatal."""
+    config_path = tmp_path / "config.json"
+    _write_config(config_path, out_channels=3, labels=[0, 1, 2])
+
+    d1 = _make_prob_dir(tmp_path, "probs1", {"p1": [0.2, 0.3, 0.5]})
+    d2 = _make_prob_dir(tmp_path, "probs2", {"p1": [0.3, 0.7]})  # Only 2 channels.
+    out = str(tmp_path / "out")
+
+    ns = _parse_ensemble_args(
+        [
+            "--predictions",
+            d1,
+            d2,
+            "--output",
+            out,
+            "--input-type",
+            "probabilities",
+            "--config",
+            str(config_path),
+        ]
+    )
+    run_ensemble(ns)  # Should not raise.
+
+    assert not (tmp_path / "out" / "p1.nii.gz").exists()
+
+
+def test_run_ensemble_probabilities_channel_count_mismatch_with_config(tmp_path):
+    """A channel count that disagrees with --config's out_channels is reported."""
+    config_path = tmp_path / "config.json"
+    _write_config(config_path, out_channels=3, labels=[0, 1, 2])
+
+    # Both directories agree with each other (2 channels), but disagree with
+    # the config's out_channels=3.
+    d1 = _make_prob_dir(tmp_path, "probs1", {"p1": [0.6, 0.4]})
+    d2 = _make_prob_dir(tmp_path, "probs2", {"p1": [0.7, 0.3]})
+    out = str(tmp_path / "out")
+
+    ns = _parse_ensemble_args(
+        [
+            "--predictions",
+            d1,
+            d2,
+            "--output",
+            out,
+            "--input-type",
+            "probabilities",
+            "--config",
+            str(config_path),
+        ]
+    )
+    run_ensemble(ns)  # Should not raise.
+
+    assert not (tmp_path / "out" / "p1.nii.gz").exists()
 
 
 # ---------------------------------------------------------------------------

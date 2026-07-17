@@ -64,6 +64,17 @@ def _parse_inference_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Path to postprocessing strategy JSON file.",
     )
+    p.flag(
+        "--output-probs",
+        help=(
+            "Also write each prediction's final (post fold/TTA-ensemble, "
+            "pre-argmax) probability volume to '<output>/probabilities/'. "
+            "When set, the discrete prediction is written to "
+            "'<output>/discrete/' instead of directly under '<output>/'. "
+            "Use this to later combine probabilities across multiple models "
+            "with 'mist_ensemble --input-type probabilities'."
+        ),
+    )
     return p.parse_args(argv)
 
 
@@ -135,6 +146,7 @@ def run_inference(ns: argparse.Namespace) -> None:
             else None
         ),
         device=device,
+        output_probs=ns.output_probs,
     )
 
 

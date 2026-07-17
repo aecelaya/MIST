@@ -86,7 +86,8 @@ def predict_single_example(
     mist_configuration: dict[str, Any],
     predictor: Predictor,
     foreground_bounding_box: dict[str, int] | None = None,
-) -> ants.core.ants_image.ANTsImage:
+    output_probs: bool = False,
+) -> tuple[ants.core.ants_image.ANTsImage, ants.core.ants_image.ANTsImage | None]:
     """Predict on a single example using a Predictor instance.
 
     Args:
@@ -95,9 +96,15 @@ def predict_single_example(
         mist_configuration: Configuration dictionary with MIST parameters.
         predictor: A callable Predictor instance.
         foreground_bounding_box: Optional crop bounding box.
+        output_probs: If True, also restore the pre-argmax probability
+            volume to original image space and return it alongside the
+            discrete prediction.
 
     Returns:
-        ANTs image of the final prediction, in original spatial space.
+        A tuple of (discrete prediction, probability prediction), both ANTs
+        images in original spatial space. The probability prediction is a
+        multi-component image with one component per class, or None if
+        output_probs is False.
     """
     # Training vs original labels.
     n_classes = mist_configuration["model"]["params"]["out_channels"]
@@ -106,6 +113,14 @@ def predict_single_example(
 
     # Run prediction via Predictor (handles TTA + ensembling internally).
     prediction = predictor(preprocessed_image)
+
+    # Capture the pre-argmax probability volume before the channel dimension
+    # is collapsed, if requested.
+    probability_volume = (
+        prediction.squeeze(dim=ic.BATCH_AXIS).to(torch.float32).cpu().numpy()
+        if output_probs
+        else None
+    )
 
     # Convert to discrete labels, remove batch dimension, and move to CPU.
     prediction = torch.argmax(prediction, dim=ic.ARGMAX_AXIS)
@@ -117,6 +132,13 @@ def predict_single_example(
         # The prediction is already in the original image's voxel space, so
         # just copy the original header directly — no reorient or resample.
         prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # noqa: E501
+        if probability_volume is not None:
+            probability_prediction = ants.merge_channels([
+                original_ants_image.new_image_like(data=probability_volume[c])
+                for c in range(probability_volume.shape[0])
+            ])
+        else:
+            probability_prediction = None
     else:
         # Ensure bounding box is defined if cropping was used.
         if (
@@ -140,6 +162,18 @@ def predict_single_example(
             foreground_bounding_box=foreground_bounding_box,
         )
 
+        if probability_volume is not None:
+            probability_prediction = (
+                inference_utils.probabilities_back_to_original_space(
+                    raw_probabilities=probability_volume,
+                    original_ants_image=original_ants_image,
+                    target_spacing=prediction_spacing,
+                    foreground_bounding_box=foreground_bounding_box,
+                )
+            )
+        else:
+            probability_prediction = None
+
     # Remap labels to match original dataset.
     if training_labels != original_labels:
         prediction = inference_utils.remap_mask_labels(
@@ -148,7 +182,7 @@ def predict_single_example(
         prediction = (
             original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # noqa: E501
         )
-    return prediction.astype("uint8")
+    return prediction.astype("uint8"), probability_prediction
 
 
 def test_on_fold(
@@ -264,7 +298,7 @@ def test_on_fold(
                     foreground_bounding_box = None
 
                 # Perform prediction and restoration to original space.
-                prediction = predict_single_example(
+                prediction, _ = predict_single_example(
                     preprocessed_image=preprocessed_image,
                     original_ants_image=original_ants_image,
                     mist_configuration=config,
@@ -294,6 +328,7 @@ def infer_from_dataframe(
     models_directory: str,
     postprocessing_strategy_filepath: str | None = None,
     device: str | torch.device | None = None,
+    output_probs: bool = False,
 ) -> None:
     """Run test-time inference on a set of input images.
 
@@ -318,6 +353,17 @@ def infer_from_dataframe(
             containing postprocessing strategies. If provided, the strategies
             will be applied to the predictions.
         device: The device to use for inference. Default is "cuda".
+        output_probs: If True, also write each patient's final (post fold/TTA
+            ensemble, pre-argmax) probability volume, restored to original
+            image space, to "<output_directory>/probabilities/<id>.nii.gz".
+            When enabled, the discrete prediction is written to
+            "<output_directory>/discrete/<id>.nii.gz" instead of directly
+            under output_directory, so both outputs sit in parallel,
+            symmetric subdirectories. When output_probs is False (the
+            default), the discrete prediction is written directly to
+            "<output_directory>/<id>.nii.gz" as before. Used to later
+            combine probabilities across models with mist_ensemble's
+            "probabilities" input type.
 
     Returns:
         None. Saves all predictions to the specified output directory.
@@ -358,6 +404,19 @@ def infer_from_dataframe(
     # Create destination directory if it does not exist.
     Path(output_directory).mkdir(parents=True, exist_ok=True)
 
+    # If probability outputs are requested, write the discrete prediction and
+    # the probability volume to parallel "discrete/" and "probabilities/"
+    # subdirectories instead of directly under output_directory. Otherwise,
+    # keep writing the discrete prediction directly under output_directory,
+    # as before.
+    if output_probs:
+        discrete_output_directory = Path(output_directory) / "discrete"
+        probabilities_output_directory = Path(output_directory) / "probabilities"
+        discrete_output_directory.mkdir(parents=True, exist_ok=True)
+        probabilities_output_directory.mkdir(parents=True, exist_ok=True)
+    else:
+        discrete_output_directory = Path(output_directory)
+
     # Set up rich progress bar.
     error_messages = []
 
@@ -370,7 +429,7 @@ def infer_from_dataframe(
             patient = paths_dataframe.iloc[patient_index].to_dict()
             patient_id = patient["id"]
             prediction_filename = str(
-                Path(output_directory) / f"{patient_id}.nii.gz")
+                discrete_output_directory / f"{patient_id}.nii.gz")
             try:
                 # Validate the input patient data.
                 anchor_image, image_paths = inference_utils.validate_inference_images(
@@ -404,7 +463,7 @@ def infer_from_dataframe(
                 )
 
                 # Perform prediction and restoration to original space.
-                prediction = predict_single_example(
+                prediction, probability_prediction = predict_single_example(
                     preprocessed_image=preprocessed_image,
                     original_ants_image=anchor_image,
                     mist_configuration=mist_configuration,
@@ -414,6 +473,7 @@ def infer_from_dataframe(
                     foreground_bounding_box=(
                         preprocessed_example["fg_bbox"]  # type: ignore[index]
                     ),
+                    output_probs=output_probs,
                 )
 
                 # Apply postprocessing if a strategy is provided.
@@ -436,6 +496,11 @@ def infer_from_dataframe(
             else:
                 # Write prediction as .nii.gz file.
                 ants.image_write(prediction, prediction_filename)
+                if probability_prediction is not None:
+                    ants.image_write(
+                        probability_prediction,
+                        str(probabilities_output_directory / f"{patient_id}.nii.gz"),
+                    )
             finally:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()

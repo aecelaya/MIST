@@ -221,7 +221,7 @@ def fold_runner(mock_mist_config, monkeypatch, tmp_path):
     results_dir, numpy_dir = _prep_dirs(tmp_path)
 
     image_write = MagicMock()
-    predict_single = MagicMock(return_value=_DummyANTsImage())
+    predict_single = MagicMock(return_value=(_DummyANTsImage(), None))
     printed = []
     mock_read_json = MagicMock()
     mock_get_test_dataset = MagicMock(return_value=_DummyLoader(n=1))
@@ -315,7 +315,7 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
     models_dir = str(_ensure_dir(tmp_path / "models"))
 
     image_write = MagicMock()
-    predict_single = MagicMock(return_value=_DummyANTsImage())
+    predict_single = MagicMock(return_value=(_DummyANTsImage(), None))
     mock_validate = MagicMock(return_value=(_DummyANTsImage(), ["x"]))
     mock_preprocess = MagicMock(
         return_value={
@@ -366,7 +366,13 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
     )
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
 
-    def run(df=None, cfg=None, device="cpu", postprocessing_strategy_filepath=None):
+    def run(
+        df=None,
+        cfg=None,
+        device="cpu",
+        postprocessing_strategy_filepath=None,
+        output_probs=False,
+    ):
         df = df if df is not None else _df_single_case(tmp_path)
         cfg = cfg or copy.deepcopy(mock_mist_config)
         ir.infer_from_dataframe(
@@ -376,6 +382,7 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
             models_directory=models_dir,
             postprocessing_strategy_filepath=postprocessing_strategy_filepath,
             device=device,
+            output_probs=output_probs,
         )
 
     return SimpleNamespace(
@@ -417,7 +424,7 @@ def test_predict_single_example_no_remap_no_crop(
     pre_img = torch.randn(1, 1, 2, 2, 2)
     orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
 
-    out = ir.predict_single_example(
+    out, probs = ir.predict_single_example(
         preprocessed_image=pre_img,
         original_ants_image=orig_ants,
         mist_configuration=cfg,
@@ -434,6 +441,7 @@ def test_predict_single_example_no_remap_no_crop(
     assert isinstance(out, _DummyANTsImage)
     assert out.astype_arg == "uint8"
     assert out.numpy().dtype == np.uint8
+    assert probs is None
 
 
 @patch("mist.inference.inference_utils.remap_mask_labels")
@@ -468,7 +476,7 @@ def test_predict_single_example_with_crop_and_remap(
     pre_img = torch.randn(1, 1, 2, 2, 2)
     orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
 
-    out = ir.predict_single_example(
+    out, probs = ir.predict_single_example(
         preprocessed_image=pre_img,
         original_ants_image=orig_ants,
         mist_configuration=cfg,
@@ -489,6 +497,7 @@ def test_predict_single_example_with_crop_and_remap(
     assert orig_ants.new_like_last_data is not None
     np.testing.assert_array_equal(orig_ants.new_like_last_data, remapped)
     assert out.astype_arg == "uint8"
+    assert probs is None
 
 
 @patch("mist.inference.inference_utils.back_to_original_space")
@@ -517,7 +526,7 @@ def test_predict_single_example_skip_true_bypasses_spatial_restore(
     pre_img = torch.randn(1, 1, 2, 2, 2)
     orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
 
-    out = ir.predict_single_example(
+    out, probs = ir.predict_single_example(
         preprocessed_image=pre_img,
         original_ants_image=orig_ants,
         mist_configuration=cfg,
@@ -531,6 +540,117 @@ def test_predict_single_example_skip_true_bypasses_spatial_restore(
     # new_image_like must have been called to copy the original header.
     assert orig_ants.new_like_last_data is not None
     assert out.astype_arg == "uint8"
+    assert probs is None
+
+
+@patch("mist.inference.inference_utils.probabilities_back_to_original_space")
+@patch("mist.inference.inference_utils.back_to_original_space")
+def test_predict_single_example_output_probs_no_crop_no_skip(
+    mock_back_to_original_space,
+    mock_probs_back_to_original_space,
+    mock_mist_config,
+    monkeypatch,
+):
+    """output_probs=True also restores the pre-argmax probability volume."""
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["model"]["params"]["out_channels"] = 2
+    cfg["preprocessing"]["crop_to_foreground"] = False
+    cfg["dataset_info"]["labels"] = [0, 1]
+
+    monkeypatch.setattr(
+        ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False
+    )
+
+    mock_back_to_original_space.return_value = _DummyANTsImage(
+        np.ones((2, 2, 2), dtype=np.int64)
+    )
+    probs_sentinel = _DummyANTsImage()
+    mock_probs_back_to_original_space.return_value = probs_sentinel
+
+    pre_img = torch.randn(1, 1, 2, 2, 2)
+    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+
+    out, probs = ir.predict_single_example(
+        preprocessed_image=pre_img,
+        original_ants_image=orig_ants,
+        mist_configuration=cfg,
+        predictor=_predictor_logits_two_class,
+        foreground_bounding_box=None,
+        output_probs=True,
+    )
+
+    assert isinstance(out, _DummyANTsImage)
+    assert probs is probs_sentinel
+    call_kwargs = mock_probs_back_to_original_space.call_args.kwargs
+    assert call_kwargs["raw_probabilities"].shape == (2, 2, 2, 2)
+    assert call_kwargs["original_ants_image"] is orig_ants
+    assert call_kwargs["foreground_bounding_box"] is None
+
+
+def test_predict_single_example_output_probs_false_returns_none(
+    mock_mist_config, monkeypatch
+):
+    """output_probs=False (the default) always returns None for probs."""
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["model"]["params"]["out_channels"] = 2
+    cfg["preprocessing"]["crop_to_foreground"] = False
+    cfg["dataset_info"]["labels"] = [0, 1]
+
+    monkeypatch.setattr(
+        ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False
+    )
+    monkeypatch.setattr(
+        ir.inference_utils,
+        "back_to_original_space",
+        MagicMock(return_value=_DummyANTsImage(np.ones((2, 2, 2), dtype=np.int64))),
+    )
+
+    pre_img = torch.randn(1, 1, 2, 2, 2)
+    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+
+    _, probs = ir.predict_single_example(
+        preprocessed_image=pre_img,
+        original_ants_image=orig_ants,
+        mist_configuration=cfg,
+        predictor=_predictor_logits_two_class,
+        foreground_bounding_box=None,
+    )
+
+    assert probs is None
+
+
+def test_predict_single_example_skip_true_output_probs(mock_mist_config, monkeypatch):
+    """output_probs=True + skip=True merges per-channel headers directly."""
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["model"]["params"]["out_channels"] = 2
+    cfg["preprocessing"]["skip"] = True
+    cfg["preprocessing"]["crop_to_foreground"] = False
+    cfg["dataset_info"]["labels"] = [0, 1]
+
+    monkeypatch.setattr(
+        ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False
+    )
+
+    merge_channels_mock = MagicMock(return_value="merged_sentinel")
+    monkeypatch.setattr(ir.ants, "merge_channels", merge_channels_mock)
+
+    pre_img = torch.randn(1, 1, 2, 2, 2)
+    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+
+    _, probs = ir.predict_single_example(
+        preprocessed_image=pre_img,
+        original_ants_image=orig_ants,
+        mist_configuration=cfg,
+        predictor=_predictor_logits_two_class,
+        foreground_bounding_box=None,
+        output_probs=True,
+    )
+
+    assert probs == "merged_sentinel"
+    merge_channels_mock.assert_called_once()
+    channel_images = merge_channels_mock.call_args.args[0]
+    assert len(channel_images) == 2
+    assert all(isinstance(img, _DummyANTsImage) for img in channel_images)
 
 
 # ==================
@@ -686,6 +806,43 @@ def test_infer_from_dataframe_success_tta_disabled(infer_runner, mock_mist_confi
     infer_runner.image_write.assert_called_once()
 
 
+def test_infer_from_dataframe_output_probs_writes_probability_volume(
+    infer_runner, mock_mist_config
+):
+    """output_probs=True writes discrete/ and probabilities/ subdirectories."""
+    prob_image = _DummyANTsImage()
+    infer_runner.predict_single.return_value = (_DummyANTsImage(), prob_image)
+
+    infer_runner.run(cfg=copy.deepcopy(mock_mist_config), output_probs=True)
+
+    call_kwargs = infer_runner.predict_single.call_args.kwargs
+    assert call_kwargs["output_probs"] is True
+
+    assert infer_runner.image_write.call_count == 2
+    written_paths = [c.args[1] for c in infer_runner.image_write.call_args_list]
+    assert any(
+        p.endswith(os.path.join("out", "discrete", "p1.nii.gz")) for p in written_paths
+    )
+    assert any(
+        p.endswith(os.path.join("out", "probabilities", "p1.nii.gz"))
+        for p in written_paths
+    )
+    assert not any(p.endswith(os.path.join("out", "p1.nii.gz")) for p in written_paths)
+
+
+def test_infer_from_dataframe_output_probs_false_skips_second_write(
+    infer_runner, mock_mist_config
+):
+    """output_probs=False (default) writes the discrete prediction directly."""
+    infer_runner.run(cfg=copy.deepcopy(mock_mist_config))
+
+    call_kwargs = infer_runner.predict_single.call_args.kwargs
+    assert call_kwargs["output_probs"] is False
+    assert infer_runner.image_write.call_count == 1
+    out_path = infer_runner.image_write.call_args.args[1]
+    assert out_path.endswith(os.path.join("out", "p1.nii.gz"))
+
+
 def test_infer_from_dataframe_postprocess_applied_and_messages_printed(
     infer_runner, mock_mist_config, tmp_path
 ):
@@ -731,7 +888,7 @@ def test_infer_from_dataframe_logs_errors_and_continues_then_summarizes(
         ]
     )
     infer_runner.predict_single.side_effect = [
-        RuntimeError("boom"), _DummyANTsImage()]
+        RuntimeError("boom"), (_DummyANTsImage(), None)]
 
     infer_runner.run(df=df)
 

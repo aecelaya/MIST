@@ -131,6 +131,86 @@ def test_back_to_original_space(
     original_image.new_image_like.assert_called_once_with("mock_numpy_data")
 
 
+def test_probabilities_back_to_original_space_no_crop():
+    """Restoring probabilities without cropping preserves shape and header."""
+    shape = (10, 9, 8)
+    spacing = (1.0, 1.0, 1.0)
+    origin = (2.0, 3.0, 4.0)
+
+    original_image = _make_ants_image(
+        np.zeros(shape, dtype=np.float32), spacing=spacing, origin=origin
+    )
+
+    n_classes = 3
+    rng = np.random.default_rng(0)
+    raw_probabilities = rng.uniform(size=(n_classes, *shape)).astype(np.float32)
+
+    result = iu.probabilities_back_to_original_space(
+        raw_probabilities=raw_probabilities,
+        original_ants_image=original_image,
+        target_spacing=spacing,
+        foreground_bounding_box=None,
+    )
+
+    assert result.components == n_classes
+    assert result.numpy().shape == (*shape, n_classes)
+    assert result.spacing == original_image.spacing
+    assert result.origin == original_image.origin
+    assert np.allclose(result.direction, original_image.direction)
+
+    # With matching spacing/orientation and no cropping, resample_image
+    # samples onto the exact same grid, so values should be (near) unchanged.
+    restored = result.numpy()
+    for c in range(n_classes):
+        assert np.allclose(restored[..., c], raw_probabilities[c], atol=1e-3)
+
+
+def test_probabilities_back_to_original_space_with_crop():
+    """Restoring probabilities with a foreground bounding box pads correctly."""
+    og_shape = (10, 9, 8)
+    spacing = (1.0, 1.0, 1.0)
+
+    original_image = _make_ants_image(
+        np.zeros(og_shape, dtype=np.float32), spacing=spacing
+    )
+
+    bbox = {
+        "x_start": 2,
+        "x_end": 7,
+        "y_start": 1,
+        "y_end": 6,
+        "z_start": 0,
+        "z_end": 5,
+        "x_og_size": og_shape[0],
+        "y_og_size": og_shape[1],
+        "z_og_size": og_shape[2],
+    }
+    cropped_shape = (
+        bbox["x_end"] - bbox["x_start"] + 1,
+        bbox["y_end"] - bbox["y_start"] + 1,
+        bbox["z_end"] - bbox["z_start"] + 1,
+    )
+
+    n_classes = 2
+    rng = np.random.default_rng(1)
+    raw_probabilities = rng.uniform(size=(n_classes, *cropped_shape)).astype(np.float32)
+
+    result = iu.probabilities_back_to_original_space(
+        raw_probabilities=raw_probabilities,
+        original_ants_image=original_image,
+        target_spacing=spacing,
+        foreground_bounding_box=bbox,
+    )
+
+    assert result.components == n_classes
+    assert result.numpy().shape == (*og_shape, n_classes)
+
+    # A voxel well outside the bounding box should be zero-padded in every
+    # channel.
+    restored = result.numpy()
+    assert np.allclose(restored[og_shape[0] - 1, og_shape[1] - 1, og_shape[2] - 1, :], 0.0)
+
+
 class _DummyModel:
     """Minimal stub for a torch.nn.Module, supporting .to(...).eval()."""
 
