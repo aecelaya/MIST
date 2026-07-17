@@ -225,18 +225,14 @@ def _ensemble_single_patient_probabilities(
     Returns:
         An error message string on failure, or None on success.
     """
-    # Imported lazily: 'ants' pulls in torch/scikit-learn, which the default
-    # 'labels' mode (and 'mist_ensemble --help') has no need to import.
-    import ants
-
-    from mist.inference import inference_utils
-
     try:
         ensembler = get_probability_ensembler(probability_ensemble_backend)
         probability_images = [
-            ants.image_read(str(d / f"{patient_id}.nii.gz")) for d in dirs
+            sitk.ReadImage(str(d / f"{patient_id}.nii.gz")) for d in dirs
         ]
-        probability_volumes = [img.numpy() for img in probability_images]
+        probability_volumes = [
+            sitk.GetArrayFromImage(img) for img in probability_images
+        ]
 
         reference_shape = probability_volumes[0].shape
         for d, volume in zip(dirs, probability_volumes, strict=True):
@@ -253,23 +249,22 @@ def _ensemble_single_patient_probabilities(
                 )
 
         consensus = ensembler(probability_volumes)
-        consensus_labels = np.argmax(consensus, axis=-1)
-        consensus_labels = inference_utils.remap_mask_labels(
-            consensus_labels, original_labels
-        )
+        consensus_labels = np.argmax(consensus, axis=-1).astype(np.uint8)
 
-        # Build a fresh scalar image and copy the header (spacing, origin,
-        # direction) from one of the inputs; all inputs are already in a
-        # common (original image) space, courtesy of
-        # 'mist_predict --output-probs'.
-        consensus_image = ants.from_numpy(consensus_labels.astype(np.float32))
-        consensus_image.set_spacing(probability_images[0].spacing)
-        consensus_image.set_origin(probability_images[0].origin)
-        consensus_image.set_direction(probability_images[0].direction)
-        ants.image_write(
-            consensus_image.astype("uint8"),
-            str(output_dir / f"{patient_id}.nii.gz"),
-        )
+        # Remap class indices (0, 1, 2, ...) back to the original dataset
+        # label values (e.g. [0, 1, 2, 4]).
+        remapped_labels = np.zeros_like(consensus_labels)
+        for i, label in enumerate(original_labels):
+            remapped_labels[consensus_labels == i] = label
+
+        # Copy the header (spacing, origin, direction) from one of the
+        # inputs; all inputs are already in a common (original image) space,
+        # courtesy of 'mist_predict --output-probs'.
+        consensus_image = sitk.GetImageFromArray(remapped_labels)
+        consensus_image.SetSpacing(probability_images[0].GetSpacing())
+        consensus_image.SetOrigin(probability_images[0].GetOrigin())
+        consensus_image.SetDirection(probability_images[0].GetDirection())
+        sitk.WriteImage(consensus_image, str(output_dir / f"{patient_id}.nii.gz"))
         return None
     except Exception as e:  # pylint: disable=broad-except
         return f"Ensemble failed for {patient_id}: {str(e)}"
