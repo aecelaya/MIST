@@ -30,12 +30,8 @@ def two_runs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, object]:
     run_a = tmp_path_factory.mktemp("run_a")
     run_b = tmp_path_factory.mktemp("run_b")
 
-    outputs_a = harness.run_pipeline(
-        dataset.dataset_json, run_a / "results", run_a / "numpy"
-    )
-    outputs_b = harness.run_pipeline(
-        dataset.dataset_json, run_b / "results", run_b / "numpy"
-    )
+    outputs_a = harness.run_pipeline(dataset.dataset_json, run_a / "results", run_a / "numpy")
+    outputs_b = harness.run_pipeline(dataset.dataset_json, run_b / "results", run_b / "numpy")
 
     return {
         "golden": harness.collect_artifacts(outputs_a),
@@ -80,9 +76,7 @@ def test_selfdiff_is_exactly_zero(two_runs: dict[str, object]) -> None:
     assert report.identical, str(report)
 
 
-def test_differ_detects_axis_transpose(
-    two_runs: dict[str, object], tmp_path: Path
-) -> None:
+def test_differ_detects_axis_transpose(two_runs: dict[str, object], tmp_path: Path) -> None:
     """A transposed image array must be reported (the core silent-bug case)."""
     golden = dict(two_runs["golden"])
     candidate = dict(two_runs["candidate"])
@@ -96,16 +90,12 @@ def test_differ_detects_axis_transpose(
     np.save(corrupted, transposed)
     candidate[key] = corrupted
 
-    report = harness.diff_artifacts(
-        golden, candidate, replacements=two_runs["replacements"]
-    )
+    report = harness.diff_artifacts(golden, candidate, replacements=two_runs["replacements"])
     assert not report.identical
     assert any(key in d for d in report.differences), str(report)
 
 
-def test_differ_detects_label_corruption(
-    two_runs: dict[str, object], tmp_path: Path
-) -> None:
+def test_differ_detects_label_corruption(two_runs: dict[str, object], tmp_path: Path) -> None:
     """A single flipped label voxel must be reported (exact integer compare)."""
     golden = dict(two_runs["golden"])
     candidate = dict(two_runs["candidate"])
@@ -120,9 +110,7 @@ def test_differ_detects_label_corruption(
     np.save(corrupted, labels)
     candidate[key] = corrupted
 
-    report = harness.diff_artifacts(
-        golden, candidate, replacements=two_runs["replacements"]
-    )
+    report = harness.diff_artifacts(golden, candidate, replacements=two_runs["replacements"])
     assert not report.identical
     assert any(key in d for d in report.differences), str(report)
 

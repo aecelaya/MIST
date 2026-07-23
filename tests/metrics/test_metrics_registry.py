@@ -202,9 +202,7 @@ def test_lesion_wise_dice_min_volume_kwarg_forwarded(lesion_masks):
     metric = get_metric("lesion_wise_dice")
     # All GT lesions filtered AND prediction is empty → denominator=0 → best case.
     empty_pred = np.zeros_like(pred)
-    result = metric(
-        gt, empty_pred, spacing, min_lesion_volume=10000.0, dilation_iters=1
-    )
+    result = metric(gt, empty_pred, spacing, min_lesion_volume=10000.0, dilation_iters=1)
     assert result == metric.best
 
 
@@ -238,9 +236,7 @@ def test_lesion_wise_surf_dice_tolerance_kwarg_forwarded(lesion_masks):
     """tolerance kwarg is forwarded as surface_dice_tolerance_mm."""
     gt, pred, spacing = lesion_masks
     metric = get_metric("lesion_wise_surf_dice")
-    result_tight = metric(
-        gt, pred, spacing, min_lesion_volume=0.0, dilation_iters=1, tolerance=0.1
-    )
+    result_tight = metric(gt, pred, spacing, min_lesion_volume=0.0, dilation_iters=1, tolerance=0.1)
     result_loose = metric(
         gt, pred, spacing, min_lesion_volume=0.0, dilation_iters=1, tolerance=10.0
     )

@@ -517,9 +517,7 @@ class TestComputePairwiseSignificance:
         df_a = pd.DataFrame({"id": ids, "WT_dice": [0.9] * n})
         df_b = pd.DataFrame({"id": ids, "WT_dice": [0.6] * n})
         df_c = pd.DataFrame({"id": ids, "WT_dice": [0.3] * n})
-        result = compute_pairwise_significance(
-            [df_a, df_b, df_c], names=["a", "b", "c"]
-        )
+        result = compute_pairwise_significance([df_a, df_b, df_c], names=["a", "b", "c"])
         assert result.shape == (3, 3)
         assert all(np.isnan(result.loc[n, n]) for n in ["a", "b", "c"])
 

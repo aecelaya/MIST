@@ -200,9 +200,7 @@ def test_surface_distance_metrics(create_synthetic_masks):
     assert len(overlap) == 2
     assert all(0.0 <= val <= 1.0 for val in overlap)
 
-    surface_dice = metrics.compute_surface_dice_at_tolerance(
-        distances, tolerance_mm=2.0
-    )
+    surface_dice = metrics.compute_surface_dice_at_tolerance(distances, tolerance_mm=2.0)
     assert isinstance(surface_dice, float)
     assert 0.0 <= surface_dice <= 1.0
 
@@ -253,9 +251,7 @@ def test_surface_overlap_zero_when_disjoint():
     mask_pred[4:5, 4:5, 4:5] = True
     spacing = (1.0, 1.0, 1.0)
     distances = metrics.compute_surface_distances(mask_gt, mask_pred, spacing)
-    rel_gt, rel_pred = metrics.compute_surface_overlap_at_tolerance(
-        distances, tolerance_mm=0.1
-    )
+    rel_gt, rel_pred = metrics.compute_surface_overlap_at_tolerance(distances, tolerance_mm=0.1)
     assert rel_gt == 0.0
     assert rel_pred == 0.0
 
@@ -268,9 +264,7 @@ def test_surface_dice_zero_when_disjoint():
     mask_pred[4:5, 4:5, 4:5] = True
     spacing = (1.0, 1.0, 1.0)
     distances = metrics.compute_surface_distances(mask_gt, mask_pred, spacing)
-    surface_dice = metrics.compute_surface_dice_at_tolerance(
-        distances, tolerance_mm=0.1
-    )
+    surface_dice = metrics.compute_surface_dice_at_tolerance(distances, tolerance_mm=0.1)
     assert surface_dice == 0.0
 
 

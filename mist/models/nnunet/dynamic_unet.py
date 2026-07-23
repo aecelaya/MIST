@@ -92,8 +92,7 @@ class DynamicUNet(nn.Module):
                 0, num_upsample_layers - self.num_deep_supervision_heads - 1
             )
             self.deep_supervision_head_ids = [
-                id
-                for id in range(deep_supervision_head_id_start, num_upsample_layers - 1)
+                id for id in range(deep_supervision_head_id_start, num_upsample_layers - 1)
             ]
             self.deep_supervision_heads = self.get_deep_supervision_heads()
 
@@ -103,9 +102,7 @@ class DynamicUNet(nn.Module):
 
     def check_kernel_stride(self):
         """Check that the kernel size and stride are valid."""
-        error_message = (
-            "Length of kernel_size and strides should be the same, and no less than 3."
-        )
+        error_message = "Length of kernel_size and strides should be the same, and no less than 3."
         if len(self.kernel_size) != len(self.strides) or len(self.kernel_size) < 3:
             raise ValueError(error_message)
 
@@ -120,8 +117,7 @@ class DynamicUNet(nn.Module):
             if not isinstance(stride, int):
                 if len(stride) != 3:
                     raise ValueError(
-                        f"Length of stride in block {idx} should be 3 "
-                        "(one per spatial dimension)."
+                        f"Length of stride in block {idx} should be 3 (one per spatial dimension)."
                     )
 
     def check_deep_supervision_parameters(self):
@@ -129,8 +125,7 @@ class DynamicUNet(nn.Module):
         num_up_layers = len(self.strides) - 1
         if self.num_deep_supervision_heads >= num_up_layers:
             raise ValueError(
-                "num_deep_supervision_heads should be less than the number of "
-                "upsampling layers."
+                "num_deep_supervision_heads should be less than the number of upsampling layers."
             )
         if self.num_deep_supervision_heads < 1:
             raise ValueError("num_deep_supervision_heads should be larger than 0.")
@@ -138,9 +133,7 @@ class DynamicUNet(nn.Module):
     def check_filters(self):
         """Check that the number of filters is valid."""
         if len(self.filters) < len(self.strides):
-            raise ValueError(
-                "The length of filters should be no less than the length of strides."
-            )
+            raise ValueError("The length of filters should be no less than the length of strides.")
         else:
             self.filters = self.filters[: len(self.strides)]
 
@@ -180,11 +173,7 @@ class DynamicUNet(nn.Module):
         for i, (skip, decoder_block) in enumerate(zip(skips, self.decoder_layers, strict=False)):
             x = decoder_block(x, skip)
 
-            if (
-                self.use_deep_supervision
-                and self.training
-                and i in self.deep_supervision_head_ids
-            ):
+            if self.use_deep_supervision and self.training and i in self.deep_supervision_head_ids:
                 deep_supervision_head_inputs.append(x)  # pylint: disable=possibly-used-before-assignment  # noqa: E501
 
         # Reverse the deep supervision head inputs to match the order of the
@@ -193,9 +182,7 @@ class DynamicUNet(nn.Module):
         # input image.
         if self.use_deep_supervision and self.training:
             deep_supervision_head_inputs.reverse()
-            for i, deep_supervision_head_input in enumerate(
-                deep_supervision_head_inputs
-            ):
+            for i, deep_supervision_head_input in enumerate(deep_supervision_head_inputs):
                 deep_supervision_head_output = self.deep_supervision_heads[i](
                     deep_supervision_head_input
                 )
@@ -360,20 +347,13 @@ class DynamicUNet(nn.Module):
         outputs correspond to filters[1], filters[2], etc.
         """
         return nn.ModuleList(
-            [
-                self.get_output_block(i + 1)
-                for i in range(self.num_deep_supervision_heads)
-            ]
+            [self.get_output_block(i + 1) for i in range(self.num_deep_supervision_heads)]
         )
 
     @staticmethod
     def initialize_weights(module):
         """Initialize the weights of the UNet."""
         if isinstance(module, (nn.Conv3d, nn.ConvTranspose3d)):
-            module.weight = nn.init.kaiming_normal_(
-                module.weight, a=constants.NEGATIVE_SLOPE
-            )
+            module.weight = nn.init.kaiming_normal_(module.weight, a=constants.NEGATIVE_SLOPE)
             if module.bias is not None:
-                module.bias = nn.init.constant_(
-                    module.bias, constants.INITIAL_BIAS_VALUE
-                )
+                module.bias = nn.init.constant_(module.bias, constants.INITIAL_BIAS_VALUE)

@@ -39,9 +39,7 @@ class DeepSupervisionLoss(nn.Module):
         self.loss_fn = loss_fn
         self.scaling_fn = scaling_fn or (lambda k: 0.5**k)
 
-    def apply_loss(
-        self, y_true: torch.Tensor, y_pred: torch.Tensor, **kwargs: Any
-    ) -> torch.Tensor:
+    def apply_loss(self, y_true: torch.Tensor, y_pred: torch.Tensor, **kwargs: Any) -> torch.Tensor:
         """Applies the loss, upsampling y_pred via trilinear interpolation.
 
         Args:
@@ -61,9 +59,7 @@ class DeepSupervisionLoss(nn.Module):
         # 2. Check if prediction needs upsampling.
         # y_pred is (batch, channel, height, width, depth).
         if y_pred.shape[2:] != target_size:
-            y_pred = F.interpolate(
-                y_pred, size=target_size, mode="trilinear", align_corners=False
-            )
+            y_pred = F.interpolate(y_pred, size=target_size, mode="trilinear", align_corners=False)
 
         # 3. Compute loss.
         # y_true and kwargs (like dtm) are used at full resolution.

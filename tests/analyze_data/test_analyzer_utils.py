@@ -213,9 +213,7 @@ class TestGetFilesDF:
         assert any("image_2" in m for m in patient_msgs)
         assert any("image_3" in m for m in patient_msgs)
 
-    def test_absent_segmentation_file_emits_warning(
-        self, monkeypatch, tmp_path: Path, caplog
-    ):
+    def test_absent_segmentation_file_emits_warning(self, monkeypatch, tmp_path: Path, caplog):
         """A patient missing a mask file produces a warning in train mode."""
         base = tmp_path / "dataset"
         ds_info = _make_dataset_info(base)
@@ -611,9 +609,7 @@ class TestGetBestPatchSize:
     # Fixture: pin the voxel budget to 128^3 so tests are GPU-independent.
     @pytest.fixture(autouse=True)
     def pin_budget(self, monkeypatch):
-        monkeypatch.setattr(
-            au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 128**3
-        )
+        monkeypatch.setattr(au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 128**3)
 
     # --- 3D isotropic mode ---
 
@@ -705,9 +701,7 @@ class TestGetBestPatchSize:
         fixes the decoder skip-connection mismatch.
         """
         # budget = 18 * 320^2 → lr_raw = 18 exactly.
-        monkeypatch.setattr(
-            au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 18 * 320**2
-        )
+        monkeypatch.setattr(au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 18 * 320**2)
         result = au.get_best_patch_size([320, 320, 20], [0.625, 0.625, 3.6])
         # z must be snapped from 18 → 20 (divisible by 4, ≤ median_lr=20).
         assert result[2] == 20
@@ -720,9 +714,7 @@ class TestGetBestPatchSize:
         median_lr=19, z_divisor=4.  Snapping 18 up → 20 > 19, so we snap
         down to 16 instead.
         """
-        monkeypatch.setattr(
-            au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 18 * 320**2
-        )
+        monkeypatch.setattr(au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 18 * 320**2)
         result = au.get_best_patch_size([320, 320, 19], [0.625, 0.625, 3.6])
         # snapped_up=20 > median_lr=19 → snapped_down=16.
         assert result[2] == 16
@@ -734,9 +726,7 @@ class TestGetBestPatchSize:
         low-res axis is exactly divisible by the cumulative nnUNet z-stride.
         """
         # budget = 18 * 320^2 triggers the prostate-like regime.
-        monkeypatch.setattr(
-            au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 18 * 320**2
-        )
+        monkeypatch.setattr(au, "_get_voxel_budget", lambda batch_size_per_gpu=2: 18 * 320**2)
         scenarios = [
             # (median, spacing)
             ([320, 320, 20], [0.625, 0.625, 3.6]),  # prostate
@@ -772,12 +762,8 @@ class TestGetBestPatchSize:
             "_get_voxel_budget",
             lambda batch_size_per_gpu=2: 128**3 // batch_size_per_gpu * 2,
         )
-        result_bs2 = au.get_best_patch_size(
-            [512, 512, 512], [1.0, 1.0, 1.0], batch_size_per_gpu=2
-        )
-        result_bs4 = au.get_best_patch_size(
-            [512, 512, 512], [1.0, 1.0, 1.0], batch_size_per_gpu=4
-        )
+        result_bs2 = au.get_best_patch_size([512, 512, 512], [1.0, 1.0, 1.0], batch_size_per_gpu=2)
+        result_bs4 = au.get_best_patch_size([512, 512, 512], [1.0, 1.0, 1.0], batch_size_per_gpu=4)
         # Smaller budget → smaller or equal patch per axis.
         for a, b in zip(result_bs4, result_bs2):
             assert a <= b
@@ -1121,9 +1107,7 @@ class TestGetBestPatchSizeInvariants:
         else:
             in_plane = [0, 1, 2]
         for i in in_plane:
-            assert patch_size[i] >= 32, (
-                f"In-plane axis {i}: patch={patch_size} has dim < 32"
-            )
+            assert patch_size[i] >= 32, f"In-plane axis {i}: patch={patch_size} has dim < 32"
 
     @pytest.mark.parametrize(
         "median, spacing, budget",
@@ -1240,9 +1224,7 @@ class TestGetBestPatchSizeQuasi2D:
     def test_larger_batch_size_gives_smaller_patch(self, batch_size, expected_ordering):
         """Budget scales inversely with batch_size so patch volume shrinks."""
         with _patch_snap_identity():
-            patch_b2 = au.get_best_patch_size(
-                [300, 300, 40], [0.8, 0.8, 4.0], batch_size_per_gpu=2
-            )
+            patch_b2 = au.get_best_patch_size([300, 300, 40], [0.8, 0.8, 4.0], batch_size_per_gpu=2)
             patch_bx = au.get_best_patch_size(
                 [300, 300, 40], [0.8, 0.8, 4.0], batch_size_per_gpu=batch_size
             )

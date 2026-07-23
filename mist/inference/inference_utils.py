@@ -103,9 +103,7 @@ def back_to_original_space(
     )
 
     # Reorient prediction.
-    prediction = ants.reorient_image2(
-        prediction, ants.get_orientation(original_ants_image)
-    )
+    prediction = ants.reorient_image2(prediction, ants.get_orientation(original_ants_image))
     prediction.set_direction(original_ants_image.direction)
 
     # Enforce size for cropped images.
@@ -209,9 +207,7 @@ def probabilities_back_to_original_space(
 
     # Merge the restored channels into one multi-component image and copy
     # the original image's header (spacing, origin, direction) onto it.
-    probabilities: ants.core.ants_image.ANTsImage = ants.merge_channels(
-        restored_channels
-    )
+    probabilities: ants.core.ants_image.ANTsImage = ants.merge_channels(restored_channels)
     probabilities.set_spacing(original_ants_image.spacing)
     probabilities.set_origin(original_ants_image.origin)
     probabilities.set_direction(original_ants_image.direction)
@@ -259,9 +255,7 @@ def load_test_time_models(
 
     # Raise an error if no model files are found.
     if not pt_files:
-        raise ValueError(
-            f"No model checkpoints found in {models_path}, (expected fold_*.pt)"
-        )
+        raise ValueError(f"No model checkpoints found in {models_path}, (expected fold_*.pt)")
 
     models = []
     for model_path in pt_files:
@@ -317,9 +311,7 @@ def validate_inference_images(
     if "id" not in patient_dict:
         raise ValueError("Patient dictionary must contain an 'id' field.")
 
-    image_paths = [
-        v for k, v in patient_dict.items() if k not in ic.PATIENT_DF_IGNORED_COLUMNS
-    ]
+    image_paths = [v for k, v in patient_dict.items() if k not in ic.PATIENT_DF_IGNORED_COLUMNS]
 
     if len(image_paths) == 0:
         raise ValueError(f"No image paths found for patient {patient_dict['id']}.")

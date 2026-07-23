@@ -47,9 +47,7 @@ def test_parse_preprocess_args_keeps_explicit_numpy(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     results = tmp_path / "res"
     numpy_dir = tmp_path / "custom_numpy"
-    ns = entry._parse_preprocess_args(
-        ["--results", str(results), "--numpy", str(numpy_dir)]
-    )
+    ns = entry._parse_preprocess_args(["--results", str(results), "--numpy", str(numpy_dir)])
     assert Path(ns.numpy) == numpy_dir.resolve()
 
 
@@ -139,9 +137,7 @@ def test_preprocess_entry_integration_parsing_and_run(tmp_path, monkeypatch):
         _fake_preprocess_dataset,
         raising=True,
     )
-    monkeypatch.setattr(
-        entry, "_prepare_preprocess_dirs", _wrapped_prepare, raising=True
-    )
+    monkeypatch.setattr(entry, "_prepare_preprocess_dirs", _wrapped_prepare, raising=True)
 
     entry.preprocess_entry(argv)
 
@@ -158,9 +154,7 @@ def test_preprocess_entry_integration_parsing_and_run(tmp_path, monkeypatch):
     assert Path(ns.numpy).exists()
 
 
-def test_preprocess_entry_blocks_when_numpy_nonempty_without_overwrite(
-    tmp_path, monkeypatch
-):
+def test_preprocess_entry_blocks_when_numpy_nonempty_without_overwrite(tmp_path, monkeypatch):
     """Raises if default ./numpy contains files and --overwrite not set."""
     monkeypatch.chdir(tmp_path)
     results = _mk_results_with_required_artifacts(tmp_path)
@@ -171,9 +165,7 @@ def test_preprocess_entry_blocks_when_numpy_nonempty_without_overwrite(
     _touch(default_numpy / "existing.npy", "x")
 
     # Keep preprocess from actually running if our guard failed.
-    monkeypatch.setattr(
-        entry.preprocess, "preprocess_dataset", lambda *_: _, raising=True
-    )
+    monkeypatch.setattr(entry.preprocess, "preprocess_dataset", lambda *_: _, raising=True)
 
     argv = ["--results", str(results)]
     with pytest.raises(FileExistsError):
@@ -186,9 +178,7 @@ def test_preprocess_entry_raises_when_analyze_artifacts_missing(tmp_path, monkey
     results = tmp_path / "results"
     results.mkdir(parents=True, exist_ok=True)  # Missing the required files.
 
-    monkeypatch.setattr(
-        entry.preprocess, "preprocess_dataset", lambda *_: _, raising=True
-    )
+    monkeypatch.setattr(entry.preprocess, "preprocess_dataset", lambda *_: _, raising=True)
 
     argv = ["--results", str(results)]
     with pytest.raises(FileNotFoundError):

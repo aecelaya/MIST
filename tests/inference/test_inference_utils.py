@@ -170,9 +170,7 @@ def test_probabilities_back_to_original_space_with_crop():
     og_shape = (10, 9, 8)
     spacing = (1.0, 1.0, 1.0)
 
-    original_image = _make_ants_image(
-        np.zeros(og_shape, dtype=np.float32), spacing=spacing
-    )
+    original_image = _make_ants_image(np.zeros(og_shape, dtype=np.float32), spacing=spacing)
 
     bbox = {
         "x_start": 2,
@@ -231,9 +229,7 @@ def test_load_test_time_models_missing_dir(tmp_path: Path, mock_mist_config):
     """Raise FileNotFoundError when models_dir is missing."""
     missing_dir = tmp_path / "nope"
     with pytest.raises(FileNotFoundError):
-        iu.load_test_time_models(
-            str(missing_dir), mist_config=mock_mist_config, device="cpu"
-        )
+        iu.load_test_time_models(str(missing_dir), mist_config=mock_mist_config, device="cpu")
 
 
 def test_load_test_time_models_no_checkpoints(tmp_path: Path, mock_mist_config):
@@ -241,9 +237,7 @@ def test_load_test_time_models_no_checkpoints(tmp_path: Path, mock_mist_config):
     models_dir = tmp_path / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
     with pytest.raises(ValueError, match="No model checkpoints"):
-        iu.load_test_time_models(
-            str(models_dir), mist_config=mock_mist_config, device="cpu"
-        )
+        iu.load_test_time_models(str(models_dir), mist_config=mock_mist_config, device="cpu")
 
 
 @patch("mist.models.model_loader.load_model_from_config")

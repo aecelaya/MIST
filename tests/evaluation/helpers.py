@@ -80,7 +80,4 @@ def make_eval_config(classes=None) -> dict:
     """
     if classes is None:
         classes = {"tumor": [1]}
-    return {
-        name: {"labels": labels, "metrics": {"dice": {}}}
-        for name, labels in classes.items()
-    }
+    return {name: {"labels": labels, "metrics": {"dice": {}}} for name, labels in classes.items()}

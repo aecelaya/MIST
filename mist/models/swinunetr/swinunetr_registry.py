@@ -34,8 +34,7 @@ def create_swinunetr(variant: str, **kwargs) -> MistSwinUNETR:
     variant = variant.lower()
     if variant not in feature_size_map:
         raise ValueError(
-            f"Unknown SwinUNETR variant: '{variant}'. "
-            f"Choose from: {list(feature_size_map)}."
+            f"Unknown SwinUNETR variant: '{variant}'. Choose from: {list(feature_size_map)}."
         )
 
     return MistSwinUNETR(

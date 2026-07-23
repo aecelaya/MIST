@@ -117,9 +117,7 @@ def _validate_eval_args(ns: argparse.Namespace) -> None:
     has_paths = ns.paths_csv is not None
     has_config = ns.eval_config is not None
     if has_paths != has_config:
-        raise ValueError(
-            "--paths-csv and --eval-config must both be provided together."
-        )
+        raise ValueError("--paths-csv and --eval-config must both be provided together.")
 
 
 def _build_eval_filepaths_df(
@@ -144,13 +142,9 @@ def _build_eval_filepaths_df(
     df = pd.read_csv(paths_csv)
     missing = [c for c in ("id", "mask") if c not in df.columns]
     if missing:
-        raise ValueError(
-            f"paths-csv is missing required column(s): {', '.join(missing)}"
-        )
+        raise ValueError(f"paths-csv is missing required column(s): {', '.join(missing)}")
     df = df[["id", "mask"]].copy()
-    df["prediction"] = df["id"].apply(
-        lambda pid: str(predictions_dir / f"{pid}.nii.gz")
-    )
+    df["prediction"] = df["id"].apply(lambda pid: str(predictions_dir / f"{pid}.nii.gz"))
     return df
 
 

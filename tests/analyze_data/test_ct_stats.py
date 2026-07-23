@@ -127,10 +127,7 @@ class TestPercentileFromHistogram:
         result = _percentile_from_histogram(
             hist, bin_edges, constants.CT_GLOBAL_CLIP_MIN_PERCENTILE
         )
-        assert (
-            abs(result - np.percentile(data, constants.CT_GLOBAL_CLIP_MIN_PERCENTILE))
-            <= 2.0
-        )
+        assert abs(result - np.percentile(data, constants.CT_GLOBAL_CLIP_MIN_PERCENTILE)) <= 2.0
 
     def test_high_percentile_accuracy(self):
         """99.5th percentile estimate is within 2 HU of the exact value."""
@@ -139,10 +136,7 @@ class TestPercentileFromHistogram:
         result = _percentile_from_histogram(
             hist, bin_edges, constants.CT_GLOBAL_CLIP_MAX_PERCENTILE
         )
-        assert (
-            abs(result - np.percentile(data, constants.CT_GLOBAL_CLIP_MAX_PERCENTILE))
-            <= 2.0
-        )
+        assert abs(result - np.percentile(data, constants.CT_GLOBAL_CLIP_MAX_PERCENTILE)) <= 2.0
 
     def test_empty_histogram_returns_zero(self):
         """An all-zero histogram returns 0.0."""

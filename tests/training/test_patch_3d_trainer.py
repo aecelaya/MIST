@@ -340,8 +340,7 @@ def test_training_step_parameters_updated_after_step(tmp_pipeline, mist_args):
 
     params_after = list(model.parameters())
     assert any(
-        not torch.equal(before, after)
-        for before, after in zip(params_before, params_after)
+        not torch.equal(before, after) for before, after in zip(params_before, params_after)
     ), "Model parameters should change after a training step"
 
 

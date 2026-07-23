@@ -28,8 +28,7 @@ def _parse_ensemble_args(
     parser = ArgParser(
         formatter_class=ArgumentDefaultsHelpFormatter,
         description=(
-            "Combine predictions from multiple MIST models into a single "
-            "consensus segmentation."
+            "Combine predictions from multiple MIST models into a single consensus segmentation."
         ),
     )
     parser.arg(
@@ -88,10 +87,7 @@ def _parse_ensemble_args(
         type=str,
         choices=list_probability_ensemblers(),
         default="mean",
-        help=(
-            "Algorithm used to combine probability volumes "
-            "(--input-type probabilities)."
-        ),
+        help=("Algorithm used to combine probability volumes (--input-type probabilities)."),
     )
     parser.arg(
         "--num-workers-ensemble",
@@ -156,8 +152,7 @@ def _get_patient_ids(dirs: list[Path]) -> list[str]:
             if extra:
                 msg_parts.append(f"extra in {d}: {sorted(extra)}")
             raise ValueError(
-                "Patient IDs do not match across prediction directories. "
-                + "; ".join(msg_parts)
+                "Patient IDs do not match across prediction directories. " + "; ".join(msg_parts)
             )
     return sorted(reference_ids)
 
@@ -184,9 +179,7 @@ def _ensemble_single_patient(
     """
     try:
         ensembler = get_label_ensembler(ensemble_backend)
-        label_maps = [
-            sitk.ReadImage(str(d / f"{patient_id}.nii.gz")) for d in dirs
-        ]
+        label_maps = [sitk.ReadImage(str(d / f"{patient_id}.nii.gz")) for d in dirs]
         consensus = ensembler(label_maps)
         sitk.WriteImage(
             consensus,
@@ -227,12 +220,8 @@ def _ensemble_single_patient_probabilities(
     """
     try:
         ensembler = get_probability_ensembler(probability_ensemble_backend)
-        probability_images = [
-            sitk.ReadImage(str(d / f"{patient_id}.nii.gz")) for d in dirs
-        ]
-        probability_volumes = [
-            sitk.GetArrayFromImage(img) for img in probability_images
-        ]
+        probability_images = [sitk.ReadImage(str(d / f"{patient_id}.nii.gz")) for d in dirs]
+        probability_volumes = [sitk.GetArrayFromImage(img) for img in probability_images]
 
         reference_shape = probability_volumes[0].shape
         for d, volume in zip(dirs, probability_volumes, strict=True):
@@ -294,9 +283,7 @@ def run_ensemble(ns: argparse.Namespace) -> None:
         ensemble_fn = _ensemble_single_patient
         ensemble_args = (ns.ensemble_backend, output_dir)
 
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=ns.num_workers_ensemble
-    ) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=ns.num_workers_ensemble) as executor:
         future_to_patient = {
             executor.submit(
                 ensemble_fn,

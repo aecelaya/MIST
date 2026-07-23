@@ -217,9 +217,7 @@ def make_onehot(
     mask_npy = mask_ants.numpy()
     masks_sitk = []
     for current_label in labels_list:
-        sitk_label_i = sitk.GetImageFromArray(
-            (mask_npy == current_label).T.astype(np.float32)
-        )
+        sitk_label_i = sitk.GetImageFromArray((mask_npy == current_label).T.astype(np.float32))
         sitk_label_i.SetSpacing(spacing)
         sitk_label_i.SetOrigin(origin)
         sitk_label_i.SetDirection(direction)

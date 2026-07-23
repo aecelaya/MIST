@@ -405,9 +405,7 @@ class TestBuildImageStatistics:
 
     def test_resampled_median_comes_from_config(self):
         """resampled_median is taken directly from config, not recomputed."""
-        result = ddu.build_image_statistics(
-            _make_raw_stats(), _make_config([32, 64, 48])
-        )
+        result = ddu.build_image_statistics(_make_raw_stats(), _make_config([32, 64, 48]))
         assert result["dimensions"]["resampled_median"] == [32, 64, 48]
 
     def test_empty_channel_is_skipped(self):
@@ -527,9 +525,7 @@ class TestBuildLabelStatistics:
         raw["total_fg_voxels"] = [1000, 1000]
         raw["label_voxel_counts"] = {1: [900, 900], 2: [10, 10]}
         raw["label_presence"] = {1: [1, 1], 2: [1, 1]}
-        ds_info = _make_dataset_info(
-            labels=(0, 1, 2), final_classes={"a": [1], "b": [2]}
-        )
+        ds_info = _make_dataset_info(labels=(0, 1, 2), final_classes={"a": [1], "b": [2]})
         result = ddu.build_label_statistics(raw, ds_info)
         ci = result["class_imbalance"]
         assert ci["dominant_label"] == 1
@@ -551,9 +547,7 @@ class TestBuildLabelStatistics:
         raw["total_fg_voxels"] = [1000, 1000]
         raw["label_voxel_counts"] = {1: [300, 300], 2: [100, 100]}
         raw["label_presence"] = {1: [1, 1], 2: [1, 1]}
-        ds_info = _make_dataset_info(
-            labels=(0, 1, 2), final_classes={"combined": [1, 2]}
-        )
+        ds_info = _make_dataset_info(labels=(0, 1, 2), final_classes={"combined": [1, 2]})
         result = ddu.build_label_statistics(raw, ds_info)
         # Combined mean = (300+100) / 1000 * 100 = 40%
         key = "mean_volume_fraction_of_foreground_pct"
@@ -697,9 +691,7 @@ class TestGenerateObservations:
 
     def test_isotropic_no_obs(self):
         """is_anisotropic = False → no anisotropy observation."""
-        obs = ddu.generate_observations(
-            _base_image_stats(), _base_label_stats(), _base_summary()
-        )
+        obs = ddu.generate_observations(_base_image_stats(), _base_label_stats(), _base_summary())
         assert not any("Anisotropic" in o for o in obs)
 
     # --- sparse images ---
@@ -722,9 +714,7 @@ class TestGenerateObservations:
 
     def test_high_foreground_density_no_obs(self):
         """foreground_fraction >= 0.2 → no foreground density observation."""
-        obs = ddu.generate_observations(
-            _base_image_stats(), _base_label_stats(), _base_summary()
-        )
+        obs = ddu.generate_observations(_base_image_stats(), _base_label_stats(), _base_summary())
         assert not any("foreground density" in o for o in obs)
 
     # --- CT modality ---
@@ -733,16 +723,12 @@ class TestGenerateObservations:
         """CT modality → HU range observation for each channel."""
         summary = _base_summary()
         summary["modality"] = "ct"
-        obs = ddu.generate_observations(
-            _base_image_stats(), _base_label_stats(), summary
-        )
+        obs = ddu.generate_observations(_base_image_stats(), _base_label_stats(), summary)
         assert any("HU" in o and "t1" in o for o in obs)
 
     def test_mr_modality_no_hu_obs(self):
         """Non-CT modality → no HU observation."""
-        obs = ddu.generate_observations(
-            _base_image_stats(), _base_label_stats(), _base_summary()
-        )
+        obs = ddu.generate_observations(_base_image_stats(), _base_label_stats(), _base_summary())
         assert not any("HU" in o for o in obs)
 
     # --- class imbalance ---
@@ -763,9 +749,7 @@ class TestGenerateObservations:
 
     def test_balanced_no_imbalance_obs(self):
         """Ratio <= 3 → no imbalance observation."""
-        obs = ddu.generate_observations(
-            _base_image_stats(), _base_label_stats(), _base_summary()
-        )
+        obs = ddu.generate_observations(_base_image_stats(), _base_label_stats(), _base_summary())
         assert not any("imbalance" in o.lower() for o in obs)
 
     def test_no_minority_label_no_obs(self):
@@ -805,9 +789,7 @@ class TestGenerateObservations:
 
     def test_high_presence_no_obs(self):
         """Label with presence >= 50% and non-tiny size → no presence obs."""
-        obs = ddu.generate_observations(
-            _base_image_stats(), _base_label_stats(), _base_summary()
-        )
+        obs = ddu.generate_observations(_base_image_stats(), _base_label_stats(), _base_summary())
         assert not any("absent in" in o for o in obs)
 
     # --- image volume fraction ---
@@ -831,9 +813,7 @@ class TestGenerateObservations:
 
     def test_large_image_fraction_no_obs(self):
         """img_frac >= SPARSE threshold → no image volume obs."""
-        obs = ddu.generate_observations(
-            _base_image_stats(), _base_label_stats(), _base_summary()
-        )
+        obs = ddu.generate_observations(_base_image_stats(), _base_label_stats(), _base_summary())
         assert not any("image volume" in o for o in obs)
 
     # --- shape-based observations ---
@@ -998,9 +978,7 @@ class TestCollectPerPatientStats:
             return _make_channel_image()
 
         monkeypatch.setattr(ants, "image_read", _image_read, raising=True)
-        monkeypatch.setattr(
-            pb_mod, "get_progress_bar", lambda _: FakePB(), raising=True
-        )
+        monkeypatch.setattr(pb_mod, "get_progress_bar", lambda _: FakePB(), raising=True)
 
     def _run(self, n=2, labels=(0, 1, 2), nan_channel=False):
         """Set up a DataFrame and run collect_per_patient_stats."""

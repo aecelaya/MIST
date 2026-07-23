@@ -62,13 +62,9 @@ def _rotation_direction(angle_deg: float) -> tuple[float, ...]:
     rotation matrix, which SimpleITK requires for a direction.
     """
     a = np.deg2rad(angle_deg)
-    rot_z = np.array(
-        [[np.cos(a), -np.sin(a), 0.0], [np.sin(a), np.cos(a), 0.0], [0.0, 0.0, 1.0]]
-    )
+    rot_z = np.array([[np.cos(a), -np.sin(a), 0.0], [np.sin(a), np.cos(a), 0.0], [0.0, 0.0, 1.0]])
     b = np.deg2rad(angle_deg * 0.5)
-    rot_y = np.array(
-        [[np.cos(b), 0.0, np.sin(b)], [0.0, 1.0, 0.0], [-np.sin(b), 0.0, np.cos(b)]]
-    )
+    rot_y = np.array([[np.cos(b), 0.0, np.sin(b)], [0.0, 1.0, 0.0], [-np.sin(b), 0.0, np.cos(b)]])
     direction = rot_z @ rot_y
     return tuple(float(v) for v in direction.flatten())
 
@@ -133,9 +129,7 @@ def _make_image_and_mask(
     x0, x1 = size_x // 6, size_x - size_x // 6
     interior = image[z0:z1, y0:y1, x0:x1]
     image[z0:z1, y0:y1, x0:x1] = _SOFT_TISSUE_HU
-    image[z0:z1, y0:y1, x0:x1] += rng.normal(
-        0.0, 5.0, size=interior.shape
-    ).astype(np.float32)
+    image[z0:z1, y0:y1, x0:x1] += rng.normal(0.0, 5.0, size=interior.shape).astype(np.float32)
 
     # Label 1: a solid block near the centre, present on most interior slices.
     lz0, lz1 = size_z // 3, size_z - size_z // 3

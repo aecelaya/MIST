@@ -47,10 +47,7 @@ def test_describe_transforms_per_label_values():
 def test_describe_transforms_per_label_only_for_replace():
     """replace_small_objects_with_label must be per_label_only."""
     descriptions = {d["name"]: d for d in registry.describe_transforms()}
-    assert (
-        descriptions["replace_small_objects_with_label"]["per_label"]
-        == "per_label_only"
-    )
+    assert descriptions["replace_small_objects_with_label"]["per_label"] == "per_label_only"
 
 
 def test_describe_transforms_kwargs_have_required_keys():
@@ -76,16 +73,10 @@ def test_describe_transforms_defaults_match_constants():
     assert rso["small_object_threshold"]["default"] == pc.SMALL_OBJECT_THRESHOLD
 
     topk = descriptions["get_top_k_connected_components"]["kwargs"]
+    assert topk["top_k_connected_components"]["default"] == pc.TOP_K_CONNECTED_COMPONENTS
+    assert topk["apply_morphological_cleaning"]["default"] == pc.APPLY_MORPHOLOGICAL_CLEANING
     assert (
-        topk["top_k_connected_components"]["default"] == pc.TOP_K_CONNECTED_COMPONENTS
-    )
-    assert (
-        topk["apply_morphological_cleaning"]["default"]
-        == pc.APPLY_MORPHOLOGICAL_CLEANING
-    )
-    assert (
-        topk["morphological_cleaning_iterations"]["default"]
-        == pc.MORPHOLOGICAL_CLEANING_ITERATIONS
+        topk["morphological_cleaning_iterations"]["default"] == pc.MORPHOLOGICAL_CLEANING_ITERATIONS
     )
 
     fh = descriptions["fill_holes_with_label"]["kwargs"]
@@ -112,17 +103,12 @@ def test_transform_registry_contains_all_expected():
 
 def test_get_transform_returns_correct_function():
     """Check get_transform returns correct functions."""
-    assert (
-        registry.get_transform("remove_small_objects") is registry.remove_small_objects
-    )
+    assert registry.get_transform("remove_small_objects") is registry.remove_small_objects
     assert (
         registry.get_transform("get_top_k_connected_components")
         is registry.get_top_k_connected_components
     )
-    assert (
-        registry.get_transform("fill_holes_with_label")
-        is registry.fill_holes_with_label
-    )
+    assert registry.get_transform("fill_holes_with_label") is registry.fill_holes_with_label
     assert (
         registry.get_transform("replace_small_objects_with_label")
         is registry.replace_small_objects_with_label

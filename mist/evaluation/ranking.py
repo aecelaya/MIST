@@ -135,8 +135,7 @@ def _build_rank_tensor(
         df = _strip_summary_rows(df, id_column)
         if df[id_column].duplicated().any():
             raise ValueError(
-                f"DataFrame at index {i} has duplicate patient IDs in "
-                f"column '{id_column}'."
+                f"DataFrame at index {i} has duplicate patient IDs in column '{id_column}'."
             )
         if df.empty:
             raise ValueError(
@@ -175,8 +174,7 @@ def _build_rank_tensor(
     metric_columns = [c for c in reference_cols if c != id_column]
     if not metric_columns:
         raise ValueError(
-            "No metric columns found in result DataFrames "
-            f"(all columns: {reference_cols})."
+            f"No metric columns found in result DataFrames (all columns: {reference_cols})."
         )
 
     for i, df in enumerate(aligned):
@@ -187,9 +185,7 @@ def _build_rank_tensor(
                     f"'{col}'. Replace or drop NaN values before ranking."
                 )
 
-    directions = {
-        col: _direction_for_column(col, direction_overrides) for col in metric_columns
-    }
+    directions = {col: _direction_for_column(col, direction_overrides) for col in metric_columns}
 
     n_strategies = len(aligned)
     n_patients = len(aligned[0])
@@ -245,22 +241,16 @@ def rank_results(
             column has no resolvable ranking direction.
     """
     if len(results) < 2:
-        raise ValueError(
-            f"rank_results requires at least 2 DataFrames, got {len(results)}."
-        )
+        raise ValueError(f"rank_results requires at least 2 DataFrames, got {len(results)}.")
 
     if names is None:
         names = [f"strategy_{i}" for i in range(len(results))]
     elif len(names) != len(results):
-        raise ValueError(
-            f"names has length {len(names)} but results has length {len(results)}."
-        )
+        raise ValueError(f"names has length {len(names)} but results has length {len(results)}.")
     if len(set(names)) != len(names):
         raise ValueError(f"names must be unique, got {names}.")
 
-    _, metric_columns, ranks = _build_rank_tensor(
-        results, names, direction_overrides, id_column
-    )
+    _, metric_columns, ranks = _build_rank_tensor(results, names, direction_overrides, id_column)
 
     avg_ranks = ranks.mean(axis=(0, 1))
     summary_df = pd.DataFrame(
@@ -315,16 +305,13 @@ def compute_pairwise_significance(
     """
     if len(results) < 2:
         raise ValueError(
-            "compute_pairwise_significance requires at least 2 DataFrames, "
-            f"got {len(results)}."
+            f"compute_pairwise_significance requires at least 2 DataFrames, got {len(results)}."
         )
 
     if names is None:
         names = [f"strategy_{i}" for i in range(len(results))]
     elif len(names) != len(results):
-        raise ValueError(
-            f"names has length {len(names)} but results has length {len(results)}."
-        )
+        raise ValueError(f"names has length {len(names)} but results has length {len(results)}.")
     if len(set(names)) != len(names):
         raise ValueError(f"names must be unique, got {names}.")
 

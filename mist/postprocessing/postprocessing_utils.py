@@ -17,9 +17,7 @@ class StrategyStep(TypedDict):
     kwargs: dict[str, Any]
 
 
-def group_labels_in_mask(
-    mask_npy: npt.NDArray[Any], labels_list: list[int]
-) -> npt.NDArray[Any]:
+def group_labels_in_mask(mask_npy: npt.NDArray[Any], labels_list: list[int]) -> npt.NDArray[Any]:
     """Extract a group of labels from a multi-label mask.
 
     Args:

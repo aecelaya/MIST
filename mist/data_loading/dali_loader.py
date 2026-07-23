@@ -72,9 +72,7 @@ class GenericPipeline(Pipeline):
                     shuffle=shuffle_input,
                 )
             else:
-                raise ValueError(
-                    "Input images are not valid. Please check the input paths."
-                )
+                raise ValueError("Input images are not valid. Please check the input paths.")
         if input_label_files:
             if utils.is_valid_generic_pipeline_input(input_label_files):
                 self.input_labels = utils.get_numpy_reader(
@@ -85,9 +83,7 @@ class GenericPipeline(Pipeline):
                     shuffle=shuffle_input,
                 )
             else:
-                raise ValueError(
-                    "Input labels are not valid. Please check the input paths."
-                )
+                raise ValueError("Input labels are not valid. Please check the input paths.")
         if input_dtm_files:
             if utils.is_valid_generic_pipeline_input(input_dtm_files):
                 self.input_dtms = utils.get_numpy_reader(
@@ -98,9 +94,7 @@ class GenericPipeline(Pipeline):
                     shuffle=shuffle_input,
                 )
             else:
-                raise ValueError(
-                    "Input DTMs are not valid. Please check the input paths."
-                )
+                raise ValueError("Input DTMs are not valid. Please check the input paths.")
 
 
 class TrainPipeline(GenericPipeline):
@@ -181,14 +175,10 @@ class TrainPipeline(GenericPipeline):
         if self.extract_patches:
             if labels:
                 self.labels = labels
-                self.label_weights = [
-                    1.0 / len(self.labels) for _ in range(len(self.labels))
-                ]
+                self.label_weights = [1.0 / len(self.labels) for _ in range(len(self.labels))]
             self.oversampling = oversampling
             self.crop_shape = types.Constant(np.array(self.roi_size), dtype=types.INT64)
-            self.crop_shape_float = types.Constant(
-                np.array(self.roi_size), dtype=types.FLOAT
-            )
+            self.crop_shape_float = types.Constant(np.array(self.roi_size), dtype=types.FLOAT)
 
         # Define the augmentations to apply to the input data. If we are not
         # applying any augmentations, then the input data is returned
@@ -336,15 +326,9 @@ class TrainPipeline(GenericPipeline):
         """
         # Define the flip options for horizontal, vertical, and depthwise flips.
         kwargs = {
-            "horizontal": (
-                fn.random.coin_flip(probability=constants.HORIZONTAL_FLIP_PROBABILITY)
-            ),
-            "vertical": (
-                fn.random.coin_flip(probability=constants.VERTICAL_FLIP_PROBABILITY)
-            ),
-            "depthwise": (
-                fn.random.coin_flip(probability=constants.DEPTH_FLIP_PROBABILITY)
-            ),
+            "horizontal": (fn.random.coin_flip(probability=constants.HORIZONTAL_FLIP_PROBABILITY)),
+            "vertical": (fn.random.coin_flip(probability=constants.VERTICAL_FLIP_PROBABILITY)),
+            "depthwise": (fn.random.coin_flip(probability=constants.DEPTH_FLIP_PROBABILITY)),
         }
 
         # Apply the flips to the image, label, and DTM data and return the

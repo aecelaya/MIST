@@ -32,8 +32,7 @@ def get_padding(
     padding_np = (kernel_size_np - stride_np + 1) / 2
     if np.min(padding_np) < 0:
         raise ValueError(
-            "Padding value should not be negative, please change the kernel "
-            "size and/or stride."
+            "Padding value should not be negative, please change the kernel size and/or stride."
         )
     padding = tuple(int(p) for p in padding_np)
 
@@ -120,10 +119,7 @@ def get_unet_params(
         # Otherwise, we use a stride of 1.
         stride = [
             constants.DEFAULT_STRIDE
-            if (
-                ratio <= constants.ANISOTROPIC_MAX_RATIO
-                and size >= constants.MIN_SIZE_FOR_STRIDE
-            )
+            if (ratio <= constants.ANISOTROPIC_MAX_RATIO and size >= constants.MIN_SIZE_FOR_STRIDE)
             else constants.ANISOTROPIC_STRIDE
             for (ratio, size) in zip(spacing_ratio, final_encoded_dimension, strict=False)
         ]

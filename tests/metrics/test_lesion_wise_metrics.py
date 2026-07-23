@@ -52,9 +52,7 @@ def test_consolidate_merges_nearby_lesions():
     # Both lesion regions should share a single label.
     labels_in_a = np.unique(consolidated[NEAR_A])
     labels_in_b = np.unique(consolidated[NEAR_B])
-    assert (
-        labels_in_a[labels_in_a > 0].tolist() == labels_in_b[labels_in_b > 0].tolist()
-    )
+    assert labels_in_a[labels_in_a > 0].tolist() == labels_in_b[labels_in_b > 0].tolist()
 
 
 def test_consolidate_does_not_merge_distant_lesions():
@@ -485,7 +483,12 @@ def test_f1_perfect_detection_is_one():
     gt = make_vol(LESION_A, LESION_B)
     pred = make_vol(LESION_A, LESION_B)
     result = compute_lesion_wise_metrics(
-        pred, gt, SPACING, metrics=["f1"], min_lesion_volume=0.0, dilation_iters=1,
+        pred,
+        gt,
+        SPACING,
+        metrics=["f1"],
+        min_lesion_volume=0.0,
+        dilation_iters=1,
     )
     # TP=2, FP=0, FN=0 → 2*2 / (2*2 + 0 + 0) = 1.0
     assert result["lesion_wise_f1"] == pytest.approx(1.0)
@@ -496,7 +499,12 @@ def test_f1_false_negative():
     gt = make_vol(LESION_A, LESION_B)
     pred = make_vol(LESION_A)
     result = compute_lesion_wise_metrics(
-        pred, gt, SPACING, metrics=["f1"], min_lesion_volume=0.0, dilation_iters=1,
+        pred,
+        gt,
+        SPACING,
+        metrics=["f1"],
+        min_lesion_volume=0.0,
+        dilation_iters=1,
     )
     # 2*1 / (2*1 + 0 + 1) = 2/3
     assert result["lesion_wise_f1"] == pytest.approx(2.0 / 3.0)
@@ -507,7 +515,12 @@ def test_f1_false_positive():
     gt = make_vol(LESION_A)
     pred = make_vol(LESION_A, LESION_B)
     result = compute_lesion_wise_metrics(
-        pred, gt, SPACING, metrics=["f1"], min_lesion_volume=0.0, dilation_iters=1,
+        pred,
+        gt,
+        SPACING,
+        metrics=["f1"],
+        min_lesion_volume=0.0,
+        dilation_iters=1,
     )
     # 2*1 / (2*1 + 1 + 0) = 2/3
     assert result["lesion_wise_f1"] == pytest.approx(2.0 / 3.0)
@@ -518,7 +531,12 @@ def test_f1_false_negative_and_false_positive():
     gt = make_vol(LESION_A, LESION_B)
     pred = make_vol(LESION_A, LESION_C)  # detects A, misses B, FP at C
     result = compute_lesion_wise_metrics(
-        pred, gt, SPACING, metrics=["f1"], min_lesion_volume=0.0, dilation_iters=1,
+        pred,
+        gt,
+        SPACING,
+        metrics=["f1"],
+        min_lesion_volume=0.0,
+        dilation_iters=1,
     )
     # 2*1 / (2*1 + 1 + 1) = 0.5
     assert result["lesion_wise_f1"] == pytest.approx(0.5)
@@ -529,7 +547,10 @@ def test_f1_all_false_positive_is_zero():
     gt = make_vol(LESION_A)
     pred = make_vol(LESION_B)
     result = compute_lesion_wise_metrics(
-        pred, gt, SPACING, metrics=["f1"],
+        pred,
+        gt,
+        SPACING,
+        metrics=["f1"],
         min_lesion_volume=1000.0,  # filter all GT lesions
         dilation_iters=1,
     )
@@ -540,7 +561,11 @@ def test_f1_all_false_positive_is_zero():
 def test_f1_empty_gt_and_pred_returns_empty():
     """No GT and no prediction → {} (metric excluded, no penalty)."""
     result = compute_lesion_wise_metrics(
-        make_vol(), make_vol(), SPACING, metrics=["f1"], min_lesion_volume=0.0,
+        make_vol(),
+        make_vol(),
+        SPACING,
+        metrics=["f1"],
+        min_lesion_volume=0.0,
     )
     assert result == {}
     assert "lesion_wise_f1" not in result
@@ -551,8 +576,12 @@ def test_f1_alongside_other_metrics():
     gt = make_vol(LESION_A, LESION_B)
     pred = make_vol(LESION_A)
     result = compute_lesion_wise_metrics(
-        pred, gt, SPACING, metrics=["dice", "f1"],
-        min_lesion_volume=0.0, dilation_iters=1,
+        pred,
+        gt,
+        SPACING,
+        metrics=["dice", "f1"],
+        min_lesion_volume=0.0,
+        dilation_iters=1,
     )
     assert result["lesion_wise_dice"] == pytest.approx(0.5)
     assert result["lesion_wise_f1"] == pytest.approx(2.0 / 3.0)

@@ -114,9 +114,7 @@ class Patch3DTrainer(BaseTrainer):
         label = batch["label"]
         dtm = batch.get("dtm", None)
 
-        max_norm = self.config["training"].get(
-            "grad_clip_norm", constants.GRAD_CLIP_VALUE
-        )
+        max_norm = self.config["training"].get("grad_clip_norm", constants.GRAD_CLIP_VALUE)
         amp_enabled = self.config["training"]["amp"]
 
         amp_context = hardware.autocast_context(amp_enabled)

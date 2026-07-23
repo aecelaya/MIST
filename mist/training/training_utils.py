@@ -29,9 +29,7 @@ def training_summary_rows(
     num_gpus = max(1, world_size)
     per_gpu = training["batch_size_per_gpu"]
     global_batch = per_gpu * num_gpus
-    patch_size = " × ".join(
-        str(dim) for dim in config["spatial_config"]["patch_size"]
-    )
+    patch_size = " × ".join(str(dim) for dim in config["spatial_config"]["patch_size"])
     return [
         ("Model", str(config["model"]["architecture"])),
         ("Parameters", _format_parameter_count(num_params)),
@@ -129,8 +127,7 @@ def sanity_check_fold_data(
     # 1:1 pairing within train and within val.
     if n_tr_img != n_tr_lbl:
         raise ValueError(
-            f"Fold {fold} mismatch: train_images ({n_tr_img}) "
-            f"!= train_labels ({n_tr_lbl})"
+            f"Fold {fold} mismatch: train_images ({n_tr_img}) != train_labels ({n_tr_lbl})"
         )
     if n_va_img != n_va_lbl:
         raise ValueError(
@@ -153,14 +150,12 @@ def sanity_check_fold_data(
     if overlap_img:
         example = next(iter(overlap_img))
         raise ValueError(
-            f"Fold {fold} train/val overlap in images ({len(overlap_img)} "
-            f"files), e.g.: {example}"
+            f"Fold {fold} train/val overlap in images ({len(overlap_img)} files), e.g.: {example}"
         )
     if overlap_lbl:
         example = next(iter(overlap_lbl))
         raise ValueError(
-            f"Fold {fold} train/val overlap in labels ({len(overlap_lbl)} "
-            f"files), e.g.: {example}"
+            f"Fold {fold} train/val overlap in labels ({len(overlap_lbl)} files), e.g.: {example}"
         )
 
     # Optional: ensure file stems (patient ids) align within each split.
@@ -176,8 +171,7 @@ def sanity_check_fold_data(
     if tr_dtm is not None:
         if len(tr_dtm) != n_tr_img:
             raise ValueError(
-                f"Fold {fold} mismatch: train_dtms ({len(tr_dtm)}) "
-                f"!= train_images ({n_tr_img})"
+                f"Fold {fold} mismatch: train_dtms ({len(tr_dtm)}) != train_images ({n_tr_img})"
             )
         if len(set(tr_dtm)) != len(tr_dtm):
             raise ValueError(f"Fold {fold} has duplicate entries in DTMs.")

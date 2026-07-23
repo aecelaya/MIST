@@ -163,9 +163,7 @@ class TestEvaluatorInit:
             ),
         ],
     )
-    def test_invalid_new_format_raises(
-        self, filepaths_df, tmp_path, bad_config, match_msg
-    ):
+    def test_invalid_new_format_raises(self, filepaths_df, tmp_path, bad_config, match_msg):
         """Each invalid new-format config raises ValueError with a message."""
         with pytest.raises(ValueError, match=match_msg):
             Evaluator(filepaths_df, bad_config, tmp_path / "out.csv")
@@ -266,9 +264,7 @@ class TestLoadPatientData:
 
     def test_missing_prediction_file_raises_file_not_found(self, evaluator, tmp_path):
         """FileNotFoundError is raised when the prediction file is absent."""
-        evaluator.filepaths_dataframe.loc["p0", "prediction"] = str(
-            tmp_path / "gone.nii.gz"
-        )
+        evaluator.filepaths_dataframe.loc["p0", "prediction"] = str(tmp_path / "gone.nii.gz")
         with pytest.raises(FileNotFoundError, match="Prediction not found"):
             evaluator._load_patient_data("p0")
 
@@ -288,9 +284,7 @@ class TestLoadPatientData:
         with pytest.raises(ValueError, match="Header mismatch"):
             evaluator._load_patient_data("p0")
 
-    def test_validate_masks_false_skips_validation(
-        self, filepaths_df, tmp_path, monkeypatch
-    ):
+    def test_validate_masks_false_skips_validation(self, filepaths_df, tmp_path, monkeypatch):
         """When validate_masks=False, validate_mask is never called."""
         mock_img = make_ants_image()
         monkeypatch.setattr(
@@ -322,9 +316,7 @@ class TestLoadPatientData:
         ev._load_patient_data("p0")
         assert called["count"] == 0
 
-    def test_validate_masks_true_calls_validate_mask(
-        self, filepaths_df, tmp_path, monkeypatch
-    ):
+    def test_validate_masks_true_calls_validate_mask(self, filepaths_df, tmp_path, monkeypatch):
         """When validate_masks=True, validate_mask is called for both files."""
         mock_img = make_ants_image()
         monkeypatch.setattr(
@@ -359,9 +351,7 @@ class TestLoadPatientData:
         ev._load_patient_data("p0")
         assert called["count"] == 2  # mask + prediction
 
-    def test_validate_masks_true_raises_on_invalid_mask(
-        self, filepaths_df, tmp_path, monkeypatch
-    ):
+    def test_validate_masks_true_raises_on_invalid_mask(self, filepaths_df, tmp_path, monkeypatch):
         """validate_masks=True raises ValueError when validation fails."""
         monkeypatch.setattr(
             evaluation_utils,
@@ -494,9 +484,7 @@ class TestComputeMetrics:
             pytest.param(-np.inf, id="neg_inf"),
         ],
     )
-    def test_nan_inf_result_replaced_with_worst(
-        self, evaluator, monkeypatch, bad_value
-    ):
+    def test_nan_inf_result_replaced_with_worst(self, evaluator, monkeypatch, bad_value):
         """NaN or Inf returned by a metric is replaced with worst value."""
         metric = type(
             "M",
@@ -557,9 +545,7 @@ class TestEvaluateSinglePatient:
         """Single-label class uses equality comparison; result is keyed correctly."""
         mask = np.array([[[1, 0, 0], [0, 1, 0]]], dtype=np.int32)
         pred = np.array([[[1, 0, 0], [0, 1, 0]]], dtype=np.int32)
-        result, err = evaluator._evaluate_single_patient(
-            "p0", mask, pred, (1.0, 1.0, 1.0)
-        )
+        result, err = evaluator._evaluate_single_patient("p0", mask, pred, (1.0, 1.0, 1.0))
         assert "id" in result
         assert "tumor_dice" in result
         assert result["tumor_dice"] == pytest.approx(1.0)
@@ -642,9 +628,7 @@ class TestEvaluatePatientPipeline:
         assert result is not None
         assert "id" in result
 
-    def test_exception_returns_none_result_and_error_message(
-        self, evaluator, monkeypatch
-    ):
+    def test_exception_returns_none_result_and_error_message(self, evaluator, monkeypatch):
         """An exception produces None result and a CRITICAL FAILURE message."""
         monkeypatch.setattr(
             evaluator,
@@ -733,9 +717,7 @@ class TestEvaluatorRun:
         assert any("All patients failed" in m for m in printed)
         assert not any("\u2713" in m for m in printed)
 
-    def test_multiple_patients_all_results_in_csv(
-        self, tmp_path, monkeypatch, _patch_run_env
-    ):
+    def test_multiple_patients_all_results_in_csv(self, tmp_path, monkeypatch, _patch_run_env):
         """All patient results appear in the saved CSV."""
         df = _make_filepaths_df(tmp_path, n=3)
         ev = Evaluator(

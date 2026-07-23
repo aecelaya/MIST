@@ -370,9 +370,7 @@ def replace_small_objects_with_label(
         updated_mask[binary] = 0
 
         # Replace small components with the replacement label.
-        updated_mask += utils.replace_small_objects_binary(
-            binary, label, replacement, min_size
-        )
+        updated_mask += utils.replace_small_objects_binary(binary, label, replacement, min_size)
 
     # Return the updated mask as an unsigned 8-bit integer array.
     return updated_mask.astype(np.uint8)

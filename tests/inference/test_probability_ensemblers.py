@@ -106,9 +106,7 @@ def test_registry_rejects_invalid_class():
     class NotAnEnsembler:
         pass
 
-    with pytest.raises(
-        TypeError, match="must inherit from AbstractProbabilityEnsembler"
-    ):
+    with pytest.raises(TypeError, match="must inherit from AbstractProbabilityEnsembler"):
 
         @register_probability_ensembler("invalid_class")
         class Invalid(NotAnEnsembler):

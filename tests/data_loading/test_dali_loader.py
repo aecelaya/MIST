@@ -52,13 +52,9 @@ class TestTrainPipelineInit:
         assert pipeline.extract_patches is True
         assert pipeline.use_augmentation is True
 
-    def test_disables_all_augmentations_when_use_augmentation_false(
-        self, base_pipeline_args
-    ):
+    def test_disables_all_augmentations_when_use_augmentation_false(self, base_pipeline_args):
         """All augmentation flags are forced off when use_augmentation=False."""
-        pipeline = dali_loader.TrainPipeline(
-            **{**base_pipeline_args, "use_augmentation": False}
-        )
+        pipeline = dali_loader.TrainPipeline(**{**base_pipeline_args, "use_augmentation": False})
         for flag in (
             "use_flips",
             "use_zoom",
@@ -77,9 +73,7 @@ class TestTrainPipelineInit:
             ("dtm", "Input DTMs are not valid"),
         ],
     )
-    def test_invalid_inputs_raise(
-        self, monkeypatch, bad_arg, expected_message, base_pipeline_args
-    ):
+    def test_invalid_inputs_raise(self, monkeypatch, bad_arg, expected_message, base_pipeline_args):
         """Raises ValueError when any input file list fails validation."""
         monkeypatch.setattr(utils, "is_valid_generic_pipeline_input", lambda _: False)
         args = base_pipeline_args.copy()
@@ -148,9 +142,7 @@ class TestBiasedCropFn:
 
         out = pipeline.biased_crop_fn("image", "label", "dtm" if use_dtm else None)
         expected = (
-            ("gpu_output", "gpu_output", "gpu_output")
-            if use_dtm
-            else ("gpu_output", "gpu_output")
+            ("gpu_output", "gpu_output", "gpu_output") if use_dtm else ("gpu_output", "gpu_output")
         )
         assert out == expected
 
@@ -250,12 +242,8 @@ class TestDefineGraph:
         "mist.data_loading.data_loading_utils.brightness_fn",
         return_value="bright_image",
     )
-    @mock.patch(
-        "mist.data_loading.data_loading_utils.blur_fn", return_value="blurred_image"
-    )
-    @mock.patch(
-        "mist.data_loading.data_loading_utils.noise_fn", return_value="noisy_image"
-    )
+    @mock.patch("mist.data_loading.data_loading_utils.blur_fn", return_value="blurred_image")
+    @mock.patch("mist.data_loading.data_loading_utils.noise_fn", return_value="noisy_image")
     def test_pipeline_output_with_and_without_dtm(
         self,
         mock_noise,
@@ -308,12 +296,8 @@ class TestDefineGraph:
 class TestTestPipelineDefineGraph:
     """Tests for TestPipeline.define_graph."""
 
-    @mock.patch(
-        "mist.data_loading.dali_loader.fn.transpose", return_value="transposed_image"
-    )
-    @mock.patch(
-        "mist.data_loading.dali_loader.fn.reshape", return_value="reshaped_image"
-    )
+    @mock.patch("mist.data_loading.dali_loader.fn.transpose", return_value="transposed_image")
+    @mock.patch("mist.data_loading.dali_loader.fn.reshape", return_value="reshaped_image")
     def test_returns_transposed_image(self, mock_reshape, mock_transpose):
         """Loads, reshapes, and transposes the image tensor."""
         pipeline = dali_loader.TestPipeline(
@@ -426,9 +410,7 @@ class TestGetTrainingDataset:
         assert "dimension" not in call_kwargs, (
             "dimension was removed from TrainPipeline; must not be passed at call site"
         )
-        mock_dali_iter.assert_called_once_with(
-            mock_train_pipeline.return_value, expected_keys
-        )
+        mock_dali_iter.assert_called_once_with(mock_train_pipeline.return_value, expected_keys)
         assert result == mock_dali_iter.return_value
 
 
@@ -450,9 +432,7 @@ class TestGetValidationDataset:
         )
         mock_validate.assert_called_once_with(["image.npy"], ["label.npy"])
         mock_pipeline.assert_called_once()
-        mock_dali_iter.assert_called_once_with(
-            mock_pipeline.return_value, ["image", "label"]
-        )
+        mock_dali_iter.assert_called_once_with(mock_pipeline.return_value, ["image", "label"])
         assert result == mock_dali_iter.return_value
 
 

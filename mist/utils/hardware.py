@@ -50,9 +50,7 @@ def resolve_amp(requested: bool, *, warn: bool = True) -> bool:
         return True
     if warn:
         device = (
-            torch.cuda.get_device_name(0)
-            if torch.cuda.is_available()
-            else "CPU (no CUDA device)"
+            torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU (no CUDA device)"
         )
         warnings.warn(
             f"AMP was requested but {device} has no hardware BF16 support; "

@@ -58,9 +58,7 @@ def compute_shape_descriptors(coords_mm: np.ndarray) -> dict[str, Any]:
 
     # Subsample to keep PCA fast on large label regions.
     if len(coords_mm) > constants.MAX_SHAPE_COORDS:
-        idx = np.random.choice(
-            len(coords_mm), constants.MAX_SHAPE_COORDS, replace=False
-        )
+        idx = np.random.choice(len(coords_mm), constants.MAX_SHAPE_COORDS, replace=False)
         coords_mm = coords_mm[idx]
 
     cov = np.cov(coords_mm.T)
@@ -238,9 +236,7 @@ def collect_per_patient_stats(
     # Per-label: voxel count, presence, and shape descriptors per patient.
     label_voxel_counts: dict[int, list[int]] = {lbl: [] for lbl in non_bg_labels}
     label_presence: dict[int, list[int]] = {lbl: [] for lbl in non_bg_labels}
-    label_shape_descriptors: dict[int, list[dict[str, Any]]] = {
-        lbl: [] for lbl in non_bg_labels
-    }
+    label_shape_descriptors: dict[int, list[dict[str, Any]]] = {lbl: [] for lbl in non_bg_labels}
 
     progress = progress_bar_utils.get_progress_bar("Building data dump")
     with progress as pb:
@@ -276,9 +272,7 @@ def collect_per_patient_stats(
                     coords_mm = coords * spacing_arr
                     shape = compute_shape_descriptors(coords_mm)
                     if shape is not None:
-                        shape["compactness"] = compute_compactness(
-                            lbl_mask, spacing_arr
-                        )
+                        shape["compactness"] = compute_compactness(lbl_mask, spacing_arr)
                         shape["skeleton_ratio"] = compute_skeleton_ratio(lbl_mask)
                         label_shape_descriptors[lbl].append(shape)
 
@@ -296,9 +290,7 @@ def collect_per_patient_stats(
     return {
         "spacings": spacings,
         "original_dims": original_dims,
-        "effective_dims": (
-            effective_dims if effective_dims is not None else original_dims
-        ),
+        "effective_dims": (effective_dims if effective_dims is not None else original_dims),
         "foreground_fractions": foreground_fractions,
         "total_fg_voxels": total_fg_voxels,
         "channel_intensities": channel_intensities,
@@ -382,9 +374,7 @@ def build_image_statistics(
         },
         "dimensions": {
             "original": {"per_axis": dim_stats},
-            "resampled_median": (
-                config["preprocessing"]["median_resampled_image_size"]
-            ),
+            "resampled_median": (config["preprocessing"]["median_resampled_image_size"]),
         },
         "intensity": {
             "per_channel": intensity_stats,
@@ -470,18 +460,12 @@ def build_label_statistics(
             shape_class = max(components, key=lambda k: components[k])
 
             compactness_vals = [
-                d["compactness"]
-                for d in shape_descs
-                if d.get("compactness") is not None
+                d["compactness"] for d in shape_descs if d.get("compactness") is not None
             ]
             skeleton_ratio_vals = [
-                d["skeleton_ratio"]
-                for d in shape_descs
-                if d.get("skeleton_ratio") is not None
+                d["skeleton_ratio"] for d in shape_descs if d.get("skeleton_ratio") is not None
             ]
-            mean_compactness = (
-                float(np.mean(compactness_vals)) if compactness_vals else None
-            )
+            mean_compactness = float(np.mean(compactness_vals)) if compactness_vals else None
             mean_skeleton_ratio = (
                 float(np.mean(skeleton_ratio_vals)) if skeleton_ratio_vals else None
             )
@@ -495,9 +479,7 @@ def build_label_statistics(
                     round(mean_compactness, 4) if mean_compactness is not None else None
                 ),
                 "skeleton_ratio": (
-                    round(mean_skeleton_ratio, 4)
-                    if mean_skeleton_ratio is not None
-                    else None
+                    round(mean_skeleton_ratio, 4) if mean_skeleton_ratio is not None else None
                 ),
             }
         else:
@@ -614,9 +596,7 @@ def generate_observations(
     # Anisotropy.
     aniso_ratio = image_stats["spacing"]["anisotropy_ratio"]
     if image_stats["spacing"]["is_anisotropic"]:
-        observations.append(
-            f"Anisotropic spacing: max/min spacing ratio = {aniso_ratio:.2f}."
-        )
+        observations.append(f"Anisotropic spacing: max/min spacing ratio = {aniso_ratio:.2f}.")
 
     # Low foreground density — only emit when there are multiple non-background
     # labels, since the per-label image fraction observation already covers the
@@ -669,9 +649,7 @@ def generate_observations(
                 f"present in {presence:.1f}% of patients."
             )
         elif presence < 50:
-            observations.append(
-                f"Label {lbl_str} is absent in {100 - presence:.1f}% of patients."
-            )
+            observations.append(f"Label {lbl_str} is absent in {100 - presence:.1f}% of patients.")
 
     # Image fraction: two-tier observation.
     for lbl_str, lbl_data in label_stats["per_label"].items():
@@ -710,18 +688,14 @@ def generate_observations(
                 f"skeleton ratio={skel:.3f}{iq_str} ({pca_str})."
             )
         elif shape["shape_class"] == "tubular":
-            observations.append(
-                f"Label {lbl_str} appears elongated: {pca_str}{skel_str}."
-            )
+            observations.append(f"Label {lbl_str} appears elongated: {pca_str}{skel_str}.")
         elif shape["shape_class"] == "planar":
             observations.append(
-                f"Label {lbl_str} appears planar/sheet-like: "
-                f"{pca_str}{iq_str}{skel_str}."
+                f"Label {lbl_str} appears planar/sheet-like: {pca_str}{iq_str}{skel_str}."
             )
         else:
             observations.append(
-                f"Label {lbl_str} appears compact/blob-like: "
-                f"{pca_str}{iq_str}{skel_str}."
+                f"Label {lbl_str} appears compact/blob-like: {pca_str}{iq_str}{skel_str}."
             )
 
     # Resampling risk: small labels that are also geometrically thin may lose
@@ -732,9 +706,9 @@ def generate_observations(
             continue
         shape = lbl_data["shape"]
         skel = shape.get("skeleton_ratio")
-        is_thin = (
-            skel is not None and skel > constants.TUBULAR_SKELETON_RATIO_THRESHOLD
-        ) or (skel is None and shape["shape_class"] in ("tubular", "planar"))
+        is_thin = (skel is not None and skel > constants.TUBULAR_SKELETON_RATIO_THRESHOLD) or (
+            skel is None and shape["shape_class"] in ("tubular", "planar")
+        )
         if is_thin:
             skel_str = f", skeleton ratio={skel:.3f}" if skel is not None else ""
             observations.append(

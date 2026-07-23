@@ -49,8 +49,7 @@ def validate_mask(
         # probability map rather than a label mask. Integer-valued floats
         # (e.g., float32 masks from BraTS or FSL) are accepted.
         if not (
-            np.issubdtype(mask_np.dtype, np.integer)
-            or np.issubdtype(mask_np.dtype, np.bool_)
+            np.issubdtype(mask_np.dtype, np.integer) or np.issubdtype(mask_np.dtype, np.bool_)
         ) and not np.all(mask_np == np.floor(mask_np)):
             return (
                 f"{mask_type} has dtype '{mask_np.dtype}' with non-integer "
@@ -141,18 +140,13 @@ def build_evaluation_dataframe(
 
         if missing:
             error_messages.append(
-                f"Skipping ID '{patient_id}' due to missing "
-                f"{', '.join(missing)} file(s)."
+                f"Skipping ID '{patient_id}' due to missing {', '.join(missing)} file(s)."
             )
             continue
 
         if validate:
-            gt_error = validate_mask(
-                mask_path, evaluation_config, mask_type="ground truth mask"
-            )
-            pred_error = validate_mask(
-                prediction_path, evaluation_config, mask_type="prediction"
-            )
+            gt_error = validate_mask(mask_path, evaluation_config, mask_type="ground truth mask")
+            pred_error = validate_mask(prediction_path, evaluation_config, mask_type="prediction")
 
             validation_errors = [e for e in (gt_error, pred_error) if e]
             if validation_errors:
@@ -245,9 +239,7 @@ def compute_results_stats(results_df: pd.DataFrame) -> pd.DataFrame:
     return results_df
 
 
-def crop_to_union(
-    mask: np.ndarray, prediction: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+def crop_to_union(mask: np.ndarray, prediction: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Crop both arrays to the bounding box of their non-zero union.
 
     This significantly speeds up surface distance metrics (Hausdorff) by
@@ -274,6 +266,8 @@ def crop_to_union(
     max_coords = coords.max(axis=0) + 1  # +1 because slicing is exclusive
 
     # 4. Generate slices dynamically for N-dimensions (works for 2D or 3D).
-    slices = tuple(slice(min_c, max_c) for min_c, max_c in zip(min_coords, max_coords, strict=False))
+    slices = tuple(
+        slice(min_c, max_c) for min_c, max_c in zip(min_coords, max_coords, strict=False)
+    )
 
     return mask[slices], prediction[slices]

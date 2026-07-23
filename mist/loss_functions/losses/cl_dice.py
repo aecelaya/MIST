@@ -68,13 +68,13 @@ class CLDice(DiceCELoss):
         skel_true = self.soft_skeletonize(y_true)
 
         # Compute precision and sensitivity PER CLASS.
-        tprec = (
-            torch.sum(skel_pred * y_true, dim=self.spatial_dims_3d) + self.smooth
-        ) / (torch.sum(skel_pred, dim=self.spatial_dims_3d) + self.smooth)
+        tprec = (torch.sum(skel_pred * y_true, dim=self.spatial_dims_3d) + self.smooth) / (
+            torch.sum(skel_pred, dim=self.spatial_dims_3d) + self.smooth
+        )
 
-        tsens = (
-            torch.sum(skel_true * y_pred, dim=self.spatial_dims_3d) + self.smooth
-        ) / (torch.sum(skel_true, dim=self.spatial_dims_3d) + self.smooth)
+        tsens = (torch.sum(skel_true * y_pred, dim=self.spatial_dims_3d) + self.smooth) / (
+            torch.sum(skel_true, dim=self.spatial_dims_3d) + self.smooth
+        )
 
         # Compute clDice score PER CLASS.
         cldice_score = 2.0 * (tprec * tsens) / (tprec + tsens)

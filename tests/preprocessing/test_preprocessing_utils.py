@@ -37,9 +37,7 @@ def _make_sitk_image_from_xyz(
     img.SetSpacing(spacing)
     img.SetOrigin(origin)
     direction = (
-        tuple(direction_mat.flatten())
-        if direction_mat is not None
-        else tuple(np.eye(3).flatten())
+        tuple(direction_mat.flatten()) if direction_mat is not None else tuple(np.eye(3).flatten())
     )
     img.SetDirection(direction)
     return img
@@ -52,9 +50,7 @@ def test_ants_to_sitk_preserves_metadata_and_orientation():
     origin = (5.0, -3.0, 2.0)
     direction = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
 
-    img_ants = _make_ants_image(
-        arr, spacing=spacing, origin=origin, direction_mat=direction
-    )
+    img_ants = _make_ants_image(arr, spacing=spacing, origin=origin, direction_mat=direction)
     img_sitk = pu.ants_to_sitk(img_ants)
 
     # Metadata preserved.
@@ -107,9 +103,7 @@ def test_get_fg_mask_bbox_detects_cube(monkeypatch):
     assert bbox["x_start"] == xs and bbox["x_end"] == ze - (ze - xe)
     assert bbox["y_start"] == ys and bbox["y_end"] == ye
     assert bbox["z_start"] == zs and bbox["z_end"] == ze
-    assert (
-        bbox["x_og_size"] == 16 and bbox["y_og_size"] == 17 and bbox["z_og_size"] == 18
-    )
+    assert bbox["x_og_size"] == 16 and bbox["y_og_size"] == 17 and bbox["z_og_size"] == 18
 
 
 def test_get_fg_mask_bbox_returns_full_when_empty(monkeypatch):
@@ -158,17 +152,13 @@ def test_aniso_intermediate_resample_changes_only_low_axis():
 def test_check_anisotropic_true_and_false():
     """Detect anisotropy if spacing ratio > 3 and return correct axis."""
     # True case: ratio > 3.
-    img1 = _make_sitk_image_from_xyz(
-        np.zeros((4, 4, 2), np.float32), spacing=(1.0, 1.0, 4.5)
-    )
+    img1 = _make_sitk_image_from_xyz(np.zeros((4, 4, 2), np.float32), spacing=(1.0, 1.0, 4.5))
     res1 = pu.check_anisotropic(img1)
     assert res1["is_anisotropic"] is True
     assert res1["low_resolution_axis"] == 2
 
     # False case: ratio == 3 -> not anisotropic by strict '>' check.
-    img2 = _make_sitk_image_from_xyz(
-        np.zeros((4, 4, 2), np.float32), spacing=(1.0, 1.0, 3.0)
-    )
+    img2 = _make_sitk_image_from_xyz(np.zeros((4, 4, 2), np.float32), spacing=(1.0, 1.0, 3.0))
     res2 = pu.check_anisotropic(img2)
     assert res2["is_anisotropic"] is False
     assert res2["low_resolution_axis"] is None
@@ -185,9 +175,7 @@ def test_make_onehot_creates_binary_masks_with_metadata():
     spacing = (1.1, 2.2, 3.3)
     origin = (10.0, -2.0, 7.0)
     direction = np.eye(3)
-    mask_ants = _make_ants_image(
-        vol, spacing=spacing, origin=origin, direction_mat=direction
-    )
+    mask_ants = _make_ants_image(vol, spacing=spacing, origin=origin, direction_mat=direction)
 
     out_masks = pu.make_onehot(mask_ants, labels_list=[0, 1, 2])
     assert len(out_masks) == 3

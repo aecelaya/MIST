@@ -152,12 +152,8 @@ class TestRunEvaluation:
     def test_evaluator_constructed_with_correct_args(self, monkeypatch, tmp_path):
         """Evaluator receives filepaths_dataframe, evaluation_config, and
         output_csv_path derived from the Namespace."""
-        fake_config = {
-            "evaluation": {"tumor": {"labels": [1], "metrics": {"dice": {}}}}
-        }
-        monkeypatch.setattr(
-            entry.io, "read_json_file", lambda _: fake_config, raising=True
-        )
+        fake_config = {"evaluation": {"tumor": {"labels": [1], "metrics": {"dice": {}}}}}
+        monkeypatch.setattr(entry.io, "read_json_file", lambda _: fake_config, raising=True)
         monkeypatch.setattr(
             entry.pd,
             "read_csv",
@@ -246,9 +242,7 @@ class TestRunEvaluation:
     def test_config_without_evaluation_key_used_directly(self, monkeypatch, tmp_path):
         """If the JSON has no 'evaluation' key the full dict is forwarded."""
         flat_config = {"tumor": {"labels": [1], "metrics": {"dice": {}}}}
-        monkeypatch.setattr(
-            entry.io, "read_json_file", lambda _: flat_config, raising=True
-        )
+        monkeypatch.setattr(entry.io, "read_json_file", lambda _: flat_config, raising=True)
         monkeypatch.setattr(
             entry.pd,
             "read_csv",

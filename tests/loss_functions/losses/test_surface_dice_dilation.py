@@ -46,13 +46,9 @@ def _make_preprocessed_data(
     SurfaceDilationLogic.forward receives already-preprocessed tensors from
     the parent loss, so tests that call it directly need this form.
     """
-    y_true, y_pred = _make_mock_data(
-        n_classes=n_classes, batch_size=batch_size, size=size
-    )
+    y_true, y_pred = _make_mock_data(n_classes=n_classes, batch_size=batch_size, size=size)
     y_true_oh = (
-        F.one_hot(y_true.squeeze(1).long(), num_classes=n_classes)
-        .permute(0, 4, 1, 2, 3)
-        .float()
+        F.one_hot(y_true.squeeze(1).long(), num_classes=n_classes).permute(0, 4, 1, 2, 3).float()
     )
     y_pred_prob = F.softmax(y_pred, dim=1)
     return y_true_oh, y_pred_prob
@@ -361,9 +357,7 @@ class TestVesselSDDL:
         assert not torch.isclose(loss_a, loss_b)
 
     def test_exclude_background(self):
-        loss_fn = VesselSDDL(
-            sddl_spacing_xyz=ISOTROPIC, exclude_background=True, iterations=2
-        )
+        loss_fn = VesselSDDL(sddl_spacing_xyz=ISOTROPIC, exclude_background=True, iterations=2)
         y_true, y_pred = _make_mock_data()
         assert torch.isfinite(loss_fn(y_true, y_pred))
 

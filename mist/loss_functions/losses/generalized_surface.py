@@ -93,9 +93,7 @@ class GenSurfLoss(DiceCELoss):
         numerator = torch.sum((dtm * diff) ** 2, dim=self.spatial_dims_3d)
 
         # Denominator: Total weighted variance of the DTM.
-        denominator = (
-            torch.sum(dtm**2, dim=self.spatial_dims_3d) + self.avoid_division_by_zero
-        )
+        denominator = torch.sum(dtm**2, dim=self.spatial_dims_3d) + self.avoid_division_by_zero
 
         # Surface loss: 1 - ratio.
         surface_loss = torch.mean(1.0 - numerator / denominator)

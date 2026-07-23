@@ -195,9 +195,7 @@ class BaseTrainer(ABC):
                     "subset of [0, 1, ..., nfolds-1]. Found folds: "
                     f"{self.mist_args.folds}."
                 )
-            self.config["training"]["folds"] = [
-                int(fold) for fold in self.mist_args.folds
-            ]
+            self.config["training"]["folds"] = [int(fold) for fold in self.mist_args.folds]
 
         # If the user specifies a number of epochs, then update the
         # configuration with the number of epochs.
@@ -207,9 +205,7 @@ class BaseTrainer(ABC):
         # If the user specifies a different batch size to use on each GPU,
         # then update the configuration with the new batch size.
         if self.mist_args.batch_size_per_gpu is not None:
-            self.config["training"]["batch_size_per_gpu"] = int(
-                self.mist_args.batch_size_per_gpu
-            )
+            self.config["training"]["batch_size_per_gpu"] = int(self.mist_args.batch_size_per_gpu)
 
         # Overwrite the loss function and its parameters if specified in
         # command line arguments.
@@ -235,9 +231,7 @@ class BaseTrainer(ABC):
         # Overwrite the learning rate scheduler and its parameters if specified
         # in command line arguments.
         if self.mist_args.learning_rate is not None:
-            self.config["training"]["learning_rate"] = float(
-                self.mist_args.learning_rate
-            )
+            self.config["training"]["learning_rate"] = float(self.mist_args.learning_rate)
 
         if self.mist_args.lr_scheduler is not None:
             self.config["training"]["lr_scheduler"] = self.mist_args.lr_scheduler
@@ -254,9 +248,7 @@ class BaseTrainer(ABC):
         # pre-Ampere/CPU. Resolving here (once, in the parent process) persists
         # the effective value to config.json so every training step and all
         # downstream inference read a hardware-appropriate setting.
-        self.config["training"]["amp"] = hardware.resolve_amp(
-            self.config["training"]["amp"]
-        )
+        self.config["training"]["amp"] = hardware.resolve_amp(self.config["training"]["amp"])
 
         # Write the updated configuration to the config.json file.
         io.write_json_file(self.config_json, self.config)
@@ -283,16 +275,14 @@ class BaseTrainer(ABC):
         new_arch = new["model"]["architecture"]
         if old_arch != new_arch:
             incompatible.append(
-                f"  --model: '{old_arch}' → '{new_arch}' "
-                f"(checkpoint weights are incompatible)"
+                f"  --model: '{old_arch}' → '{new_arch}' (checkpoint weights are incompatible)"
             )
 
         old_patch = old["spatial_config"]["patch_size"]
         new_patch = new["spatial_config"]["patch_size"]
         if old_patch != new_patch:
             incompatible.append(
-                f"  --patch-size: {old_patch} → {new_patch} "
-                f"(checkpoint weights are incompatible)"
+                f"  --patch-size: {old_patch} → {new_patch} (checkpoint weights are incompatible)"
             )
 
         if incompatible:
@@ -309,9 +299,7 @@ class BaseTrainer(ABC):
         tr_new = new["training"]
 
         if tr_old["loss"]["name"] != tr_new["loss"]["name"]:
-            warnings.append(
-                f"  --loss: '{tr_old['loss']['name']}' → '{tr_new['loss']['name']}'"
-            )
+            warnings.append(f"  --loss: '{tr_old['loss']['name']}' → '{tr_new['loss']['name']}'")
 
         old_clw = tr_old["loss"]["composite_loss_weighting"]
         new_clw = tr_new["loss"]["composite_loss_weighting"]
@@ -319,20 +307,16 @@ class BaseTrainer(ABC):
             warnings.append(f"  --composite-loss-weighting: {old_clw} → {new_clw}")
 
         if tr_old["optimizer"] != tr_new["optimizer"]:
-            warnings.append(
-                f"  --optimizer: '{tr_old['optimizer']}' → '{tr_new['optimizer']}'"
-            )
+            warnings.append(f"  --optimizer: '{tr_old['optimizer']}' → '{tr_new['optimizer']}'")
 
         if tr_old["learning_rate"] != tr_new["learning_rate"]:
             warnings.append(
-                f"  --learning-rate: {tr_old['learning_rate']} → "
-                f"{tr_new['learning_rate']}"
+                f"  --learning-rate: {tr_old['learning_rate']} → {tr_new['learning_rate']}"
             )
 
         if tr_old["lr_scheduler"] != tr_new["lr_scheduler"]:
             warnings.append(
-                f"  --lr-scheduler: '{tr_old['lr_scheduler']}' → "
-                f"'{tr_new['lr_scheduler']}'"
+                f"  --lr-scheduler: '{tr_old['lr_scheduler']}' → '{tr_new['lr_scheduler']}'"
             )
 
         old_warmup = tr_old.get("warmup_epochs", 0)
@@ -341,9 +325,7 @@ class BaseTrainer(ABC):
             warnings.append(f"  --warmup-epochs: {old_warmup} → {new_warmup}")
 
         if tr_old["l2_penalty"] != tr_new["l2_penalty"]:
-            warnings.append(
-                f"  --l2-penalty: {tr_old['l2_penalty']} → {tr_new['l2_penalty']}"
-            )
+            warnings.append(f"  --l2-penalty: {tr_old['l2_penalty']} → {tr_new['l2_penalty']}")
 
         if warnings:
             print_warning(
@@ -393,7 +375,8 @@ class BaseTrainer(ABC):
         if not pretrained_config_path:
             warnings.warn(
                 "--pretrained-weights is set but --pretrained-config was not "
-                "provided. Skipping encoder compatibility validation.", stacklevel=2
+                "provided. Skipping encoder compatibility validation.",
+                stacklevel=2,
             )
             return
 
@@ -402,9 +385,7 @@ class BaseTrainer(ABC):
 
     def _use_dtms(self) -> bool:
         """Return True when the selected loss requires distance transform maps."""
-        return (
-            self.config["training"]["loss"]["name"] in TrainerConstants.DTM_AWARE_LOSSES
-        )
+        return self.config["training"]["loss"]["name"] in TrainerConstants.DTM_AWARE_LOSSES
 
     def _setup_folds(self) -> None:
         """Setup data paths and parameters for a specific fold.
@@ -471,9 +452,7 @@ class BaseTrainer(ABC):
                 )
 
                 # Unpack while handling optional DTMs.
-                (train_images, val_images, train_labels, val_labels, *maybe_dtms) = (
-                    splits
-                )
+                (train_images, val_images, train_labels, val_labels, *maybe_dtms) = splits
                 if self._use_dtms():
                     train_dtms, _ = maybe_dtms
 
@@ -508,17 +487,13 @@ class BaseTrainer(ABC):
             **self.config["model"]["params"],
             **self.config["spatial_config"],
         }
-        return get_model_from_registry(
-            self.config["model"]["architecture"], **model_kwargs
-        )
+        return get_model_from_registry(self.config["model"]["architecture"], **model_kwargs)
 
     def _print_training_summary(self, world_size: int) -> None:
         """Print a one-time summary of the training configuration (rank 0)."""
         model = self._build_model()
         num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        rows = training_utils.training_summary_rows(
-            self.config, num_params, world_size
-        )
+        rows = training_utils.training_summary_rows(self.config, num_params, world_size)
         table = Table(title="Training configuration", show_header=False)
         table.add_column(style="bold")
         table.add_column()
@@ -538,21 +513,16 @@ class BaseTrainer(ABC):
         pretrained_weights = getattr(self.mist_args, "pretrained_weights", None)
         if pretrained_weights:
             strategy = getattr(self.mist_args, "input_channel_strategy", "average")
-            model, transfer_summary = load_pretrained_encoder(
-                model, pretrained_weights, strategy
-            )
+            model, transfer_summary = load_pretrained_encoder(model, pretrained_weights, strategy)
             if rank == 0:
                 n_loaded = len(transfer_summary["loaded"])
                 n_applied = len(transfer_summary["channel_strategy_applied"])
                 n_skipped = len(transfer_summary["skipped"])
                 transferred_keys = set(
-                    transfer_summary["loaded"]
-                    + transfer_summary["channel_strategy_applied"]
+                    transfer_summary["loaded"] + transfer_summary["channel_strategy_applied"]
                 )
                 model_sd = model.state_dict()
-                loaded_scalars = sum(
-                    model_sd[k].numel() for k in transferred_keys if k in model_sd
-                )
+                loaded_scalars = sum(model_sd[k].numel() for k in transferred_keys if k in model_sd)
                 print_info(
                     f"Pretrained encoder loaded from {pretrained_weights}\n"
                     f"  Loaded:                   {n_loaded} tensors "
@@ -585,9 +555,7 @@ class BaseTrainer(ABC):
         loss_cls = get_loss(loss_name)
         loss_params = {}
         if loss_name in TrainerConstants.SPACING_AWARE_LOSSES:
-            loss_params["sddl_spacing_xyz"] = self.config["spatial_config"][
-                "target_spacing"
-            ]
+            loss_params["sddl_spacing_xyz"] = self.config["spatial_config"]["target_spacing"]
         loss_function = loss_cls(**loss_params)
         loss_function = DeepSupervisionLoss(loss_function)
 
@@ -711,9 +679,7 @@ class BaseTrainer(ABC):
         hw = self.config["training"]["hardware"]
         os.environ["MASTER_ADDR"] = hw["master_addr"]
         os.environ["MASTER_PORT"] = str(hw["master_port"])
-        dist.init_process_group(
-            hw["communication_backend"], rank=rank, world_size=world_size
-        )
+        dist.init_process_group(hw["communication_backend"], rank=rank, world_size=world_size)
 
     # Clean up processes after distributed training
     def cleanup(self) -> None:
@@ -751,9 +717,7 @@ class BaseTrainer(ABC):
                 if loaded:
                     print_info(f"Resuming fold {fold} from epoch {state['epoch']}")
                 else:
-                    print_warning(
-                        f"No checkpoint found for fold {fold}, starting from scratch."
-                    )
+                    print_warning(f"No checkpoint found for fold {fold}, starting from scratch.")
 
         # Build data loaders for the fold.
         train_loader, val_loader = self.build_dataloaders(
@@ -824,9 +788,7 @@ class BaseTrainer(ABC):
                     # Check for NaN/Inf and flag for early exit.
                     if not np.isfinite(mean_loss):
                         if rank == 0:
-                            print_error(
-                                "Stopping training: Detected NaN or inf loss value!"
-                            )
+                            print_error("Stopping training: Detected NaN or inf loss value!")
                         stop_training[0] = 1
 
                     # Update running average and progress bar (rank 0 only).

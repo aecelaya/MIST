@@ -48,21 +48,13 @@ class SlidingWindowInferer(AbstractInferer):
 
         # Validate input parameters.
         if len(patch_size) != 3:
-            raise ValueError(
-                f"patch_size must be a tuple of length 3, got: {patch_size}"
-            )
+            raise ValueError(f"patch_size must be a tuple of length 3, got: {patch_size}")
         if not all(isinstance(dim, int) and dim > 0 for dim in patch_size):
-            raise ValueError(
-                f"All patch dimensions must be positive integers, got: {patch_size}"
-            )
+            raise ValueError(f"All patch dimensions must be positive integers, got: {patch_size}")
         if not isinstance(sw_batch_size, int) or sw_batch_size < 1:
-            raise ValueError(
-                f"sw_batch_size must be a positive integer, got: {sw_batch_size}"
-            )
+            raise ValueError(f"sw_batch_size must be a positive integer, got: {sw_batch_size}")
         if not 0 <= patch_overlap < 1:
-            raise ValueError(
-                f"patch_overlap must be in the range [0, 1), got: {patch_overlap}"
-            )
+            raise ValueError(f"patch_overlap must be in the range [0, 1), got: {patch_overlap}")
         if patch_blend_mode not in ic.SLIDING_WINDOW_PATCH_BLEND_MODES:
             raise ValueError(
                 f"Unsupported blend mode: '{patch_blend_mode}'. Supported "

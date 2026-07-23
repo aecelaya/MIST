@@ -18,10 +18,7 @@ def _make_eval_config(classes=None) -> dict:
     """Return a minimal valid evaluation_config in the new nested format."""
     if classes is None:
         classes = {"tumor": [1]}
-    return {
-        name: {"labels": labels, "metrics": {"dice": {}}}
-        for name, labels in classes.items()
-    }
+    return {name: {"labels": labels, "metrics": {"dice": {}}} for name, labels in classes.items()}
 
 
 class _FakeImage:
@@ -76,9 +73,7 @@ class TestValidateMask:
         assert result is not None
         assert "not a 3D image" in result
 
-    def test_float_dtype_with_fractional_values_returns_error(
-        self, monkeypatch, tmp_path
-    ):
+    def test_float_dtype_with_fractional_values_returns_error(self, monkeypatch, tmp_path):
         """Float dtype with non-integer values (probability map) returns error."""
         path = tmp_path / "mask.nii.gz"
         path.touch()
@@ -129,9 +124,7 @@ class TestValidateMask:
         path = tmp_path / "pred.nii.gz"
         path.touch()
         monkeypatch.setattr(ants, "image_header_info", lambda _: self._header(4))
-        result = evaluation_utils.validate_mask(
-            path, _make_eval_config(), mask_type="prediction"
-        )
+        result = evaluation_utils.validate_mask(path, _make_eval_config(), mask_type="prediction")
         assert result is not None
         assert "prediction" in result
 
@@ -182,16 +175,12 @@ class TestBuildEvaluationDataframe:
     def test_accepts_path_objects(self, csv_and_preds):
         """pathlib.Path inputs are accepted without error."""
         csv_path, pred_dir = csv_and_preds
-        df, _ = evaluation_utils.build_evaluation_dataframe(
-            Path(csv_path), Path(pred_dir)
-        )
+        df, _ = evaluation_utils.build_evaluation_dataframe(Path(csv_path), Path(pred_dir))
         assert len(df) == 2
 
     def test_missing_csv_returns_empty_df_and_error(self, tmp_path):
         """Missing CSV produces an empty DataFrame and an error message."""
-        df, err = evaluation_utils.build_evaluation_dataframe(
-            tmp_path / "none.csv", tmp_path
-        )
+        df, err = evaluation_utils.build_evaluation_dataframe(tmp_path / "none.csv", tmp_path)
         assert df.empty
         assert "No train_paths.csv" in err
 
@@ -227,9 +216,7 @@ class TestBuildEvaluationDataframe:
         """validate=True without evaluation_config raises ValueError."""
         csv_path, pred_dir = csv_and_preds
         with pytest.raises(ValueError, match="evaluation_config must be"):
-            evaluation_utils.build_evaluation_dataframe(
-                csv_path, pred_dir, validate=True
-            )
+            evaluation_utils.build_evaluation_dataframe(csv_path, pred_dir, validate=True)
 
     def test_validate_true_valid_masks_included(self, monkeypatch, csv_and_preds):
         """validate=True with passing masks keeps both patients."""

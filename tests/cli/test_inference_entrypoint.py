@@ -93,9 +93,7 @@ def test_parse_inference_args_missing_required_raises(tmp_path):
 )
 def test_resolve_device_cpu_cuda(monkeypatch, is_avail, dev_in, expected_type):
     """Test _resolve_device for CPU and CUDA."""
-    monkeypatch.setattr(
-        entry.torch.cuda, "is_available", lambda: is_avail, raising=True
-    )
+    monkeypatch.setattr(entry.torch.cuda, "is_available", lambda: is_avail, raising=True)
     dev = entry._resolve_device(dev_in)
     assert isinstance(dev, entry.torch.device)
     assert dev.type == expected_type
@@ -133,9 +131,7 @@ def _touch_json(p: Path, payload=None):
 def _touch_csv(p: Path, rows=None):
     """Create a CSV file with the given rows."""
     p.parent.mkdir(parents=True, exist_ok=True)
-    df = pd.DataFrame(
-        rows if rows is not None else [{"id": "p1", "image": "/tmp/p1.nii.gz"}]
-    )
+    df = pd.DataFrame(rows if rows is not None else [{"id": "p1", "image": "/tmp/p1.nii.gz"}])
     df.to_csv(p, index=False)
 
 
@@ -191,9 +187,7 @@ def test_prepare_io_missing_raises(tmp_path, missing_field):
         config=str(cfg),
         paths_csv=str(paths),
         output=str(out),
-        postprocess_strategy=(
-            str(pps) if missing_field == "postprocess_strategy" else None
-        ),
+        postprocess_strategy=(str(pps) if missing_field == "postprocess_strategy" else None),
     )
 
     # Remove whichever path we want missing.

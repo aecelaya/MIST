@@ -125,15 +125,12 @@ def get_files_df(
     # the dataset JSON file so the JSON and its data can be co-located and
     # moved together without adjusting the working directory.
     base_dir = (
-        Path(path_to_dataset_json).resolve().parent
-        / dataset_info[f"{train_or_test}-data"]
+        Path(path_to_dataset_json).resolve().parent / dataset_info[f"{train_or_test}-data"]
     ).resolve()
 
     # Get sorted list of patient IDs, skipping hidden files.
     # Sorting ensures deterministic ordering across platforms and runs.
-    patient_ids = sorted(
-        p.name for p in base_dir.iterdir() if not p.name.startswith(".")
-    )
+    patient_ids = sorted(p.name for p in base_dir.iterdir() if not p.name.startswith("."))
 
     # Build one row dict per patient, then create the DataFrame in one call.
     rows = []
@@ -152,8 +149,7 @@ def get_files_df(
                 row_data[image_type] = matching_file
             else:
                 logging.warning(
-                    "Patient '%s': no file found for image type '%s' "
-                    "(identifying strings: %s).",
+                    "Patient '%s': no file found for image type '%s' (identifying strings: %s).",
                     patient_id,
                     image_type,
                     identifying_strings,
@@ -395,9 +391,7 @@ def get_best_patch_size(
         target_mm = (remaining_budget * float(np.prod(free_spacings))) ** (1.0 / n)
 
         new_fixed = [
-            i
-            for i in free_axes
-            if (target_mm / target_spacing[i]) >= median_resampled_size[i]
+            i for i in free_axes if (target_mm / target_spacing[i]) >= median_resampled_size[i]
         ]
         if not new_fixed:
             break

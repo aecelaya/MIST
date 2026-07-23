@@ -133,10 +133,12 @@ def predict_single_example(
         # just copy the original header directly — no reorient or resample.
         prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # noqa: E501
         if probability_volume is not None:
-            probability_prediction = ants.merge_channels([
-                original_ants_image.new_image_like(data=probability_volume[c])
-                for c in range(probability_volume.shape[0])
-            ])
+            probability_prediction = ants.merge_channels(
+                [
+                    original_ants_image.new_image_like(data=probability_volume[c])
+                    for c in range(probability_volume.shape[0])
+                ]
+            )
         else:
             probability_prediction = None
     else:
@@ -145,13 +147,9 @@ def predict_single_example(
             mist_configuration["preprocessing"]["crop_to_foreground"]
             and foreground_bounding_box is None
         ):
-            foreground_bounding_box = preprocessing_utils.get_fg_mask_bbox(
-                original_ants_image
-            )
+            foreground_bounding_box = preprocessing_utils.get_fg_mask_bbox(original_ants_image)
 
-        prediction_spacing = tuple(
-            mist_configuration["spatial_config"]["target_spacing"]
-        )
+        prediction_spacing = tuple(mist_configuration["spatial_config"]["target_spacing"])
 
         # Restore original spacing, orientation, and header.
         prediction = inference_utils.back_to_original_space(
@@ -163,22 +161,18 @@ def predict_single_example(
         )
 
         if probability_volume is not None:
-            probability_prediction = (
-                inference_utils.probabilities_back_to_original_space(
-                    raw_probabilities=probability_volume,
-                    original_ants_image=original_ants_image,
-                    target_spacing=prediction_spacing,
-                    foreground_bounding_box=foreground_bounding_box,
-                )
+            probability_prediction = inference_utils.probabilities_back_to_original_space(
+                raw_probabilities=probability_volume,
+                original_ants_image=original_ants_image,
+                target_spacing=prediction_spacing,
+                foreground_bounding_box=foreground_bounding_box,
             )
         else:
             probability_prediction = None
 
     # Remap labels to match original dataset.
     if training_labels != original_labels:
-        prediction = inference_utils.remap_mask_labels(
-            prediction.numpy(), original_labels
-        )
+        prediction = inference_utils.remap_mask_labels(prediction.numpy(), original_labels)
         prediction = (
             original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # noqa: E501
         )
@@ -274,9 +268,7 @@ def test_on_fold(
                 # load the first image in the list. MIST already checks that
                 # the images are the same size and spacing.
                 image_paths = [
-                    v
-                    for k, v in patient.items()
-                    if k not in ic.PATIENT_DF_IGNORED_COLUMNS
+                    v for k, v in patient.items() if k not in ic.PATIENT_DF_IGNORED_COLUMNS
                 ]
                 original_ants_image = ants.image_read(image_paths[0])
 
@@ -306,8 +298,7 @@ def test_on_fold(
                     foreground_bounding_box=foreground_bounding_box,
                 )
             except (FileNotFoundError, RuntimeError, ValueError) as e:
-                error_messages.append(
-                    f"Prediction failed for {patient_id}: {str(e)}")
+                error_messages.append(f"Prediction failed for {patient_id}: {str(e)}")
             else:
                 # Write prediction as .nii.gz file.
                 ants.image_write(prediction, filename)
@@ -385,8 +376,7 @@ def infer_from_dataframe(
     )
 
     # Set up the predictor for inference.
-    predictor = _build_predictor(
-        mist_configuration, models=models_list, device=device)
+    predictor = _build_predictor(mist_configuration, models=models_list, device=device)
 
     # If a postprocess strategy file is provided, check if it exists and
     # initialize the postprocessor.
@@ -394,8 +384,7 @@ def infer_from_dataframe(
     if postprocessing_strategy_filepath is not None:
         if not Path(postprocessing_strategy_filepath).exists():
             raise FileNotFoundError(
-                "Postprocess strategy file not found: "
-                f"{postprocessing_strategy_filepath}"
+                f"Postprocess strategy file not found: {postprocessing_strategy_filepath}"
             )
         postprocessor = Postprocessor(
             strategy_path=postprocessing_strategy_filepath,
@@ -428,13 +417,10 @@ def infer_from_dataframe(
         for patient_index in pb.track(range(len(paths_dataframe))):
             patient = paths_dataframe.iloc[patient_index].to_dict()
             patient_id = patient["id"]
-            prediction_filename = str(
-                discrete_output_directory / f"{patient_id}.nii.gz")
+            prediction_filename = str(discrete_output_directory / f"{patient_id}.nii.gz")
             try:
                 # Validate the input patient data.
-                anchor_image, image_paths = inference_utils.validate_inference_images(
-                    patient
-                )
+                anchor_image, image_paths = inference_utils.validate_inference_images(patient)
 
                 # Preprocess the input images using the MIST preprocessing
                 # pipeline. This will handle normalization, cropping, and
@@ -490,8 +476,7 @@ def infer_from_dataframe(
                     if postprocessing_error_messages:
                         error_messages.extend(postprocessing_error_messages)
             except (FileNotFoundError, RuntimeError, ValueError) as e:
-                error_messages.append(
-                    f"Prediction failed for {patient_id}: {str(e)}")
+                error_messages.append(f"Prediction failed for {patient_id}: {str(e)}")
                 continue
             else:
                 # Write prediction as .nii.gz file.
@@ -508,8 +493,7 @@ def infer_from_dataframe(
     # Print a summary of the inference results. If there are any error or
     # warning messages, print them. Otherwise, print a success message.
     if error_messages:
-        print_section_header(
-            "Inference completed with the following messages:")
+        print_section_header("Inference completed with the following messages:")
         for message in error_messages:
             print_error(message)
     else:

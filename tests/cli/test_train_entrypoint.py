@@ -164,13 +164,9 @@ def test_ensure_required_artifacts_missing_numpy_dir(tmp_path):
     """It raises when the NumPy directory itself does not exist."""
     results_dir = tmp_path / "results"
     results_dir.mkdir()
-    _write_required_files(
-        results_dir, include_test=False
-    )  # helper from this test module
+    _write_required_files(results_dir, include_test=False)  # helper from this test module
 
-    ns = argparse.Namespace(
-        results=str(results_dir), numpy=str(tmp_path / "numpy_missing")
-    )
+    ns = argparse.Namespace(results=str(results_dir), numpy=str(tmp_path / "numpy_missing"))
     with pytest.raises(FileNotFoundError) as e:
         entry._ensure_required_artifacts(ns)
     assert "NumPy directory does not exist" in str(e.value)
@@ -236,9 +232,7 @@ def test_train_entry_resume_and_overwrite_are_mutually_exclusive(tmp_path, monke
         entry.train_entry(argv)
 
 
-def test_train_entry_blocks_existing_results_csv_without_overwrite(
-    tmp_path, monkeypatch
-):
+def test_train_entry_blocks_existing_results_csv_without_overwrite(tmp_path, monkeypatch):
     """It raises FileExistsError when results.csv exists without --overwrite."""
     _patch_minimal_cli(monkeypatch)
 
@@ -258,9 +252,7 @@ def test_train_entry_blocks_existing_results_csv_without_overwrite(
     monkeypatch.setattr(
         entry,
         "Patch3DTrainer",
-        lambda _ns: (_ for _ in ()).throw(
-            AssertionError("Trainer should not be created")
-        ),
+        lambda _ns: (_ for _ in ()).throw(AssertionError("Trainer should not be created")),
         raising=True,
     )
 
@@ -406,9 +398,7 @@ def test_train_entry_happy_path_with_eval_and_test_infer(tmp_path, monkeypatch):
     )
 
     # Non-empty evaluation dataframe.
-    eval_df = pd.DataFrame(
-        {"prediction": ["p.nii.gz"], "mask": ["m.nii.gz"], "id": [0]}
-    )
+    eval_df = pd.DataFrame({"prediction": ["p.nii.gz"], "mask": ["m.nii.gz"], "id": [0]})
     monkeypatch.setattr(
         entry.evaluation_utils,
         "build_evaluation_dataframe",
@@ -450,9 +440,7 @@ def test_train_entry_happy_path_with_eval_and_test_infer(tmp_path, monkeypatch):
         assert p.parent.name == "predictions"
         assert Path(models_directory).name == "models"
 
-    monkeypatch.setattr(
-        entry, "infer_from_dataframe", _infer_from_dataframe, raising=True
-    )
+    monkeypatch.setattr(entry, "infer_from_dataframe", _infer_from_dataframe, raising=True)
 
     argv = [
         "--results",

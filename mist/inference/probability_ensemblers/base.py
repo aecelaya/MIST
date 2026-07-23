@@ -49,7 +49,4 @@ class AbstractProbabilityEnsembler(ABC):
         return hash(self.name)
 
     def __eq__(self, other: Any) -> bool:
-        return (
-            isinstance(other, AbstractProbabilityEnsembler)
-            and self.name == other.name
-        )
+        return isinstance(other, AbstractProbabilityEnsembler) and self.name == other.name

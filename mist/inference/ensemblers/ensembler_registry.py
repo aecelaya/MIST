@@ -34,7 +34,6 @@ def get_ensembler(name: str) -> AbstractEnsembler:
     """Retrieve a fresh instance of a registered ensembler by name."""
     if name not in ENSEMBLER_REGISTRY:
         raise KeyError(
-            f"Ensembler '{name}' is not registered. "
-            f"Available: [{', '.join(list_ensemblers())}]"
+            f"Ensembler '{name}' is not registered. Available: [{', '.join(list_ensemblers())}]"
         )
     return ENSEMBLER_REGISTRY[name]()

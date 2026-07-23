@@ -52,12 +52,8 @@ def _patch_minimal_cli(monkeypatch) -> None:
         parser.add_argument("--overwrite", action="store_true")
 
     monkeypatch.setattr(entry.argmod, "ArgParser", _mk_parser, raising=True)
-    monkeypatch.setattr(
-        entry.argmod, "add_analyzer_args", _add_analyzer_args, raising=True
-    )
-    monkeypatch.setattr(
-        entry.argmod, "add_preprocess_args", _add_preprocess_args, raising=True
-    )
+    monkeypatch.setattr(entry.argmod, "add_analyzer_args", _add_analyzer_args, raising=True)
+    monkeypatch.setattr(entry.argmod, "add_preprocess_args", _add_preprocess_args, raising=True)
     monkeypatch.setattr(entry.argmod, "add_train_args", _add_train_args, raising=True)
 
 
@@ -297,9 +293,7 @@ def test_run_all_entry_handles_false_flags_and_empty_lists(monkeypatch):
     )
 
     # Parse and construct expected.
-    ns = entry._parse_run_all_args(
-        argv=["--data", "d.json", "--results", "r", "--numpy", "n"]
-    )
+    ns = entry._parse_run_all_args(argv=["--data", "d.json", "--results", "r", "--numpy", "n"])
     ns.folds = []  # Empty -> should not appear.
 
     analyze_keys = ["data", "results", "nfolds", "num_workers_analyze", "overwrite"]
@@ -356,8 +350,7 @@ def test_run_all_entry_passes_warmup_epochs_to_train(monkeypatch):
     )
 
     entry.run_all_entry(
-        argv=["--data", "d.json", "--results", "r", "--numpy", "n",
-              "--warmup-epochs", "0"]
+        argv=["--data", "d.json", "--results", "r", "--numpy", "n", "--warmup-epochs", "0"]
     )
 
     assert "--warmup-epochs" in captured_train_argv

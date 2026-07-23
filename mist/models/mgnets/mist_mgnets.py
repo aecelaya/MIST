@@ -98,9 +98,7 @@ class MGNet(MISTModel):
         self.use_deep_supervision = use_deep_supervision
 
         # --- 1. ADAPTIVE TOPOLOGY CONFIGURATION ---
-        self.kernels, self.strides, _ = nnunet_utils.get_unet_params(
-            patch_size, target_spacing
-        )
+        self.kernels, self.strides, _ = nnunet_utils.get_unet_params(patch_size, target_spacing)
         self.num_layers = len(self.strides)
         self.bottleneck_layer_idx = self.num_layers - 1
 
@@ -123,9 +121,7 @@ class MGNet(MISTModel):
             self.spike_height_schedule = list(range(1, max_spike_height + 1))
         elif mg_net.lower() == "wnet":
             # Sparse W-Pattern: [1, 2, 1, 3, 1, 4 ...].
-            self.spike_height_schedule = self._generate_sparse_w_sequence(
-                max_spike_height
-            )
+            self.spike_height_schedule = self._generate_sparse_w_sequence(max_spike_height)
         else:
             # Standard U-Net behavior (Single spike at max height, effectively).
             self.spike_height_schedule = [max_spike_height]
@@ -162,9 +158,7 @@ class MGNet(MISTModel):
             up_blocks = nn.ModuleList()
             up_samples = nn.ModuleList()
 
-            for depth_idx in range(
-                self.bottleneck_layer_idx - 1, peak_depth_idx - 1, -1
-            ):
+            for depth_idx in range(self.bottleneck_layer_idx - 1, peak_depth_idx - 1, -1):
                 expected_in_channels = self.filters_per_layer[depth_idx + 1]
                 expected_in_channels += self.filters_per_layer[depth_idx]
 
@@ -267,11 +261,7 @@ class MGNet(MISTModel):
         multigrid structure and do not transfer cleanly across architectures.
         """
         return OrderedDict(
-            {
-                k: v
-                for k, v in self.state_dict().items()
-                if k.startswith("main_encoder.")
-            }
+            {k: v for k, v in self.state_dict().items() if k.startswith("main_encoder.")}
         )
 
     def _generate_sparse_w_sequence(self, max_height: int) -> list[int]:
@@ -293,9 +283,7 @@ class MGNet(MISTModel):
         if max_height <= 1:
             return [1]
 
-        core_sequence = list(range(2, max_height + 1)) + list(
-            range(max_height - 1, 1, -1)
-        )
+        core_sequence = list(range(2, max_height + 1)) + list(range(max_height - 1, 1, -1))
         full_sequence = [1]
         for val in core_sequence:
             full_sequence.extend([val, 1])
@@ -352,9 +340,7 @@ class MGNet(MISTModel):
             act_name=constants.ACTIVATION,
         )
 
-    def _make_upsample(
-        self, in_channels: int, scale_factor: Sequence[int]
-    ) -> nn.Module:
+    def _make_upsample(self, in_channels: int, scale_factor: Sequence[int]) -> nn.Module:
         """
         Creates a learnable transposed convolution upsampling layer.
 
@@ -441,9 +427,7 @@ class MGNet(MISTModel):
                 target_depth_idx = self.bottleneck_layer_idx - 1 - i
 
                 vertical_features = upsample(current_features)
-                nearest_encoder_features = encoder_feature_registry[target_depth_idx][
-                    -1
-                ]
+                nearest_encoder_features = encoder_feature_registry[target_depth_idx][-1]
 
                 inputs_to_concat = [vertical_features, nearest_encoder_features]
 
@@ -494,13 +478,9 @@ class MGNet(MISTModel):
             if self.use_deep_supervision:
                 decoder_features_for_deep_supervision.reverse()
                 deep_supervision_outputs = []
-                for head_idx, features in enumerate(
-                    decoder_features_for_deep_supervision
-                ):
+                for head_idx, features in enumerate(decoder_features_for_deep_supervision):
                     aux_output = self.deep_supervision_heads[head_idx](features)
-                    deep_supervision_outputs.append(
-                        F.interpolate(aux_output, x.shape[2:])
-                    )
+                    deep_supervision_outputs.append(F.interpolate(aux_output, x.shape[2:]))
             return {
                 "prediction": prediction,
                 "deep_supervision": deep_supervision_outputs,

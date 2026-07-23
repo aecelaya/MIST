@@ -309,6 +309,4 @@ def test_predictor_use_amp_false_skips_autocast(monkeypatch):
     predictor = _make_predictor(use_amp=False)
     predictor(torch.ones(1, 1, 4, 4, 4))
 
-    assert not autocast_entered, (
-        "torch.autocast should not be entered when use_amp=False"
-    )
+    assert not autocast_entered, "torch.autocast should not be entered when use_amp=False"

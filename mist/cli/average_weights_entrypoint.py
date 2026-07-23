@@ -38,9 +38,7 @@ def average_weights_entry(argv: list[str] | None = None) -> None:
     """Entrypoint for the mist_average_weights command."""
     ns = _parse_args(argv)
     average_fold_weights(ns.weights, output_path=ns.output)
-    print_success(
-        f"Averaged weights from {len(ns.weights)} checkpoints saved to {ns.output}"
-    )
+    print_success(f"Averaged weights from {len(ns.weights)} checkpoints saved to {ns.output}")
 
 
 if __name__ == "__main__":

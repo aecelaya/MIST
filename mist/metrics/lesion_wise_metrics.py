@@ -36,9 +36,7 @@ def _consolidate_gt_lesions(
         Relabeled GT mask where nearby lesions share a label. Background
         voxels remain zero.
     """
-    gt_dilated = binary_dilation(
-        labeled_gt > 0, structure=struct, iterations=consolidation_iters
-    )
+    gt_dilated = binary_dilation(labeled_gt > 0, structure=struct, iterations=consolidation_iters)
     labeled_dilated, _ = label(gt_dilated, struct)
     # Project original GT voxels onto the dilated component labels.
     # Lesions whose dilated footprints merge receive the same new label and
@@ -52,9 +50,7 @@ def compute_lesion_wise_metrics(
     spacing: tuple[float, float, float],
     metrics: list[str],
     min_lesion_volume: float = LesionWiseMetricsConstants.MIN_LESION_VOLUME,
-    surface_dice_tolerance_mm: float = (
-        LesionWiseMetricsConstants.SURFACE_DICE_TOLERANCE_MM
-    ),
+    surface_dice_tolerance_mm: float = (LesionWiseMetricsConstants.SURFACE_DICE_TOLERANCE_MM),
     dilation_iters: int = LesionWiseMetricsConstants.DILATION_ITERS,
     gt_consolidation_iters: int = LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS,
     reduction: str = "mean",
@@ -140,9 +136,7 @@ def compute_lesion_wise_metrics(
         num_gt_above_thresh += 1
 
         # Find prediction components that overlap the dilated GT lesion.
-        dilated = binary_dilation(
-            gt_lesion, structure=struct, iterations=dilation_iters
-        )
+        dilated = binary_dilation(gt_lesion, structure=struct, iterations=dilation_iters)
         pred_overlap_labels = np.unique(labeled_pred[dilated])
         pred_overlap_labels = pred_overlap_labels[pred_overlap_labels > 0]
         matched_pred_labels.update(pred_overlap_labels.tolist())
@@ -159,18 +153,14 @@ def compute_lesion_wise_metrics(
 
         if "dice" in metrics:
             lesion_result["lesion_wise_dice"] = (
-                float(compute_dice_coefficient(gt_lesion, pred_lesion))
-                if detected
-                else 0.0
+                float(compute_dice_coefficient(gt_lesion, pred_lesion)) if detected else 0.0
             )
 
         # Compute surface distances once, shared by HD95 and surface Dice.
         surface_dist = None
         if detected and needs_surface:
             try:
-                surface_dist = compute_surface_distances(
-                    gt_lesion, pred_lesion, spacing
-                )
+                surface_dist = compute_surface_distances(gt_lesion, pred_lesion, spacing)
             except ValueError:
                 pass  # Treat as undetected for surface-based metrics.
 
@@ -183,11 +173,7 @@ def compute_lesion_wise_metrics(
 
         if "surface_dice" in metrics:
             lesion_result["lesion_wise_surf_dice"] = (
-                float(
-                    compute_surface_dice_at_tolerance(
-                        surface_dist, surface_dice_tolerance_mm
-                    )
-                )
+                float(compute_surface_dice_at_tolerance(surface_dist, surface_dice_tolerance_mm))
                 if surface_dist is not None
                 else 0.0
             )
@@ -208,16 +194,12 @@ def compute_lesion_wise_metrics(
     aggregate: dict[str, float] = {}
 
     if "dice" in metrics:
-        aggregate["lesion_wise_dice"] = (
-            sum(r["lesion_wise_dice"] for r in results) / denominator
-        )
+        aggregate["lesion_wise_dice"] = sum(r["lesion_wise_dice"] for r in results) / denominator
 
     if "haus95" in metrics:
         haus_sum = sum(r["lesion_wise_haus95"] for r in results)
         # Each FP is penalized with the image diagonal distance.
-        aggregate["lesion_wise_haus95"] = (
-            haus_sum + num_fp * diagonal_mm
-        ) / denominator
+        aggregate["lesion_wise_haus95"] = (haus_sum + num_fp * diagonal_mm) / denominator
 
     if "surface_dice" in metrics:
         aggregate["lesion_wise_surf_dice"] = (

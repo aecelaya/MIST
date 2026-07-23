@@ -107,9 +107,7 @@ class TestMGNetInit:
 
     def test_extra_kwargs_are_ignored(self, base_kwargs):
         """**kwargs absorbs unknown keys without raising."""
-        assert isinstance(
-            MGNet(**base_kwargs, some_unknown_arg="ignored"), torch.nn.Module
-        )
+        assert isinstance(MGNet(**base_kwargs, some_unknown_arg="ignored"), torch.nn.Module)
 
     def test_non_3d_patch_size_raises(self, base_kwargs):
         """2D patch_size raises a clear 3D-only error."""
@@ -345,9 +343,7 @@ class TestMGNetForward:
         assert isinstance(output["deep_supervision"], list)
         assert len(output["deep_supervision"]) > 0
 
-    def test_train_deep_supervision_shapes_match_prediction(
-        self, base_kwargs, small_input
-    ):
+    def test_train_deep_supervision_shapes_match_prediction(self, base_kwargs, small_input):
         """All deep supervision outputs are upsampled to match the prediction."""
         model = MGNet(mg_net="fmgnet", **base_kwargs)
         model.train()
@@ -356,9 +352,7 @@ class TestMGNetForward:
         for ds in output["deep_supervision"]:
             assert ds.shape == output["prediction"].shape
 
-    def test_train_without_deep_supervision_returns_dict_with_none(
-        self, base_kwargs, small_input
-    ):
+    def test_train_without_deep_supervision_returns_dict_with_none(self, base_kwargs, small_input):
         """Training without deep supervision returns dict with deep_supervision=None."""
         base_kwargs["use_deep_supervision"] = False
         model = MGNet(mg_net="fmgnet", **base_kwargs)

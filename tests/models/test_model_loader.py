@@ -175,17 +175,13 @@ def test_validate_encoder_compatibility_allows_in_out_channel_diff(nnunet_config
     validate_encoder_compatibility(nnunet_config, target)
 
 
-def test_validate_encoder_compatibility_arch_mismatch_raises(
-    nnunet_config, mednext_config
-):
+def test_validate_encoder_compatibility_arch_mismatch_raises(nnunet_config, mednext_config):
     """Different architectures raise ValueError."""
     with pytest.raises(ValueError, match="Architecture mismatch"):
         validate_encoder_compatibility(nnunet_config, mednext_config)
 
 
-def test_validate_encoder_compatibility_arch_mismatch_force_warns(
-    nnunet_config, mednext_config
-):
+def test_validate_encoder_compatibility_arch_mismatch_force_warns(nnunet_config, mednext_config):
     """force=True emits a warning instead of raising."""
     with pytest.warns(UserWarning, match="Architecture mismatch"):
         validate_encoder_compatibility(nnunet_config, mednext_config, force=True)
@@ -263,9 +259,7 @@ def source_checkpoint(nnunet_source, tmp_path):
     return path
 
 
-def test_load_pretrained_encoder_same_channels_returns_summary(
-    nnunet_source, source_checkpoint
-):
+def test_load_pretrained_encoder_same_channels_returns_summary(nnunet_source, source_checkpoint):
     """Loading into same-channel model populates the summary."""
     target = NNUNet(
         in_channels=1,
@@ -281,9 +275,7 @@ def test_load_pretrained_encoder_same_channels_returns_summary(
     assert len(summary["channel_strategy_applied"]) == 0
 
 
-def test_load_pretrained_encoder_encoder_weights_transferred(
-    nnunet_source, source_checkpoint
-):
+def test_load_pretrained_encoder_encoder_weights_transferred(nnunet_source, source_checkpoint):
     """Encoder weights in target should match source after loading."""
     target = NNUNet(
         in_channels=1,
@@ -316,25 +308,19 @@ def test_load_pretrained_encoder_decoder_unchanged(nnunet_source, source_checkpo
     decoder_before = {
         k: v.clone()
         for k, v in target.state_dict().items()
-        if not k.startswith(
-            ("unet.input_block.", "unet.encoder_layers.", "unet.bottleneck.")
-        )
+        if not k.startswith(("unet.input_block.", "unet.encoder_layers.", "unet.bottleneck."))
     }
     target, _ = load_pretrained_encoder(target, source_checkpoint)
     decoder_after = {
         k: v
         for k, v in target.state_dict().items()
-        if not k.startswith(
-            ("unet.input_block.", "unet.encoder_layers.", "unet.bottleneck.")
-        )
+        if not k.startswith(("unet.input_block.", "unet.encoder_layers.", "unet.bottleneck."))
     }
     for key in decoder_before:
         assert torch.allclose(decoder_before[key].float(), decoder_after[key].float())
 
 
-def test_load_pretrained_encoder_in_channel_average_strategy(
-    source_checkpoint, tmp_path
-):
+def test_load_pretrained_encoder_in_channel_average_strategy(source_checkpoint, tmp_path):
     """'average' strategy produces a weight with the correct target shape."""
     target = NNUNet(
         in_channels=4,  # Different from source (1).
@@ -390,9 +376,7 @@ def test_load_pretrained_encoder_in_channel_skip_strategy(
         use_deep_supervision=False,
         use_pocket_model=True,
     )
-    _, summary = load_pretrained_encoder(
-        target, source_checkpoint, in_channel_strategy="skip"
-    )
+    _, summary = load_pretrained_encoder(target, source_checkpoint, in_channel_strategy="skip")
     assert len(summary["channel_strategy_applied"]) == 0
 
 
@@ -413,9 +397,7 @@ def test_load_pretrained_encoder_invalid_strategy_raises(source_checkpoint):
 
 def test_load_pretrained_encoder_strips_ddp_prefix(nnunet_source, tmp_path):
     """Source checkpoints with DDP module. prefix are handled correctly."""
-    ddp_sd = OrderedDict(
-        {f"module.{k}": v for k, v in nnunet_source.state_dict().items()}
-    )
+    ddp_sd = OrderedDict({f"module.{k}": v for k, v in nnunet_source.state_dict().items()})
     path = str(tmp_path / "ddp.pt")
     torch.save(ddp_sd, path)
 
@@ -439,9 +421,7 @@ def test_load_pretrained_encoder_no_get_encoder_raises(source_checkpoint):
         def forward(self, x):
             return x
 
-    with pytest.raises(
-        AttributeError, match="does not implement get_encoder_state_dict"
-    ):
+    with pytest.raises(AttributeError, match="does not implement get_encoder_state_dict"):
         load_pretrained_encoder(BareModel(), source_checkpoint)
 
 
@@ -467,9 +447,7 @@ def test_get_model_from_registry_success(valid_mist_config):
 def test_validate_missing_model_key(valid_mist_config):
     """Test ValueError is raised when 'model' key is missing."""
     valid_mist_config.pop("model")
-    with pytest.raises(
-        ValueError, match="Missing required key 'model' in configuration."
-    ):
+    with pytest.raises(ValueError, match="Missing required key 'model' in configuration."):
         validate_mist_config_for_model_loading(valid_mist_config)
 
 
@@ -499,9 +477,7 @@ def test_load_model_from_config_strips_ddp_prefix(mock_torch_load, valid_mist_co
     dummy_model = MagicMock(spec=NNUNet)
 
     # Return a dummy model instance from registry constructor.
-    with patch(
-        "mist.models.model_loader.get_model_from_registry", return_value=dummy_model
-    ):
+    with patch("mist.models.model_loader.get_model_from_registry", return_value=dummy_model):
         # Fake DDP-wrapped weights.
         mock_torch_load.return_value = {
             "module.encoder.weight": torch.randn(4, 1, 3, 3, 3),
@@ -523,9 +499,7 @@ def test_load_model_from_config_keeps_non_ddp_keys(mock_torch_load, valid_mist_c
     """Non-DDP checkpoints are loaded without key modification."""
     dummy_model = MagicMock(spec=NNUNet)
 
-    with patch(
-        "mist.models.model_loader.get_model_from_registry", return_value=dummy_model
-    ):
+    with patch("mist.models.model_loader.get_model_from_registry", return_value=dummy_model):
         # Raw (non-DDP) state dict.
         mock_torch_load.return_value = {
             "encoder.weight": torch.randn(4, 1, 3, 3, 3),
@@ -538,9 +512,7 @@ def test_load_model_from_config_keeps_non_ddp_keys(mock_torch_load, valid_mist_c
         assert "encoder.weight" in loaded_state_dict
         assert "encoder.bias" in loaded_state_dict
         # Ensure nothing was stripped.
-        assert all(
-            k in ["encoder.weight", "encoder.bias"] for k in loaded_state_dict.keys()
-        )
+        assert all(k in ["encoder.weight", "encoder.bias"] for k in loaded_state_dict.keys())
         assert model is dummy_model
 
 
@@ -552,18 +524,14 @@ def test_load_model_from_config_keeps_non_ddp_keys(mock_torch_load, valid_mist_c
 def test_validate_missing_spatial_config_key(valid_mist_config):
     """Missing 'spatial_config' key raises ValueError."""
     valid_mist_config.pop("spatial_config")
-    with pytest.raises(
-        ValueError, match="Missing required key 'spatial_config' in configuration."
-    ):
+    with pytest.raises(ValueError, match="Missing required key 'spatial_config' in configuration."):
         validate_mist_config_for_model_loading(valid_mist_config)
 
 
 def test_validate_missing_spatial_config_subkey(valid_mist_config):
     """Missing key inside 'spatial_config' raises ValueError."""
     valid_mist_config["spatial_config"].pop("patch_size")
-    with pytest.raises(
-        ValueError, match="Missing required key 'patch_size' in spatial_config."
-    ):
+    with pytest.raises(ValueError, match="Missing required key 'patch_size' in spatial_config."):
         validate_mist_config_for_model_loading(valid_mist_config)
 
 
@@ -592,9 +560,7 @@ def test_load_pretrained_encoder_target_key_absent_from_source_is_skipped(
     assert len(summary["loaded"]) == 0
 
 
-def test_load_pretrained_encoder_incompatible_shape_is_skipped(
-    nnunet_source, source_checkpoint
-):
+def test_load_pretrained_encoder_incompatible_shape_is_skipped(nnunet_source, source_checkpoint):
     """A key whose shape[0] differs between source and target is skipped."""
     source_enc = nnunet_source.get_encoder_state_dict()
     first_key = next(iter(source_enc))

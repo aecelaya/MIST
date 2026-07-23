@@ -312,9 +312,7 @@ def patch_registries(monkeypatch):
     monkeypatch.setattr(bt, "get_loss", lambda name: DummyLoss)
     monkeypatch.setattr(bt, "get_alpha_scheduler", lambda cfg: object())
 
-    def fake_get_optimizer(
-        name, params, weight_decay, eps, learning_rate=None, l2_penalty=None
-    ):
+    def fake_get_optimizer(name, params, weight_decay, eps, learning_rate=None, l2_penalty=None):
         """Fake optimizer that returns a dummy SGD."""
         lr = 0.1 if learning_rate is None else float(learning_rate)
         wd = float(weight_decay if l2_penalty is None else l2_penalty)
@@ -515,9 +513,7 @@ def test_build_components_single_gpu(tmp_pipeline, mist_args, monkeypatch):
     assert isinstance(state["model"], DummyModel)
 
 
-def test_build_components_multi_gpu_wraps_with_ddp(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_build_components_multi_gpu_wraps_with_ddp(tmp_pipeline, mist_args, monkeypatch):
     """Test build_components with multiple GPUs, DDP wrapping."""
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
     results, _ = tmp_pipeline
@@ -531,9 +527,7 @@ def test_build_components_multi_gpu_wraps_with_ddp(
     assert "scaler" not in state
 
 
-def test_setup_initializes_process_group_once(
-    tmp_pipeline, mist_args, monkeypatch, patch_dist
-):
+def test_setup_initializes_process_group_once(tmp_pipeline, mist_args, monkeypatch, patch_dist):
     """Ensure process group is initialized only once."""
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
     trainer = DummyTrainer(mist_args)
@@ -633,9 +627,7 @@ def test_fit_multi_gpu_uses_spawn(tmp_pipeline, mist_args, monkeypatch):
     assert spawned["count"] == 1
 
 
-def test_fit_sets_cudnn_conv_fp32_precision_when_available(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_fit_sets_cudnn_conv_fp32_precision_when_available(tmp_pipeline, mist_args, monkeypatch):
     """fit() sets cudnn.conv.fp32_precision='tf32' on PyTorch >= 2.5."""
     fake_conv = SimpleNamespace(fp32_precision=None)
     monkeypatch.setattr(torch.backends.cudnn, "conv", fake_conv, raising=False)
@@ -665,9 +657,7 @@ def test_invalid_folds_subset_raises(tmp_pipeline, mist_args):
     assert "Found folds: [0, 2]" in msg
 
 
-def test_update_num_gpus_raises_when_cuda_unavailable(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_update_num_gpus_raises_when_cuda_unavailable(tmp_pipeline, mist_args, monkeypatch):
     """Test that update_num_gpus raises when CUDA is unavailable."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=False)
 
@@ -731,9 +721,7 @@ def test_train_fold_raises_when_val_images_less_than_world_size(
     assert "reduce the number of GPUs" in msg
 
 
-def test_train_loop_else_branch_rank_nonzero(
-    tmp_pipeline, mist_args, monkeypatch, patch_dist
-):
+def test_train_loop_else_branch_rank_nonzero(tmp_pipeline, mist_args, monkeypatch, patch_dist):
     """Test train_fold else branch for rank > 0."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True, raising=False)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
@@ -754,9 +742,7 @@ def test_train_loop_else_branch_rank_nonzero(
     assert patch_dist["barrier"] >= 1
 
 
-def test_validation_else_branch_rank_nonzero(
-    tmp_pipeline, mist_args, monkeypatch, patch_dist
-):
+def test_validation_else_branch_rank_nonzero(tmp_pipeline, mist_args, monkeypatch, patch_dist):
     """Test validation step else branch for rank > 0."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True, raising=False)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
@@ -867,9 +853,7 @@ def test_run_cross_validation_nonzero_rank_no_print_but_calls_folds(
         {"name": "linear", "params": {"init_pause": 5}},
     ],
 )
-def test_build_components_composite_loss_scheduler(
-    tmp_pipeline, mist_args, monkeypatch, clw_cfg
-):
+def test_build_components_composite_loss_scheduler(tmp_pipeline, mist_args, monkeypatch, clw_cfg):
     """Test that build_components sets composite_loss_weighting correctly.
 
     Uses a composite loss name so the COMPOSITE_LOSSES guard is satisfied.
@@ -931,9 +915,7 @@ def test_set_seed_swallows_dist_errors(tmp_pipeline, mist_args, monkeypatch):
     assert os.environ["PYTHONHASHSEED"] == "123"
 
 
-def test_resume_raises_on_incompatible_model_override(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_resume_raises_on_incompatible_model_override(tmp_pipeline, mist_args, monkeypatch):
     """--resume + --model mismatch raises ValueError before training starts."""
     mist_args.resume = True
     mist_args.model = "different_arch"
@@ -942,9 +924,7 @@ def test_resume_raises_on_incompatible_model_override(
         DummyTrainer(mist_args)
 
 
-def test_resume_raises_on_incompatible_patch_size_override(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_resume_raises_on_incompatible_patch_size_override(tmp_pipeline, mist_args, monkeypatch):
     """--resume + --patch-size mismatch raises ValueError before training starts."""
     mist_args.resume = True
     mist_args.patch_size = [32, 32, 32]  # config default is [16, 16, 16]
@@ -959,9 +939,7 @@ def test_resume_warns_on_loss_override(tmp_pipeline, mist_args, monkeypatch):
     mist_args.loss = "dice"  # config default is dummy_loss
 
     printed = []
-    monkeypatch.setattr(
-        console_mod.console, "print", lambda msg: printed.append(str(msg))
-    )
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
 
     DummyTrainer(mist_args)
 
@@ -974,9 +952,7 @@ def test_resume_no_warning_when_no_overrides(tmp_pipeline, mist_args, monkeypatc
     mist_args.resume = True
 
     printed = []
-    monkeypatch.setattr(
-        console_mod.console, "print", lambda msg: printed.append(str(msg))
-    )
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
 
     DummyTrainer(mist_args)
 
@@ -1014,9 +990,7 @@ def test_save_and_load_checkpoint_roundtrip(tmp_pipeline, mist_args, monkeypatch
     assert fresh_state["best_val_loss"] == pytest.approx(0.42)
 
 
-def test_load_checkpoint_returns_false_when_missing(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_load_checkpoint_returns_false_when_missing(tmp_pipeline, mist_args, monkeypatch):
     """load_checkpoint returns False and leaves state unchanged when no file."""
     trainer = DummyTrainer(mist_args)
     state = trainer.build_components(rank=0, world_size=1)
@@ -1045,9 +1019,7 @@ def test_train_fold_saves_checkpoint_each_epoch(tmp_pipeline, mist_args, monkeyp
     assert checkpoint["fold"] == 0
 
 
-def test_resume_loads_checkpoint_and_prints_message(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_resume_loads_checkpoint_and_prints_message(tmp_pipeline, mist_args, monkeypatch):
     """With --resume and an existing checkpoint, train_fold loads it and prints."""
     monkeypatch.setattr(torch, "save", _real_torch_save)
     monkeypatch.setattr(torch, "load", _real_torch_load)
@@ -1090,9 +1062,7 @@ def test_resume_warns_when_no_checkpoint(tmp_pipeline, mist_args, monkeypatch):
     assert any("No checkpoint found" in s for s in out)
 
 
-def test_run_cross_validation_skips_completed_fold(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_run_cross_validation_skips_completed_fold(tmp_pipeline, mist_args, monkeypatch):
     """With --resume, completed folds (epoch >= epochs-1) are skipped."""
     monkeypatch.setattr(torch, "save", _real_torch_save)
     monkeypatch.setattr(torch, "load", _real_torch_load)
@@ -1132,9 +1102,7 @@ def test_run_cross_validation_skips_completed_fold(
     assert any("already complete" in s for s in out)
 
 
-def test_validation_rank0_ddp_allreduce_and_mean(
-    tmp_pipeline, mist_args, monkeypatch, patch_dist
-):
+def test_validation_rank0_ddp_allreduce_and_mean(tmp_pipeline, mist_args, monkeypatch, patch_dist):
     """With DDP, rank 0 validation uses all_reduce and divides by world_size."""
     # Enable multi-GPU (DDP path).
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
@@ -1235,9 +1203,7 @@ def test_check_resume_overrides_warns_on_all_training_diffs(tmp_pipeline, monkey
     )
 
     printed = []
-    monkeypatch.setattr(
-        console_mod.console, "print", lambda msg: printed.append(str(msg))
-    )
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
 
     DummyTrainer(args)
 
@@ -1256,9 +1222,7 @@ def test_check_resume_overrides_warns_on_all_training_diffs(tmp_pipeline, monkey
 # =============================================
 
 
-def test_validate_pretrained_config_warns_when_no_config_path(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_validate_pretrained_config_warns_when_no_config_path(tmp_pipeline, mist_args, monkeypatch):
     """pretrained_weights set but no config path emits a Python warning."""
     mist_args.pretrained_weights = "/fake/weights.pt"
     # pretrained_config is intentionally not set (absent == None via getattr)
@@ -1280,9 +1244,7 @@ def test_validate_pretrained_config_calls_validator_when_both_set(
     monkeypatch.setattr(
         bt.io,
         "read_json_file",
-        lambda path: (
-            source_cfg if path == "/fake/source_config.json" else _real_read(path)
-        ),
+        lambda path: source_cfg if path == "/fake/source_config.json" else _real_read(path),
     )
 
     calls = []
@@ -1303,9 +1265,7 @@ def test_validate_pretrained_config_calls_validator_when_both_set(
 # =============================================
 
 
-def test_build_components_loads_pretrained_encoder(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_build_components_loads_pretrained_encoder(tmp_pipeline, mist_args, monkeypatch):
     """When pretrained_weights is set, load_pretrained_encoder is called and
     the summary is printed on rank 0."""
     mist_args.pretrained_weights = "/fake/encoder.pt"
@@ -1331,9 +1291,7 @@ def test_build_components_loads_pretrained_encoder(
     monkeypatch.setattr(bt, "validate_encoder_compatibility", lambda *a: None)
 
     printed = []
-    monkeypatch.setattr(
-        console_mod.console, "print", lambda msg: printed.append(str(msg))
-    )
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
 
     trainer = DummyTrainer(mist_args)
     trainer.build_components(rank=0, world_size=1)
@@ -1349,9 +1307,7 @@ def test_build_components_loads_pretrained_encoder(
 # =============================================
 
 
-def test_build_components_spacing_aware_loss_injects_spacing(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_build_components_spacing_aware_loss_injects_spacing(tmp_pipeline, mist_args, monkeypatch):
     """A spacing-aware loss name causes sddl_spacing_xyz to be passed to the
     loss constructor."""
     spacing_loss = next(iter(bt.TrainerConstants.SPACING_AWARE_LOSSES))
@@ -1402,9 +1358,7 @@ def test_train_fold_logs_alpha_for_composite_loss(tmp_pipeline, mist_args, monke
 
     # Stub get_alpha_scheduler to return a simple callable — no real scheduler
     # needed; we just need state["composite_loss_weighting"] to be non-None.
-    monkeypatch.setattr(
-        bt, "get_alpha_scheduler", lambda name, num_epochs, **kw: lambda epoch: 0.7
-    )
+    monkeypatch.setattr(bt, "get_alpha_scheduler", lambda name, num_epochs, **kw: lambda epoch: 0.7)
 
     # Capture the SummaryWriter used during training.
     created_writers = []

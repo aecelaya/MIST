@@ -128,12 +128,8 @@ class MedNeXt(MISTModel):
         self.bottleneck = nn.Sequential(
             *[
                 MedNeXtBlock(
-                    in_channels=(
-                        init_filters * (filters_multiplier ** len(blocks_down))
-                    ),
-                    out_channels=(
-                        init_filters * (filters_multiplier ** len(blocks_down))
-                    ),
+                    in_channels=(init_filters * (filters_multiplier ** len(blocks_down))),
+                    out_channels=(init_filters * (filters_multiplier ** len(blocks_down))),
                     expansion_ratio=bottleneck_expansion_ratio,
                     kernel_size=dec_kernel_size,
                     use_residual_connection=use_residual_blocks,
@@ -150,12 +146,8 @@ class MedNeXt(MISTModel):
         for i, num_blocks in enumerate(blocks_up):
             up_blocks.append(
                 MedNeXtUpBlock(
-                    in_channels=(
-                        init_filters * (filters_multiplier ** (len(blocks_up) - i))
-                    ),
-                    out_channels=(
-                        init_filters * (filters_multiplier ** (len(blocks_up) - i - 1))
-                    ),
+                    in_channels=(init_filters * (filters_multiplier ** (len(blocks_up) - i))),
+                    out_channels=(init_filters * (filters_multiplier ** (len(blocks_up) - i - 1))),
                     expansion_ratio=decoder_expansion_ratio[i],
                     kernel_size=dec_kernel_size,
                     use_residual_connection=use_residual_blocks,
@@ -168,12 +160,10 @@ class MedNeXt(MISTModel):
                     *[
                         MedNeXtBlock(
                             in_channels=(
-                                init_filters
-                                * (filters_multiplier ** (len(blocks_up) - i - 1))
+                                init_filters * (filters_multiplier ** (len(blocks_up) - i - 1))
                             ),
                             out_channels=(
-                                init_filters
-                                * (filters_multiplier ** (len(blocks_up) - i - 1))
+                                init_filters * (filters_multiplier ** (len(blocks_up) - i - 1))
                             ),
                             expansion_ratio=decoder_expansion_ratio[i],
                             kernel_size=dec_kernel_size,
@@ -215,11 +205,7 @@ class MedNeXt(MISTModel):
             "bottleneck.",
         )
         return OrderedDict(
-            {
-                k: v
-                for k, v in self.state_dict().items()
-                if k.startswith(encoder_prefixes)
-            }
+            {k: v for k, v in self.state_dict().items() if k.startswith(encoder_prefixes)}
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor | dict:
@@ -248,7 +234,9 @@ class MedNeXt(MISTModel):
         if self.use_deep_supervision:
             ds_outputs = []
 
-        for i, (up_block, dec_stage) in enumerate(zip(self.up_blocks, self.dec_stages, strict=False)):
+        for i, (up_block, dec_stage) in enumerate(
+            zip(self.up_blocks, self.dec_stages, strict=False)
+        ):
             if self.use_deep_supervision and i < len(self.out_blocks):
                 ds_outputs.append(self.out_blocks[i](x))  # pylint: disable=used-before-assignment  # noqa: E501
 

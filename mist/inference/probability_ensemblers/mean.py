@@ -31,9 +31,7 @@ class MeanProbabilityEnsembler(AbstractProbabilityEnsembler):
             ValueError: If probabilities is empty or shapes disagree.
         """
         if not probabilities:
-            raise ValueError(
-                "MeanProbabilityEnsembler requires at least one probability volume."
-            )
+            raise ValueError("MeanProbabilityEnsembler requires at least one probability volume.")
         reference_shape = probabilities[0].shape
         for p in probabilities:
             if p.shape != reference_shape:

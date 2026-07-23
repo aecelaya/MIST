@@ -13,17 +13,14 @@ from mist.metrics import lookup_tables
 def _assert_is_numpy_array(name: str, array: Any) -> None:
     """Raises an exception if `array` is not a numpy array."""
     if not isinstance(array, np.ndarray):
-        raise ValueError(
-            f"The argument {name!r} should be a numpy array, not a {type(array)}"
-        )
+        raise ValueError(f"The argument {name!r} should be a numpy array, not a {type(array)}")
 
 
 def _check_nd_numpy_array(name: str, array: npt.NDArray[Any], num_dims: int) -> None:
     """Raises an exception if `array` is not a `num_dims`-D numpy array."""
     if len(array.shape) != num_dims:
         raise ValueError(
-            f"The argument {name!r} should be a {num_dims}D array, not of shape "
-            f"{array.shape}"
+            f"The argument {name!r} should be a {num_dims}D array, not of shape {array.shape}"
         )
 
 
@@ -42,8 +39,7 @@ def _assert_is_bool_numpy_array(name: str, array: Any) -> None:
     _assert_is_numpy_array(name, array)
     if array.dtype != bool:
         raise ValueError(
-            f"The argument {name!r} should be a numpy array of type bool, not "
-            f"{array.dtype}"
+            f"The argument {name!r} should be a numpy array of type bool, not {array.dtype}"
         )
 
 
@@ -109,9 +105,7 @@ def _crop_to_bounding_box(
 
     num_dims = len(mask.shape)
     if num_dims == 2:
-        cropmask[0:-1, 0:-1] = mask[
-            bbox_min[0] : bbox_max[0] + 1, bbox_min[1] : bbox_max[1] + 1
-        ]
+        cropmask[0:-1, 0:-1] = mask[bbox_min[0] : bbox_max[0] + 1, bbox_min[1] : bbox_max[1] + 1]
     elif num_dims == 3:
         cropmask[0:-1, 0:-1, 0:-1] = mask[
             bbox_min[0] : bbox_max[0] + 1,
@@ -221,10 +215,8 @@ def compute_surface_distances(
 
         # Compute the area for all 256 possible surface elements
         # (given a 2x2x2 neighbourhood) according to the spacing_mm.
-        neighbour_code_to_surface_area = (
-            lookup_tables.create_table_neighbour_code_to_surface_area(
-                spacing_mm  # type: ignore
-            )
+        neighbour_code_to_surface_area = lookup_tables.create_table_neighbour_code_to_surface_area(
+            spacing_mm  # type: ignore
         )
         kernel = lookup_tables.ENCODE_NEIGHBOURHOOD_3D_KERNEL
         full_true_neighbours = 0b11111111
@@ -250,9 +242,7 @@ def compute_surface_distances(
     )
 
     # create masks with the surface voxels
-    borders_gt = (neighbour_code_map_gt != 0) & (
-        neighbour_code_map_gt != full_true_neighbours
-    )
+    borders_gt = (neighbour_code_map_gt != 0) & (neighbour_code_map_gt != full_true_neighbours)
     borders_pred = (neighbour_code_map_pred != 0) & (
         neighbour_code_map_pred != full_true_neighbours
     )
@@ -265,9 +255,7 @@ def compute_surface_distances(
         distmap_gt = np.inf * np.ones(borders_gt.shape)
 
     if borders_pred.any():
-        distmap_pred = ndimage.distance_transform_edt(
-            ~borders_pred, sampling=spacing_mm
-        )
+        distmap_pred = ndimage.distance_transform_edt(~borders_pred, sampling=spacing_mm)
     else:
         distmap_pred = np.inf * np.ones(borders_pred.shape)
 
@@ -407,12 +395,10 @@ def compute_surface_overlap_at_tolerance(
     surfel_areas_gt = surface_distances["surfel_areas_gt"]
     surfel_areas_pred = surface_distances["surfel_areas_pred"]
     rel_overlap_gt = (
-        np.sum(surfel_areas_gt[distances_gt_to_pred <= tolerance_mm])
-        / np.sum(surfel_areas_gt)
+        np.sum(surfel_areas_gt[distances_gt_to_pred <= tolerance_mm]) / np.sum(surfel_areas_gt)
     ).astype("float")
     rel_overlap_pred = (
-        np.sum(surfel_areas_pred[distances_pred_to_gt <= tolerance_mm])
-        / np.sum(surfel_areas_pred)
+        np.sum(surfel_areas_pred[distances_pred_to_gt <= tolerance_mm]) / np.sum(surfel_areas_pred)
     ).astype("float")
     return (rel_overlap_gt, rel_overlap_pred)
 
@@ -448,12 +434,9 @@ def compute_surface_dice_at_tolerance(
 
     # Compute the overlap of the surfaces at the specified tolerance.
     overlap_gt = np.sum(surfel_areas_gt[distances_gt_to_pred <= tolerance_mm])
-    overlap_pred = np.sum(
-        surfel_areas_pred[distances_pred_to_gt <= tolerance_mm]
-    ).astype("float")
+    overlap_pred = np.sum(surfel_areas_pred[distances_pred_to_gt <= tolerance_mm]).astype("float")
     surface_dice = (
-        (overlap_gt + overlap_pred)
-        / (np.sum(surfel_areas_gt) + np.sum(surfel_areas_pred))
+        (overlap_gt + overlap_pred) / (np.sum(surfel_areas_gt) + np.sum(surfel_areas_pred))
     ).astype("float")
     return surface_dice
 

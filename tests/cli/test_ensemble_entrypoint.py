@@ -40,16 +40,12 @@ def _write_probability_volume(
     path, channel_values: list[float], shape: tuple[int, int, int] = (4, 4, 4)
 ) -> None:
     """Write a multi-component NIfTI with constant per-channel probabilities."""
-    channels = [
-        ants.from_numpy(np.full(shape, v, dtype=np.float32)) for v in channel_values
-    ]
+    channels = [ants.from_numpy(np.full(shape, v, dtype=np.float32)) for v in channel_values]
     merged = ants.merge_channels(channels)
     ants.image_write(merged, str(path))
 
 
-def _make_prob_dir(
-    tmp_path, name: str, patient_channel_values: dict[str, list[float]]
-) -> str:
+def _make_prob_dir(tmp_path, name: str, patient_channel_values: dict[str, list[float]]) -> str:
     """Create a probability directory with one multi-component NIfTI per patient."""
     d = tmp_path / name
     d.mkdir()
@@ -148,9 +144,7 @@ def test_parse_ensemble_args_input_type_default_labels(tmp_path):
     """Default --input-type is 'labels', and --config is not required."""
     d1 = _make_pred_dir(tmp_path, "p1", ["a"])
     d2 = _make_pred_dir(tmp_path, "p2", ["a"])
-    ns = _parse_ensemble_args(
-        ["--predictions", d1, d2, "--output", str(tmp_path / "out")]
-    )
+    ns = _parse_ensemble_args(["--predictions", d1, d2, "--output", str(tmp_path / "out")])
     assert ns.input_type == "labels"
     assert ns.config is None
     assert ns.probability_ensemble_backend == "mean"
@@ -350,9 +344,7 @@ def test_run_ensemble_output_values_correct(tmp_path):
     )
     run_ensemble(ns)
 
-    result = sitk.GetArrayFromImage(
-        sitk.ReadImage(str(tmp_path / "out" / f"{pid}.nii.gz"))
-    )
+    result = sitk.GetArrayFromImage(sitk.ReadImage(str(tmp_path / "out" / f"{pid}.nii.gz")))
     assert np.array_equal(result, foreground)
 
 

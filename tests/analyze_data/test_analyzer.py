@@ -495,9 +495,7 @@ class TestAnalyzerHelpers:
         monkeypatch.setattr(np, "percentile", lambda a, q: 3.0, raising=True)
         assert max(Analyzer(args).get_target_spacing()) == 3.0
 
-    def test_check_resampled_dims_warns_when_large(
-        self, args, monkeypatch, capture_console
-    ):
+    def test_check_resampled_dims_warns_when_large(self, args, monkeypatch, capture_console):
         """check_resampled_dims logs a warning when exceeding memory limit."""
         monkeypatch.setattr(
             au,
@@ -681,9 +679,7 @@ class TestGetCtNormalizationParameters:
 
         monkeypatch.setattr(ants, "image_read", _image_read, raising=True)
         Analyzer(args).get_ct_normalization_parameters()
-        assert any(
-            "HU values outside the histogram range" in m for m in capture_console
-        )
+        assert any("HU values outside the histogram range" in m for m in capture_console)
 
     def test_ct_normalization_raises_on_worker_error(self, args, monkeypatch):
         """An exception in the CT stats worker propagates as RuntimeError."""
@@ -945,9 +941,7 @@ class TestValidateDataset:
         def _dispatch(path: str):
             if "mask" in path:
                 arr = np.zeros((10, 10, 10), dtype=np.float32)
-                arr[2:4, 2:4, 2:4] = (
-                    99 if path.startswith("0_") or "/0_mask.nii.gz" in path else 1
-                )
+                arr[2:4, 2:4, 2:4] = 99 if path.startswith("0_") or "/0_mask.nii.gz" in path else 1
                 return ants.from_numpy(arr)
             return make_ants_image(fill=1.0)
 
@@ -973,9 +967,7 @@ class TestValidateDataset:
         assert any("In 0:" in m and "ITK internal error" in m for m in capture_console)
         assert_exclusion_summary(capture_console, 1)
 
-    def test_runtime_error_excludes_one_sample_and_logs(
-        self, args, monkeypatch, capture_console
-    ):
+    def test_runtime_error_excludes_one_sample_and_logs(self, args, monkeypatch, capture_console):
         """RuntimeError on one sample is caught and that sample excluded."""
 
         def _read_dispatch(path: str):
@@ -987,9 +979,7 @@ class TestValidateDataset:
         a = Analyzer(args)
         a.validate_dataset()
         assert len(a.paths_df) == TRAIN_N - 1
-        assert any(
-            "In 0:" in m and "corrupted NIfTI header" in m for m in capture_console
-        )
+        assert any("In 0:" in m and "corrupted NIfTI header" in m for m in capture_console)
         assert_exclusion_summary(capture_console, 1)
 
     def test_runtime_error_all_samples_raises(self, args, monkeypatch):
@@ -1003,9 +993,7 @@ class TestValidateDataset:
         with pytest.raises(RuntimeError):
             Analyzer(args).validate_dataset()
 
-    def test_header_mismatch_excludes_one_and_logs(
-        self, args, monkeypatch, capture_console
-    ):
+    def test_header_mismatch_excludes_one_and_logs(self, args, monkeypatch, capture_console):
         """Sample with mismatched image/mask headers is excluded."""
 
         def _hdr_with_path(path: str):
@@ -1109,8 +1097,7 @@ class TestValidateDataset:
         a.validate_dataset()
         assert len(a.paths_df) == TRAIN_N - 1
         assert any(
-            "In 0:" in m and "Got 4D mask" in m and "images are 3D" in m
-            for m in capture_console
+            "In 0:" in m and "Got 4D mask" in m and "images are 3D" in m for m in capture_console
         )
         assert_exclusion_summary(capture_console, 1)
 
@@ -1133,9 +1120,7 @@ class TestValidateDataset:
         with pytest.raises(RuntimeError):
             Analyzer(args).validate_dataset()
 
-    def test_corrupt_secondary_image_excludes_patient(
-        self, args, monkeypatch, capture_console
-    ):
+    def test_corrupt_secondary_image_excludes_patient(self, args, monkeypatch, capture_console):
         """RuntimeError from ants.image_header_info inside the loop excludes patient."""
 
         def _hdr_router(path: str):
@@ -1151,9 +1136,7 @@ class TestValidateDataset:
         assert len(a.paths_df) == TRAIN_N - 1
         assert any("In 0:" in m for m in capture_console)
 
-    def test_multi_image_mismatch_excludes_one_and_logs(
-        self, args, monkeypatch, capture_console
-    ):
+    def test_multi_image_mismatch_excludes_one_and_logs(self, args, monkeypatch, capture_console):
         """Patient with mismatched image-to-image headers is excluded."""
         two_image_df = pd.DataFrame(
             {
@@ -1163,9 +1146,7 @@ class TestValidateDataset:
                 "t2": [f"{i}_t2.nii.gz" for i in range(TRAIN_N)],
             }
         )
-        monkeypatch.setattr(
-            au, "get_files_df", lambda *_a, **_k: two_image_df, raising=True
-        )
+        monkeypatch.setattr(au, "get_files_df", lambda *_a, **_k: two_image_df, raising=True)
 
         def _hdr_router(path: str):
             # Tag headers so the comparison can distinguish mask-vs-image
@@ -1202,7 +1183,6 @@ class TestValidateDataset:
         a.validate_dataset()
         assert len(a.paths_df) == TRAIN_N - 1
         assert any(
-            "In 0:" in m and "Mismatch between" in m and "images" in m
-            for m in capture_console
+            "In 0:" in m and "Mismatch between" in m and "images" in m for m in capture_console
         )
         assert_exclusion_summary(capture_console, 1)

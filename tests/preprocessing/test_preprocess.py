@@ -27,9 +27,7 @@ class _DummyAntsImage:
         origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
         direction: tuple[float, ...] = (1.0,) * 9,
     ) -> None:
-        self._arr = (
-            np.zeros((2, 2, 2), dtype=np.float32) if arr is None else np.asarray(arr)
-        )
+        self._arr = np.zeros((2, 2, 2), dtype=np.float32) if arr is None else np.asarray(arr)
         self._spacing = spacing
         self._origin = origin
         self._direction = direction
@@ -521,9 +519,7 @@ def test_resample_mask_happy_path(monkeypatch):
         arr = np.zeros((3, 3, 3, len(labels)), dtype=np.float32)
         return _DummyAntsImage(arr)
 
-    monkeypatch.setattr(
-        pp.preprocessing_utils, "sitk_to_ants", _sitk_to_ants, raising=True
-    )
+    monkeypatch.setattr(pp.preprocessing_utils, "sitk_to_ants", _sitk_to_ants, raising=True)
     monkeypatch.setattr(
         pp.ants,
         "from_numpy",
@@ -622,9 +618,7 @@ def test_resample_mask_aniso_intermediate_called_for_each_label(monkeypatch):
         )
         return SimpleNamespace(numpy=lambda: arr)
 
-    monkeypatch.setattr(
-        pp.preprocessing_utils, "sitk_to_ants", _sitk_to_ants, raising=True
-    )
+    monkeypatch.setattr(pp.preprocessing_utils, "sitk_to_ants", _sitk_to_ants, raising=True)
 
     class _Out:
         """Simple ANTs-like output holder."""
@@ -710,9 +704,7 @@ def test_compute_dtm_shapes_and_types(monkeypatch):
         arr = np.zeros((5, 6, 7, len(labels)), dtype=np.float32)
         return _DummyAntsImage(arr)
 
-    monkeypatch.setattr(
-        pp.preprocessing_utils, "sitk_to_ants", _sitk_to_ants, raising=True
-    )
+    monkeypatch.setattr(pp.preprocessing_utils, "sitk_to_ants", _sitk_to_ants, raising=True)
 
     out = pp.compute_dtm(mask_ants=src_mask, labels=labels, normalize_dtm=True)
     assert isinstance(out, np.ndarray)
@@ -725,12 +717,8 @@ def test_compute_dtm_zero_guards_combined(monkeypatch):
     labels = [0]
     masks = [_DummySitkImage()]
 
-    monkeypatch.setattr(
-        pp.preprocessing_utils, "make_onehot", lambda *_: masks, raising=True
-    )
-    monkeypatch.setattr(
-        pp.preprocessing_utils, "sitk_get_sum", lambda _m: 1, raising=True
-    )
+    monkeypatch.setattr(pp.preprocessing_utils, "make_onehot", lambda *_: masks, raising=True)
+    monkeypatch.setattr(pp.preprocessing_utils, "sitk_get_sum", lambda _m: 1, raising=True)
     monkeypatch.setattr(pp.sitk, "Cast", lambda img, *_a, **_k: img, raising=True)
     monkeypatch.setattr(pp.sitk, "JoinSeries", lambda seq: seq, raising=True)
 
@@ -827,28 +815,18 @@ def test_compute_dtm_empty_mask_diagonal_distance(monkeypatch):
 
     labels = [0, 1]
     masks = [_DummySitkImage() for _ in labels]
-    monkeypatch.setattr(
-        pp.preprocessing_utils, "make_onehot", lambda *_: masks, raising=True
-    )
-    monkeypatch.setattr(
-        pp.preprocessing_utils, "sitk_get_sum", lambda _m: 0, raising=True
-    )
-    monkeypatch.setattr(
-        pp.sitk, "GetImageFromArray", lambda arr: _ArrayImage(arr), raising=True
-    )
+    monkeypatch.setattr(pp.preprocessing_utils, "make_onehot", lambda *_: masks, raising=True)
+    monkeypatch.setattr(pp.preprocessing_utils, "sitk_get_sum", lambda _m: 0, raising=True)
+    monkeypatch.setattr(pp.sitk, "GetImageFromArray", lambda arr: _ArrayImage(arr), raising=True)
     monkeypatch.setattr(pp.sitk, "Cast", lambda img, *_a, **_k: img, raising=True)
     monkeypatch.setattr(pp.sitk, "JoinSeries", lambda seq: seq, raising=True)
 
     def _sitk_to_ants(seq):
         return SimpleNamespace(numpy=lambda: np.stack([im._arr for im in seq], axis=-1))
 
-    monkeypatch.setattr(
-        pp.preprocessing_utils, "sitk_to_ants", _sitk_to_ants, raising=True
-    )
+    monkeypatch.setattr(pp.preprocessing_utils, "sitk_to_ants", _sitk_to_ants, raising=True)
 
-    out = pp.compute_dtm(
-        mask_ants=SimpleNamespace(), labels=labels, normalize_dtm=False
-    )
+    out = pp.compute_dtm(mask_ants=SimpleNamespace(), labels=labels, normalize_dtm=False)
     assert out.shape == (d, h, w, len(labels))
     assert out.dtype == np.float32
     assert np.allclose(out[..., 0], expected)
@@ -878,15 +856,9 @@ def test_preprocess_example_full_flow_no_skip_with_crop_and_dtm(monkeypatch):
         },
     }
 
-    img0 = _DummyAntsImage(
-        np.ones((2, 2, 2), dtype=np.float32), spacing=(2.0, 2.0, 2.0)
-    )
-    img1 = _DummyAntsImage(
-        2 * np.ones((2, 2, 2), dtype=np.float32), spacing=(2.0, 2.0, 2.0)
-    )
-    mask_img = _DummyAntsImage(
-        np.zeros((2, 2, 2), dtype=np.float32), spacing=(2.0, 2.0, 2.0)
-    )
+    img0 = _DummyAntsImage(np.ones((2, 2, 2), dtype=np.float32), spacing=(2.0, 2.0, 2.0))
+    img1 = _DummyAntsImage(2 * np.ones((2, 2, 2), dtype=np.float32), spacing=(2.0, 2.0, 2.0))
+    mask_img = _DummyAntsImage(np.zeros((2, 2, 2), dtype=np.float32), spacing=(2.0, 2.0, 2.0))
 
     seq = iter([img0, img1, mask_img])
     monkeypatch.setattr(pp.ants, "image_read", lambda _p: next(seq), raising=True)
@@ -901,12 +873,8 @@ def test_preprocess_example_full_flow_no_skip_with_crop_and_dtm(monkeypatch):
         return im
 
     monkeypatch.setattr(pp.preprocessing_utils, "crop_to_fg", _crop, raising=True)
-    monkeypatch.setattr(
-        pp, "resample_image", lambda im, target_spacing: im, raising=True
-    )
-    monkeypatch.setattr(
-        pp, "resample_mask", lambda m, labels, target_spacing: m, raising=True
-    )
+    monkeypatch.setattr(pp, "resample_image", lambda im, target_spacing: im, raising=True)
+    monkeypatch.setattr(pp, "resample_mask", lambda m, labels, target_spacing: m, raising=True)
     monkeypatch.setattr(pp, "window_and_normalize", lambda arr, cfg_: arr, raising=True)
 
     def _compute_dtm(_m, labels, normalize_dtm):
@@ -947,9 +915,7 @@ def test_preprocess_example_skip_true_no_resample_no_normalize(monkeypatch):
         },
     }
 
-    img0 = _DummyAntsImage(
-        np.ones((2, 2, 2), dtype=np.float32), spacing=(1.5, 1.5, 1.5)
-    )
+    img0 = _DummyAntsImage(np.ones((2, 2, 2), dtype=np.float32), spacing=(1.5, 1.5, 1.5))
     mask_img = _DummyAntsImage(np.zeros((2, 2, 2), dtype=np.float32))
 
     seq = iter([img0, mask_img])
@@ -957,29 +923,21 @@ def test_preprocess_example_skip_true_no_resample_no_normalize(monkeypatch):
     monkeypatch.setattr(
         pp.ants,
         "reorient_image2",
-        lambda *_a, **_k: pytest.fail(
-            "reorient_image2 must not be called when skip=True."
-        ),
+        lambda *_a, **_k: pytest.fail("reorient_image2 must not be called when skip=True."),
         raising=True,
     )
     monkeypatch.setattr(
         pp,
         "resample_image",
-        lambda *_a, **_k: pytest.fail(
-            "resample_image must not be called when skip=True."
-        ),
+        lambda *_a, **_k: pytest.fail("resample_image must not be called when skip=True."),
     )
     monkeypatch.setattr(
         pp,
         "window_and_normalize",
-        lambda *_a, **_k: pytest.fail(
-            "window_and_normalize must not be called when skip=True."
-        ),
+        lambda *_a, **_k: pytest.fail("window_and_normalize must not be called when skip=True."),
     )
 
-    out = pp.preprocess_example(
-        cfg, image_paths_list=["i0"], mask_path="m.nii.gz", fg_bbox=None
-    )
+    out = pp.preprocess_example(cfg, image_paths_list=["i0"], mask_path="m.nii.gz", fg_bbox=None)
     assert out["image"].shape == (2, 2, 2, 1)
     assert out["mask"].shape == (2, 2, 2, 1)
     assert out["dtm"] is None
@@ -1009,9 +967,7 @@ def test_preprocess_example_crop_requires_bbox_error(monkeypatch):
         },
     }
 
-    monkeypatch.setattr(
-        pp.ants, "image_read", lambda _p: _DummyAntsImage(), raising=True
-    )
+    monkeypatch.setattr(pp.ants, "image_read", lambda _p: _DummyAntsImage(), raising=True)
     monkeypatch.setattr(
         pp.preprocessing_utils,
         "get_fg_mask_bbox",
@@ -1020,9 +976,7 @@ def test_preprocess_example_crop_requires_bbox_error(monkeypatch):
     )
 
     with pytest.raises(ValueError, match="Foreground bounding box is required"):
-        pp.preprocess_example(
-            cfg, image_paths_list=["img.nii.gz"], mask_path=None, fg_bbox=None
-        )
+        pp.preprocess_example(cfg, image_paths_list=["img.nii.gz"], mask_path=None, fg_bbox=None)
 
 
 def test_preprocess_example_skip_true_crop_flag_ignored(monkeypatch):
@@ -1048,23 +1002,17 @@ def test_preprocess_example_skip_true_crop_flag_ignored(monkeypatch):
         },
     }
 
-    monkeypatch.setattr(
-        pp.ants, "image_read", lambda _p: _DummyAntsImage(), raising=True
-    )
+    monkeypatch.setattr(pp.ants, "image_read", lambda _p: _DummyAntsImage(), raising=True)
     monkeypatch.setattr(
         pp.ants,
         "reorient_image2",
-        lambda *_a, **_k: pytest.fail(
-            "reorient_image2 must not be called when skip=True."
-        ),
+        lambda *_a, **_k: pytest.fail("reorient_image2 must not be called when skip=True."),
         raising=True,
     )
     monkeypatch.setattr(
         pp.preprocessing_utils,
         "get_fg_mask_bbox",
-        lambda *_a, **_k: pytest.fail(
-            "get_fg_mask_bbox must not be called when skip=True."
-        ),
+        lambda *_a, **_k: pytest.fail("get_fg_mask_bbox must not be called when skip=True."),
         raising=True,
     )
     monkeypatch.setattr(
@@ -1074,9 +1022,7 @@ def test_preprocess_example_skip_true_crop_flag_ignored(monkeypatch):
         raising=True,
     )
 
-    out = pp.preprocess_example(
-        cfg, image_paths_list=["img.nii.gz"], mask_path=None, fg_bbox=None
-    )
+    out = pp.preprocess_example(cfg, image_paths_list=["img.nii.gz"], mask_path=None, fg_bbox=None)
     assert out["fg_bbox"] is None
     assert out["image"].shape == (2, 2, 2, 1)
 
@@ -1092,9 +1038,7 @@ def test_preprocess_example_inference_mode_sets_mask_and_dtm_none(monkeypatch):
     monkeypatch.setattr(
         pp.ants,
         "reorient_image2",
-        lambda *_a, **_k: pytest.fail(
-            "reorient_image2 must not be called when skip=True."
-        ),
+        lambda *_a, **_k: pytest.fail("reorient_image2 must not be called when skip=True."),
         raising=True,
     )
 
@@ -1163,17 +1107,11 @@ def test_preprocess_dataset_end_to_end_saves_arrays_and_updates_config(
     )
     _write_csv(
         results / "fg_bboxes.csv",
-        pd.DataFrame(
-            [{"id": "p1", "x0": 0, "x1": 2, "y0": 0, "y1": 2, "z0": 0, "z1": 2}]
-        ),
+        pd.DataFrame([{"id": "p1", "x0": 0, "x1": 2, "y0": 0, "y1": 2, "z0": 0, "z1": 2}]),
     )
 
-    monkeypatch.setattr(
-        pp.progress_bar, "get_progress_bar", lambda *_: _PB(), raising=True
-    )
-    monkeypatch.setattr(
-        pp.concurrent.futures, "ProcessPoolExecutor", ThreadPoolExecutor
-    )
+    monkeypatch.setattr(pp.progress_bar, "get_progress_bar", lambda *_: _PB(), raising=True)
+    monkeypatch.setattr(pp.concurrent.futures, "ProcessPoolExecutor", ThreadPoolExecutor)
 
     def _pe(config, image_paths_list, mask_path, fg_bbox):
         img = np.ones((2, 2, 2, 1), dtype=np.float32)
@@ -1301,9 +1239,7 @@ def test_preprocess_dataset_sets_fg_bbox_none_when_crop_disabled(tmp_path, monke
     )
     _write_csv(
         results / "fg_bboxes.csv",
-        pd.DataFrame(
-            [{"id": "p1", "x0": 0, "x1": 1, "y0": 0, "y1": 1, "z0": 0, "z1": 1}]
-        ),
+        pd.DataFrame([{"id": "p1", "x0": 0, "x1": 1, "y0": 0, "y1": 1, "z0": 0, "z1": 1}]),
     )
 
     monkeypatch.setattr(
@@ -1318,9 +1254,7 @@ def test_preprocess_dataset_sets_fg_bbox_none_when_crop_disabled(tmp_path, monke
         lambda p: json.loads(Path(p).read_text(encoding="utf-8")),
         raising=True,
     )
-    monkeypatch.setattr(
-        pp.concurrent.futures, "ProcessPoolExecutor", ThreadPoolExecutor
-    )
+    monkeypatch.setattr(pp.concurrent.futures, "ProcessPoolExecutor", ThreadPoolExecutor)
 
     observed: dict[str, Any] = {}
 
@@ -1332,9 +1266,7 @@ def test_preprocess_dataset_sets_fg_bbox_none_when_crop_disabled(tmp_path, monke
             "dtm": np.zeros((2, 2, 2, 1), dtype=np.float32),
         }
 
-    monkeypatch.setattr(
-        pp, "preprocess_example", _fake_preprocess_example, raising=True
-    )
+    monkeypatch.setattr(pp, "preprocess_example", _fake_preprocess_example, raising=True)
 
     ns = SimpleNamespace(
         results=str(results),
@@ -1467,9 +1399,7 @@ def test_preprocess_single_patient_skips_dtm_when_disabled(tmp_path, monkeypatch
     assert not (output_dirs["dtms"] / "p1.npy").exists()
 
 
-def test_preprocess_dataset_prints_error_summary_on_failures(
-    tmp_path, monkeypatch, base_config
-):
+def test_preprocess_dataset_prints_error_summary_on_failures(tmp_path, monkeypatch, base_config):
     """preprocess_dataset prints 'N of M patients had errors' on failure."""
     results = tmp_path / "results"
     numpy_dir = tmp_path / "numpy"
@@ -1494,12 +1424,8 @@ def test_preprocess_dataset_prints_error_summary_on_failures(
         ),
     )
 
-    monkeypatch.setattr(
-        pp.progress_bar, "get_progress_bar", lambda *_: _PB(), raising=True
-    )
-    monkeypatch.setattr(
-        pp.concurrent.futures, "ProcessPoolExecutor", ThreadPoolExecutor
-    )
+    monkeypatch.setattr(pp.progress_bar, "get_progress_bar", lambda *_: _PB(), raising=True)
+    monkeypatch.setattr(pp.concurrent.futures, "ProcessPoolExecutor", ThreadPoolExecutor)
 
     def _pe_always_fail(**kwargs):
         raise RuntimeError("boom")
@@ -1507,9 +1433,7 @@ def test_preprocess_dataset_prints_error_summary_on_failures(
     monkeypatch.setattr(pp, "preprocess_example", _pe_always_fail, raising=True)
 
     printed = []
-    monkeypatch.setattr(
-        console_mod.console, "print", lambda msg, **k: printed.append(str(msg))
-    )
+    monkeypatch.setattr(console_mod.console, "print", lambda msg, **k: printed.append(str(msg)))
 
     ns = argparse.Namespace(
         results=str(results),

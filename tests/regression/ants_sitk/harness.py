@@ -86,18 +86,25 @@ def run_pipeline(
 
     analyze_entry(
         [
-            "--data", str(dataset_json),
-            "--results", str(results_dir),
-            "--nfolds", str(nfolds),
-            "--num-workers-analyze", "1",
+            "--data",
+            str(dataset_json),
+            "--results",
+            str(results_dir),
+            "--nfolds",
+            str(nfolds),
+            "--num-workers-analyze",
+            "1",
             "--overwrite",
         ]
     )
 
     preprocess_argv = [
-        "--results", str(results_dir),
-        "--numpy", str(numpy_dir),
-        "--num-workers-preprocess", "1",
+        "--results",
+        str(results_dir),
+        "--numpy",
+        str(numpy_dir),
+        "--num-workers-preprocess",
+        "1",
         "--overwrite",
     ]
     if compute_dtms:
@@ -232,7 +239,11 @@ def _compare_json(
         for shared in sorted(set(golden) & set(candidate)):
             diffs.extend(
                 _compare_json(
-                    key, golden[shared], candidate[shared], atol, rtol,
+                    key,
+                    golden[shared],
+                    candidate[shared],
+                    atol,
+                    rtol,
                     f"{path}.{shared}",
                 )
             )
@@ -241,8 +252,7 @@ def _compare_json(
     if isinstance(golden, list) and isinstance(candidate, list):
         if len(golden) != len(candidate):
             diffs.append(
-                f"{loc}: list length {len(golden)} (golden) != "
-                f"{len(candidate)} (candidate)"
+                f"{loc}: list length {len(golden)} (golden) != {len(candidate)} (candidate)"
             )
             return diffs
         for i, (g, c) in enumerate(zip(golden, candidate)):
@@ -257,8 +267,7 @@ def _compare_json(
     if isinstance(golden, (int, float)) and isinstance(candidate, (int, float)):
         if not _numbers_close(float(golden), float(candidate), atol, rtol):
             diffs.append(
-                f"{loc}: {golden} (golden) != {candidate} (candidate) "
-                f"(atol={atol}, rtol={rtol})"
+                f"{loc}: {golden} (golden) != {candidate} (candidate) (atol={atol}, rtol={rtol})"
             )
         return diffs
 
@@ -284,8 +293,7 @@ def _compare_csv(
 
     if len(golden_rows) != len(candidate_rows):
         diffs.append(
-            f"{key}: row count {len(golden_rows)} (golden) != "
-            f"{len(candidate_rows)} (candidate)"
+            f"{key}: row count {len(golden_rows)} (golden) != {len(candidate_rows)} (candidate)"
         )
         return diffs
 
@@ -304,8 +312,7 @@ def _compare_csv(
             except ValueError:
                 pass
             diffs.append(
-                f"{key}[row {r}, col {c}]: {gcell_n!r} (golden) != "
-                f"{ccell_n!r} (candidate)"
+                f"{key}[row {r}, col {c}]: {gcell_n!r} (golden) != {ccell_n!r} (candidate)"
             )
     return diffs
 
@@ -332,14 +339,10 @@ def _compare_npy(
             f"(candidate) -- possible axis transpose"
         ]
 
-    if np.issubdtype(golden.dtype, np.integer) and np.issubdtype(
-        candidate.dtype, np.integer
-    ):
+    if np.issubdtype(golden.dtype, np.integer) and np.issubdtype(candidate.dtype, np.integer):
         if not np.array_equal(golden, candidate):
             mismatched = int(np.count_nonzero(golden != candidate))
-            return [
-                f"{key}: {mismatched} voxel(s) differ (exact integer compare)"
-            ]
+            return [f"{key}: {mismatched} voxel(s) differ (exact integer compare)"]
         return []
 
     if not np.allclose(golden, candidate, atol=atol, rtol=rtol, equal_nan=True):
@@ -383,9 +386,7 @@ def diff_artifacts(
             c = _normalize(json.loads(cpath.read_text()), replacements)
             report.differences.extend(_compare_json(key, g, c, atol, rtol))
         elif key.endswith(".csv"):
-            report.differences.extend(
-                _compare_csv(key, gpath, cpath, replacements, atol, rtol)
-            )
+            report.differences.extend(_compare_csv(key, gpath, cpath, replacements, atol, rtol))
         elif key.endswith(".npy"):
             report.differences.extend(_compare_npy(key, gpath, cpath, atol, rtol))
         else:  # pragma: no cover - defensive; no other artifact types today.
@@ -428,9 +429,7 @@ def capture(golden_dir: Path) -> dict[str, Path]:
     return _map_from_root(golden_dir)
 
 
-def diff_against_golden(
-    golden_dir: Path, *, atol: float = 0.0, rtol: float = 0.0
-) -> DiffReport:
+def diff_against_golden(golden_dir: Path, *, atol: float = 0.0, rtol: float = 0.0) -> DiffReport:
     """Regenerate a candidate run and diff it against a stored golden set."""
     golden_dir = Path(golden_dir)
     manifest_path = golden_dir / _MANIFEST_NAME
@@ -460,9 +459,7 @@ def diff_against_golden(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Stage 0 ANTs->SimpleITK regression harness."
-    )
+    parser = argparse.ArgumentParser(description="Stage 0 ANTs->SimpleITK regression harness.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     cap = sub.add_parser("capture", help="Capture golden artifacts.")

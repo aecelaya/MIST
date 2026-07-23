@@ -34,9 +34,7 @@ class ShapeSpyLoss(SegmentationLoss):
 class DummySumLoss(SegmentationLoss):
     """Returns simple sum of predictions for testing scaling behavior."""
 
-    def forward(
-        self, y_true: torch.Tensor, y_pred: torch.Tensor, **kwargs: Any
-    ) -> torch.Tensor:
+    def forward(self, y_true: torch.Tensor, y_pred: torch.Tensor, **kwargs: Any) -> torch.Tensor:
         return y_pred.sum()
 
 
@@ -58,9 +56,7 @@ def _make_mock_data(
     y_pred = torch.ones((batch_size, channels, size, size, size))
 
     # Create supervision heads with increasing values to verify weighting.
-    y_supervision = tuple(
-        torch.ones_like(y_pred) * (i + 2) for i in range(num_supervisions)
-    )
+    y_supervision = tuple(torch.ones_like(y_pred) * (i + 2) for i in range(num_supervisions))
     return y_true, y_pred, y_supervision
 
 

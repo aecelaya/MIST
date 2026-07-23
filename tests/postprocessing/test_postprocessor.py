@@ -225,9 +225,7 @@ def test_apply_strategy_to_single_example(
     mock_read_json, mock_get_transform, simulate_error, dummy_ants_image
 ):
     """Test both successful and failing transform scenarios."""
-    transform_name = (
-        "remove_small_objects" if not simulate_error else "fill_holes_with_label"
-    )
+    transform_name = "remove_small_objects" if not simulate_error else "fill_holes_with_label"
     mock_read_json.return_value = [
         {
             "transform": transform_name,
@@ -257,9 +255,7 @@ def test_apply_strategy_to_single_example(
         assert len(messages) == 1
         assert "Error applying fill_holes_with_label to test123" in messages[0]
     else:
-        np.testing.assert_array_equal(
-            result_image.numpy(), dummy_ants_image.numpy() + 1
-        )
+        np.testing.assert_array_equal(result_image.numpy(), dummy_ants_image.numpy() + 1)
         assert messages == []
 
 
@@ -455,8 +451,7 @@ def test_run_postprocessor(
     if expect_error:
         assert any("Error applying" in msg for msg in printed)
         assert any(
-            "Postprocessing completed with the following messages:" in msg
-            for msg in printed
+            "Postprocessing completed with the following messages:" in msg for msg in printed
         )
     else:
         output_file = output_dir / "example1.nii.gz"
@@ -468,9 +463,7 @@ def test_run_postprocessor(
 
 
 @patch("mist.utils.io.read_json_file")
-def test_run_empty_base_dir_warns_and_returns(
-    mock_read_json_file, dummy_strategy, tmp_path
-):
+def test_run_empty_base_dir_warns_and_returns(mock_read_json_file, dummy_strategy, tmp_path):
     """run() prints a warning and returns early when no .nii.gz files exist."""
     mock_read_json_file.return_value = dummy_strategy
     output_dir = tmp_path / "out"
@@ -530,10 +523,7 @@ def test_run_unexpected_worker_exception_is_caught(
             postprocessor.run(base_dir, output_dir)
 
     assert any("Unexpected error" in msg for msg in printed)
-    assert any(
-        "Postprocessing completed with the following messages:" in msg
-        for msg in printed
-    )
+    assert any("Postprocessing completed with the following messages:" in msg for msg in printed)
 
 
 @patch("mist.utils.io.read_json_file")
@@ -586,7 +576,5 @@ def test_run_patient_id_preserves_dots(
     # patient_id should be "patient.001", not "patient".
     assert any("patient.001" in msg for msg in printed)
     assert not any(
-        msg
-        for msg in printed
-        if "patient" in msg and "001" not in msg and "Error" in msg
+        msg for msg in printed if "patient" in msg and "001" not in msg and "Error" in msg
     )

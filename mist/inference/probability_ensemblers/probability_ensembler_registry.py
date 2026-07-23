@@ -14,9 +14,7 @@ def register_probability_ensembler(name: str) -> Callable[[type[T]], type[T]]:
 
     def decorator(cls: type[T]) -> type[T]:
         if not issubclass(cls, AbstractProbabilityEnsembler):
-            raise TypeError(
-                f"{cls.__name__} must inherit from AbstractProbabilityEnsembler."
-            )
+            raise TypeError(f"{cls.__name__} must inherit from AbstractProbabilityEnsembler.")
         if name in PROBABILITY_ENSEMBLER_REGISTRY:
             raise KeyError(f"Probability ensembler '{name}' is already registered.")
         PROBABILITY_ENSEMBLER_REGISTRY[name] = cls

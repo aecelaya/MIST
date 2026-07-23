@@ -59,9 +59,7 @@ class Evaluator:
 
         # 2. Check for duplicates and set index to 'id' for O(1) lookups.
         if df["id"].duplicated().any():
-            raise ValueError(
-                "Duplicate patient IDs found in DataFrame. IDs must be unique."
-            )
+            raise ValueError("Duplicate patient IDs found in DataFrame. IDs must be unique.")
 
         self.filepaths_dataframe = df.set_index("id")
 
@@ -86,9 +84,7 @@ class Evaluator:
         """Check if the filepaths DataFrame has the required columns."""
         required_columns = ["id", "mask", "prediction"]
         if not all(col in filepaths_dataframe.columns for col in required_columns):
-            raise ValueError(
-                f"DataFrame must contain columns: {', '.join(required_columns)}"
-            )
+            raise ValueError(f"DataFrame must contain columns: {', '.join(required_columns)}")
         return filepaths_dataframe.copy()
 
     @staticmethod
@@ -112,8 +108,7 @@ class Evaluator:
         for class_name, class_info in evaluation_config.items():
             if "labels" not in class_info or "metrics" not in class_info:
                 raise ValueError(
-                    f"Class '{class_name}' must contain both 'labels' and "
-                    "'metrics' keys."
+                    f"Class '{class_name}' must contain both 'labels' and 'metrics' keys."
                 )
 
             class_labels = class_info["labels"]
@@ -122,9 +117,7 @@ class Evaluator:
                     f"Class '{class_name}' must have a non-empty list of class labels."
                 )
             if any(label <= 0 for label in class_labels):
-                raise ValueError(
-                    f"Class labels for '{class_name}' must be greater than 0."
-                )
+                raise ValueError(f"Class labels for '{class_name}' must be greater than 0.")
 
             if not isinstance(class_info["metrics"], dict):
                 raise ValueError(f"Metrics for '{class_name}' must be a dictionary.")
@@ -154,16 +147,13 @@ class Evaluator:
             return worst_case_value
         return None
 
-    def _load_patient_data(
-        self, patient_id: str
-    ) -> dict[str, ants.core.ants_image.ANTsImage]:
+    def _load_patient_data(self, patient_id: str) -> dict[str, ants.core.ants_image.ANTsImage]:
         """Load the ground truth and prediction paths for a given patient ID."""
         try:
             row = self.filepaths_dataframe.loc[patient_id]
         except KeyError as e:
             raise ValueError(
-                f"No data found for patient ID: {patient_id}. "
-                f"See the following exception: {e}."
+                f"No data found for patient ID: {patient_id}. See the following exception: {e}."
             ) from e
 
         row_data = row.to_dict()
@@ -188,9 +178,7 @@ class Evaluator:
             )
             errors = [e for e in (mask_error, pred_error) if e]
             if errors:
-                raise ValueError(
-                    f"Mask validation failed for {patient_id}: " + " | ".join(errors)
-                )
+                raise ValueError(f"Mask validation failed for {patient_id}: " + " | ".join(errors))
 
         # Validate headers before loading heavy image data.
         mask_header = ants.image_header_info(row_data["mask"])
@@ -232,9 +220,7 @@ class Evaluator:
             metric = get_metric(metric_name)
 
             # Determine worst-case value for this metric (e.g. inf or diagonal).
-            worst = (
-                diagonal_distance_mm if metric.worst == float("inf") else metric.worst
-            )
+            worst = diagonal_distance_mm if metric.worst == float("inf") else metric.worst
 
             # Check for edge cases (empty masks).
             metric_value = self._handle_edge_cases(
@@ -260,9 +246,7 @@ class Evaluator:
                         result[metric_name] = val
 
                 except Exception as e:  # pylint: disable=broad-except
-                    error_messages.append(
-                        f"Error in {metric_name} for {patient_id}: {e}"
-                    )
+                    error_messages.append(f"Error in {metric_name} for {patient_id}: {e}")
                     result[metric_name] = worst
 
         return result, "\n".join(error_messages) if error_messages else None
@@ -313,9 +297,7 @@ class Evaluator:
 
         return (results, "\n".join(patient_errors) if patient_errors else None)
 
-    def _evaluate_patient_pipeline(
-        self, patient_id: str
-    ) -> tuple[dict | None, str | None]:
+    def _evaluate_patient_pipeline(self, patient_id: str) -> tuple[dict | None, str | None]:
         """Complete evaluation for a single patient to be run in parallel."""
         patient_data = None
         result = None
@@ -367,13 +349,10 @@ class Evaluator:
         patient_ids = self.filepaths_dataframe.index.tolist()
 
         # Execute in parallel
-        with concurrent.futures.ProcessPoolExecutor(
-            max_workers=max_workers
-        ) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Submit all patient tasks to the executor.
             future_to_patient = {
-                executor.submit(self._evaluate_patient_pipeline, pid): pid
-                for pid in patient_ids
+                executor.submit(self._evaluate_patient_pipeline, pid): pid for pid in patient_ids
             }
 
             with progress_bar.get_progress_bar("Evaluating predictions") as pb:
@@ -401,9 +380,7 @@ class Evaluator:
 
         # Compute summary stats (Mean, Std, etc.).
         if not self.results_dataframe.empty:
-            self.results_dataframe = evaluation_utils.compute_results_stats(
-                self.results_dataframe
-            )
+            self.results_dataframe = evaluation_utils.compute_results_stats(self.results_dataframe)
 
         # Save to disk.
         self.results_dataframe.to_csv(self.output_csv_path, index=False)
@@ -413,6 +390,4 @@ class Evaluator:
                 f"Empty CSV saved to {self.output_csv_path}"
             )
         else:
-            print_success(
-                f"Evaluation complete. Results saved to {self.output_csv_path}"
-            )
+            print_success(f"Evaluation complete. Results saved to {self.output_csv_path}")

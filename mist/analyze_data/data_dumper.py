@@ -77,13 +77,9 @@ class DataDumper:
         # When crop_to_foreground is enabled, use fg bounding box dims as the
         # image size denominator so vol-fraction-of-image reflects the actual
         # region the model sees rather than the full uncropped volume.
-        crop_to_fg = bool(
-            self.config.get("preprocessing", {}).get("crop_to_foreground", False)
-        )
+        crop_to_fg = bool(self.config.get("preprocessing", {}).get("crop_to_foreground", False))
         effective_dims = (
-            self.cropped_dims
-            if (crop_to_fg and self.cropped_dims is not None)
-            else None
+            self.cropped_dims if (crop_to_fg and self.cropped_dims is not None) else None
         )
 
         # Single pass over all patients to collect raw statistics.
@@ -92,9 +88,7 @@ class DataDumper:
         )
 
         image_stats = data_dump_utils.build_image_statistics(raw_stats, self.config)
-        label_stats = data_dump_utils.build_label_statistics(
-            raw_stats, self.dataset_info
-        )
+        label_stats = data_dump_utils.build_label_statistics(raw_stats, self.dataset_info)
         observations = data_dump_utils.generate_observations(
             image_stats, label_stats, dataset_summary
         )
@@ -160,16 +154,11 @@ class DataDumper:
             f"- **Task:** {ds['task']}",
             f"- **Modality:** {ds['modality'].upper()}",
             f"- **Patients:** {ds['num_patients']}",
-            (
-                f"- **Channels ({ds['num_channels']}):** "
-                f"{', '.join(ds['channel_names'])}"
-            ),
+            (f"- **Channels ({ds['num_channels']}):** {', '.join(ds['channel_names'])}"),
             f"- **Labels:** {ds['labels']}",
             (
                 "- **Final classes:** "
-                + ", ".join(
-                    f"{name} {labels}" for name, labels in ds["final_classes"].items()
-                )
+                + ", ".join(f"{name} {labels}" for name, labels in ds["final_classes"].items())
             ),
             f"- **Dataset size:** {ds['dataset_size_gb']:.3f} GB",
             "",
@@ -183,8 +172,7 @@ class DataDumper:
         for ax in range(3):
             s = img["spacing"]["per_axis"][f"axis_{ax}"]
             lines.append(
-                f"| {ax} | {s['mean']} | {s['std']} | {s['min']} "
-                f"| {s['median']} | {s['max']} |"
+                f"| {ax} | {s['mean']} | {s['std']} | {s['min']} | {s['median']} | {s['max']} |"
             )
 
         aniso = img["spacing"]["anisotropy_ratio"]
@@ -208,10 +196,7 @@ class DataDumper:
         med = img["dimensions"]["resampled_median"]
         lines += [
             "",
-            (
-                f"**Median resampled dimensions:** "
-                f"{med[0]} \u00d7 {med[1]} \u00d7 {med[2]} voxels"
-            ),
+            (f"**Median resampled dimensions:** {med[0]} \u00d7 {med[1]} \u00d7 {med[2]} voxels"),
             "",
             "### Intensity Distributions (foreground voxels)",
         ]
@@ -258,18 +243,10 @@ class DataDumper:
             sh = lbl_data["shape"]
             lin = f"{sh['linearity']:.2f}" if sh["linearity"] is not None else "\u2014"
             plan = f"{sh['planarity']:.2f}" if sh["planarity"] is not None else "\u2014"
-            sph = (
-                f"{sh['sphericity']:.2f}" if sh["sphericity"] is not None else "\u2014"
-            )
-            iq = (
-                f"{sh['compactness']:.3f}"
-                if sh.get("compactness") is not None
-                else "\u2014"
-            )
+            sph = f"{sh['sphericity']:.2f}" if sh["sphericity"] is not None else "\u2014"
+            iq = f"{sh['compactness']:.3f}" if sh.get("compactness") is not None else "\u2014"
             skel = (
-                f"{sh['skeleton_ratio']:.3f}"
-                if sh.get("skeleton_ratio") is not None
-                else "\u2014"
+                f"{sh['skeleton_ratio']:.3f}" if sh.get("skeleton_ratio") is not None else "\u2014"
             )
             vol_frac_fg = lbl_data["mean_volume_fraction_of_foreground_pct"]
             vol_frac_img = lbl_data["mean_volume_fraction_of_image_pct"]
@@ -327,10 +304,7 @@ class DataDumper:
             ),
             "",
             "### Image Dimensions",
-            (
-                "- **Original dimensions:** Voxel counts along each axis before "
-                "resampling."
-            ),
+            ("- **Original dimensions:** Voxel counts along each axis before resampling."),
             (
                 "- **Median resampled dimensions:** Estimated image size after "
                 "resampling to the target spacing, derived from the MIST config. "

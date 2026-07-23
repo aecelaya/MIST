@@ -64,9 +64,9 @@ class TestGenSurfLoss:
 
         # Manually convert to OneHot/Softmax.
         n_classes = 3
-        y_true_oh = torch.nn.functional.one_hot(
-            y_true.squeeze(1), num_classes=n_classes
-        ).permute(0, 4, 1, 2, 3)  # (B, C, H, W, D)
+        y_true_oh = torch.nn.functional.one_hot(y_true.squeeze(1), num_classes=n_classes).permute(
+            0, 4, 1, 2, 3
+        )  # (B, C, H, W, D)
         y_pred_soft = torch.softmax(y_pred, dim=1)
 
         # Slice to remove background (channel 0) from ALL tensors.
@@ -103,9 +103,9 @@ class TestGenSurfLoss:
         dims = loss_fn.spatial_dims_3d
 
         # Simulate preprocess() result (which slices background).
-        y_true_oh = torch.nn.functional.one_hot(
-            y_true.squeeze(1), num_classes=3
-        ).permute(0, 4, 1, 2, 3)[:, 1:]
+        y_true_oh = torch.nn.functional.one_hot(y_true.squeeze(1), num_classes=3).permute(
+            0, 4, 1, 2, 3
+        )[:, 1:]
         y_pred_soft = torch.softmax(y_pred, dim=1)[:, 1:]
 
         # DTM must be manually sliced to match.

@@ -103,9 +103,7 @@ def test_nnunet_forward_with_deep_supervision(base_kwargs):
         ),
     ],
 )
-def test_quasi_2d_forward_pass_nnunet_compatibility(
-    patch_size, spacing, should_succeed
-):
+def test_quasi_2d_forward_pass_nnunet_compatibility(patch_size, spacing, should_succeed):
     """Regression: quasi-2D patches that are not divisible by the cumulative
     nnUNet z-stride cause a decoder skip-connection size mismatch at runtime.
 

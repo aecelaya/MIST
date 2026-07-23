@@ -295,9 +295,7 @@ def compute_dtm(
             if normalize_dtm:
                 dtm_i = sitk.GetImageFromArray(all_ones_mask)
             else:
-                diagonal_distance = np.sqrt(
-                    mask_depth**2 + mask_width**2 + mask_height**2
-                )
+                diagonal_distance = np.sqrt(mask_depth**2 + mask_width**2 + mask_height**2)
                 dtm_i = sitk.GetImageFromArray(diagonal_distance * all_ones_mask)
 
         # Set the pixel type and spacing for the DTM.
@@ -383,8 +381,7 @@ def preprocess_example(
             if crop:
                 if fg_bbox is None:
                     raise ValueError(
-                        "Foreground bounding box is required for cropping, but "
-                        "none was provided."
+                        "Foreground bounding box is required for cropping, but none was provided."
                     )
                 image_i = preprocessing_utils.crop_to_fg(image_i, fg_bbox)
 
@@ -584,8 +581,7 @@ def preprocess_dataset(args: argparse.Namespace) -> None:
     if error_messages:
         print_warning("\n".join(error_messages))
         print_warning(
-            f"{len(error_messages)} of {len(patients)} patient(s) had errors "
-            "and were skipped."
+            f"{len(error_messages)} of {len(patients)} patient(s) had errors and were skipped."
         )
     else:
         print_success("Preprocessing complete.")
