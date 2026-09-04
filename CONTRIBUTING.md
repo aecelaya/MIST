@@ -48,9 +48,9 @@ behavior you change.
 
 ## Reporting bugs and requesting features
 
-Use the issue templates (**Bug report** / **Feature request**). For bugs,
-please include the install method, MIST version, and GPU/PyTorch details the
-template asks for — these are essential for reproducing the problem.
+Use the issue templates (**Bug report** / **Feature request**). For bugs, please
+include the install method, MIST version, and GPU/PyTorch details the template
+asks for — these are essential for reproducing the problem.
 
 For usage questions, please use
 [Discussions](https://github.com/mist-medical/MIST/discussions) or the
