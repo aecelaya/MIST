@@ -18,19 +18,41 @@ import numpy as np
 import numpy.typing as npt
 import SimpleITK as sitk
 
+# ants.image_read's signature is `image_read(filename, dimension=None,
+# pixeltype='float', reorient=False)` -- it force-casts every image to this
+# pixel type on read regardless of the file's on-disk type, and every
+# ants.image_read(...) call site in mist/ uses that "float" default (none
+# pass pixeltype explicitly). Verified empirically: a mask file whose NIfTI
+# header genuinely says uint8 (confirmed via plain sitk.ReadImage, which
+# preserves it) still comes back as float32 from ants.image_read. A plain
+# sitk.ReadImage does NOT do this -- it preserves the on-disk pixel type --
+# so matching ants' actual behavior requires an explicit cast here, not just
+# a passthrough read.
+_PIXELTYPE_TO_SITK = {
+    "unsigned char": sitk.sitkUInt8,
+    "unsigned int": sitk.sitkUInt32,
+    "float": sitk.sitkFloat32,
+    "double": sitk.sitkFloat64,
+}
 
-def read_image(path: str | Path) -> sitk.Image:
+
+def read_image(path: str | Path, pixeltype: str = "float") -> sitk.Image:
     """Read an image from disk.
 
-    Replacement for `ants.image_read`.
+    Replacement for `ants.image_read`. Defaults to casting to float32,
+    matching ants.image_read's own default -- see the module-level note on
+    `_PIXELTYPE_TO_SITK` for why this isn't just `sitk.ReadImage`.
 
     Args:
         path: Path to the image file.
+        pixeltype: Pixel type to cast to: "unsigned char", "unsigned int",
+            "float", or "double", matching ants.image_read's own options.
 
     Returns:
-        The image.
+        The image, cast to `pixeltype`.
     """
-    return sitk.ReadImage(str(path))
+    image = sitk.ReadImage(str(path))
+    return sitk.Cast(image, _PIXELTYPE_TO_SITK[pixeltype])
 
 
 def write_image(image: sitk.Image, path: str | Path) -> None:
@@ -229,17 +251,32 @@ def crop_image(
     migrating a `crop_indices(lowerind, upperind)` call should pass
     `index=lowerind, size=upperind - lowerind` here.
 
+    A zero (or negative) entry in `size` raises, matching ants.crop_indices'
+    behavior: verified empirically that ants.crop_indices raises on a
+    zero-sized crop, while sitk.RegionOfInterest on its own silently returns
+    a degenerate empty-dimension image. That divergence is exactly the class
+    of silent failure this migration exists to avoid, so it's guarded
+    against explicitly here rather than left to whatever RegionOfInterest
+    happens to do.
+
     Args:
         image: Image to crop.
         index: Starting voxel index, (x, y, z) order.
-        size: Extracted region size, (x, y, z) order.
+        size: Extracted region size, (x, y, z) order. Every entry must be
+            positive.
 
     Returns:
         The cropped image.
+
+    Raises:
+        ValueError: If any entry of `size` is not positive.
     """
+    size = [int(s) for s in size]
+    if any(s <= 0 for s in size):
+        raise ValueError(f"crop_image requires a positive size on every axis, got {size}.")
     return sitk.RegionOfInterest(
         image,
-        size=[int(s) for s in size],
+        size=size,
         index=[int(i) for i in index],
     )
 
@@ -257,21 +294,37 @@ def pad_image(
     ants.pad_image also supports a "pad to a given shape" mode that MIST
     doesn't use; MIST only ever pads by explicit per-axis amounts.
 
+    Negative padding raises. Verified empirically that ants.pad_image
+    accepts a negative value and silently reinterprets it as a *crop*
+    instead of a pad (e.g. lower_padding=-1 trims a voxel off that axis).
+    That's a surprising enough semantic that MIST's own call site already
+    clamps to non-negative before calling it (see
+    inference_utils.decrop_from_fg), so this deliberately does not replicate
+    it — better to fail loudly on a negative value than silently start
+    cropping where a pad was intended.
+
     Args:
         image: Image to pad.
-        lower_padding: Voxels to add before the image, (x, y, z) order.
-        upper_padding: Voxels to add after the image, (x, y, z) order.
+        lower_padding: Voxels to add before the image, (x, y, z) order. Every
+            entry must be non-negative.
+        upper_padding: Voxels to add after the image, (x, y, z) order. Every
+            entry must be non-negative.
         constant: Fill value for padded voxels.
 
     Returns:
         The padded image.
+
+    Raises:
+        ValueError: If any padding entry is negative.
     """
-    return sitk.ConstantPad(
-        image,
-        [int(p) for p in lower_padding],
-        [int(p) for p in upper_padding],
-        constant,
-    )
+    lower_padding = [int(p) for p in lower_padding]
+    upper_padding = [int(p) for p in upper_padding]
+    if any(p < 0 for p in lower_padding) or any(p < 0 for p in upper_padding):
+        raise ValueError(
+            "pad_image requires non-negative padding on every axis, got "
+            f"lower_padding={lower_padding}, upper_padding={upper_padding}."
+        )
+    return sitk.ConstantPad(image, lower_padding, upper_padding, constant)
 
 
 def merge_channels(images: Sequence[sitk.Image]) -> sitk.Image:
@@ -280,10 +333,23 @@ def merge_channels(images: Sequence[sitk.Image]) -> sitk.Image:
     Replacement for `ants.merge_channels`. Component order matches input
     order.
 
+    Deliberately does not replicate one piece of ants.merge_channels'
+    behavior: verified empirically that ants.merge_channels on images with
+    mismatched geometry silently succeeds, using the first image's geometry
+    and apparently ignoring the mismatch, whereas sitk.Compose raises. A
+    geometry mismatch here almost certainly means a bug upstream (e.g. two
+    models' outputs that were never actually resampled to a common space);
+    failing loudly is the safer behavior to keep, not a regression to work
+    around.
+
     Args:
         images: Scalar images to merge, all with the same size/geometry.
 
     Returns:
         The merged multi-component image.
+
+    Raises:
+        RuntimeError: If the images don't all share the same geometry (from
+            the underlying sitk.Compose call).
     """
     return sitk.Compose(list(images))
