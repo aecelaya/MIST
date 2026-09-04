@@ -8,3 +8,6 @@
 
 # style: apply ruff format across the repository
 fd8fc4064887d58383277db125c0df00a148ce2a
+
+# style: format Markdown docs and README with Prettier
+0897825af8b05e3ee3ad54760d5fbd563d77c9a6
