@@ -384,7 +384,7 @@ def patch_dist(monkeypatch):
             return FakeDist._world_size
 
         @staticmethod
-        def init_process_group(backend, rank, world_size):
+        def init_process_group(backend, rank, world_size, device_id=None):
             """Initialize the process group."""
             calls["init"] += 1
             FakeDist._initialized = True
@@ -551,13 +551,27 @@ def test_train_fold_runs_full_epoch(tmp_pipeline, mist_args, monkeypatch, patch_
 
 
 def test_train_fold_early_stop_on_nan(tmp_pipeline, mist_args, monkeypatch, patch_dist):
-    """NaN training loss should trigger early stop and cleanup (DDP case)."""
-    # Use 2 GPUs so DDP is engaged, ensuring cleanup() destroys the process
-    # group.
+    """NaN training loss should trigger early stop (DDP case)."""
+    # Use 2 GPUs so DDP is engaged.
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
     trainer = DummyTrainer(mist_args, train_loss_value=float("nan"), val_loss_value=2.0)
     trainer.train_fold(fold=0, rank=0, world_size=2)
-    assert patch_dist["destroy"] >= 1
+    # The process group is shared across folds and is only destroyed once
+    # run_cross_validation's fold loop exits, not by train_fold itself -- see
+    # the comments in train_fold for why per-fold teardown is unsafe.
+    assert patch_dist["destroy"] == 0
+    assert patch_dist["init"] >= 1
+
+
+def test_run_cross_validation_cleans_up_process_group_once_after_nan(
+    tmp_pipeline, mist_args, monkeypatch, patch_dist
+):
+    """cleanup() runs exactly once, after run_cross_validation's fold loop,
+    even when a fold aborts early on a NaN loss."""
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
+    trainer = DummyTrainer(mist_args, train_loss_value=float("nan"), val_loss_value=2.0)
+    trainer.run_cross_validation(rank=0, world_size=2)
+    assert patch_dist["destroy"] == 1
 
 
 def test_overwrite_config_from_args(tmp_pipeline, mist_args, monkeypatch):

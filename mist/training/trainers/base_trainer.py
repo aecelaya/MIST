@@ -679,7 +679,17 @@ class BaseTrainer(ABC):
         hw = self.config["training"]["hardware"]
         os.environ["MASTER_ADDR"] = hw["master_addr"]
         os.environ["MASTER_PORT"] = str(hw["master_port"])
-        dist.init_process_group(hw["communication_backend"], rank=rank, world_size=world_size)
+        # device_id tells NCCL which GPU this rank's collective ops (e.g.
+        # barrier()) run on explicitly, instead of relying on the ambient
+        # "current CUDA device" set by train_fold's torch.cuda.set_device(rank)
+        # call just before this -- silences a UserWarning on newer torch
+        # versions and is what that warning itself recommends.
+        dist.init_process_group(
+            hw["communication_backend"],
+            rank=rank,
+            world_size=world_size,
+            device_id=torch.device("cuda", rank),
+        )
 
     # Clean up processes after distributed training
     def cleanup(self) -> None:
@@ -805,7 +815,15 @@ class BaseTrainer(ABC):
             if stop_training.item() == 1:
                 if rank == 0:
                     logs_writer.close()
-                self.cleanup()
+                # Note: the process group is NOT torn down here. It is shared
+                # across every fold run_cross_validation loops over in this
+                # process, and is only destroyed once, after that loop exits
+                # (see run_cross_validation). Destroying and re-creating it
+                # per fold raced ranks against each other (one rank could
+                # start re-initializing for the next fold while another was
+                # still tearing down the previous group) and produced
+                # intermittent NCCL "connection refused" crashes between
+                # folds on multi-GPU runs.
                 return  # Exit training early.
 
             # Update learning rate scheduler.
@@ -910,8 +928,13 @@ class BaseTrainer(ABC):
         if rank == 0:
             logs_writer.close()
 
-        # Clean up distributed processes.
-        self.cleanup()
+        # Note: the process group is intentionally left up here. It is shared
+        # across every fold run_cross_validation loops over in this process,
+        # and is only destroyed once that loop exits (see run_cross_validation
+        # and its call to self.cleanup()). Tearing it down and re-initializing
+        # it fresh for each fold raced ranks against each other and produced
+        # intermittent NCCL "connection refused" crashes between folds on
+        # multi-GPU runs.
 
     def run_cross_validation(self, rank: int, world_size: int) -> None:
         """Run cross-validation for selected folds."""
@@ -933,6 +956,11 @@ class BaseTrainer(ABC):
 
             # Train the model for the current fold.
             self.train_fold(fold=fold, rank=rank, world_size=world_size)
+
+        # Clean up the process group once, after all folds this process is
+        # responsible for have finished (or aborted). See the comments in
+        # train_fold for why this must not happen per-fold.
+        self.cleanup()
 
     def fit(self):
         """Fit the model using multiprocessing.
