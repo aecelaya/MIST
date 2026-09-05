@@ -3,13 +3,13 @@
 from pathlib import Path
 from typing import Any
 
-import ants
 import numpy as np
 import pandas as pd
 from skimage.morphology import skeletonize
 
 from mist.analyze_data.analyzer_constants import AnalyzeConstants as constants
 from mist.utils import progress_bar as progress_bar_utils
+from mist.utils import sitk_io
 
 
 def get_dataset_size_gb(paths_df: pd.DataFrame) -> float:
@@ -243,11 +243,11 @@ def collect_per_patient_stats(
         for i in pb.track(range(n_patients)):
             patient = paths_df.iloc[i].to_dict()
 
-            mask = ants.image_read(patient["mask"])
-            mask_arr = mask.numpy()
+            mask = sitk_io.read_image(patient["mask"])
+            mask_arr = sitk_io.array_from_image(mask)
 
-            spacings[i, :] = mask.spacing
-            original_dims[i, :] = mask.shape
+            spacings[i, :] = mask.GetSpacing()
+            original_dims[i, :] = mask.GetSize()
 
             fg_mask = mask_arr != 0
             fg_count = int(np.sum(fg_mask))
@@ -255,12 +255,12 @@ def collect_per_patient_stats(
             eff_voxels = (
                 int(np.prod(effective_dims[i]))
                 if effective_dims is not None
-                else int(np.prod(mask.shape))
+                else int(np.prod(mask.GetSize()))
             )
             foreground_fractions[i] = fg_count / max(eff_voxels, 1)
 
             # Per-label statistics and shape descriptors.
-            spacing_arr = np.array(mask.spacing)
+            spacing_arr = np.array(mask.GetSpacing())
             for lbl in non_bg_labels:
                 lbl_mask = mask_arr == lbl
                 voxel_count = int(np.sum(lbl_mask))
@@ -281,8 +281,8 @@ def collect_per_patient_stats(
                 for col in image_cols:
                     if col not in patient or not isinstance(patient[col], str):
                         continue
-                    img = ants.image_read(patient[col])
-                    fg_vals = img.numpy()[fg_mask]
+                    img = sitk_io.read_image(patient[col])
+                    fg_vals = sitk_io.array_from_image(img)[fg_mask]
                     # Sample up to ~5000 voxels per patient to keep memory low.
                     step = max(1, len(fg_vals) // 5000)
                     channel_intensities[col].extend(fg_vals[::step].tolist())

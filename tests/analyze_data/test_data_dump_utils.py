@@ -3,7 +3,6 @@
 from pathlib import Path
 from typing import Any
 
-import ants
 import numpy as np
 import pandas as pd
 import pytest
@@ -11,6 +10,7 @@ import pytest
 from mist.analyze_data import data_dump_utils as ddu
 from mist.analyze_data.analyzer_constants import AnalyzeConstants as constants
 from mist.utils import progress_bar as pb_mod
+from mist.utils import sitk_io
 from tests.analyze_data.helpers import FakePB
 
 # ---------------------------------------------------------------------------
@@ -18,11 +18,9 @@ from tests.analyze_data.helpers import FakePB
 # ---------------------------------------------------------------------------
 
 
-def _ants_image(arr: np.ndarray, spacing=(1.0, 1.0, 1.0)):
-    """Wrap a numpy array in an ANTs image with given spacing."""
-    img = ants.from_numpy(arr.astype(np.float32))
-    img.set_spacing(spacing)
-    return img
+def _sitk_image(arr: np.ndarray, spacing=(1.0, 1.0, 1.0)):
+    """Wrap a numpy array in an image with given spacing."""
+    return sitk_io.image_from_array(arr.astype(np.float32), spacing=spacing)
 
 
 def _make_paths_df(mask_paths, channel_paths: dict[str, list]) -> pd.DataFrame:
@@ -952,17 +950,17 @@ class TestGenerateObservations:
 
 
 def _make_mask_image(shape=(10, 10, 10), spacing=(1.0, 1.0, 1.5)):
-    """Return an ANTs mask with label 1 in a 3x3x3 cube and label 2 in
+    """Return a mask image with label 1 in a 3x3x3 cube and label 2 in
     a 2x2x2 cube."""
     arr = np.zeros(shape, dtype=np.float32)
     arr[1:4, 1:4, 1:4] = 1  # 27 voxels of label 1
     arr[6:8, 6:8, 6:8] = 2  # 8 voxels of label 2
-    return _ants_image(arr, spacing)
+    return _sitk_image(arr, spacing)
 
 
 def _make_channel_image(shape=(10, 10, 10), fill=100.0, spacing=(1.0, 1.0, 1.5)):
-    """Return a constant-value ANTs image for a channel."""
-    return _ants_image(np.full(shape, fill, dtype=np.float32), spacing)
+    """Return a constant-value image for a channel."""
+    return _sitk_image(np.full(shape, fill, dtype=np.float32), spacing)
 
 
 class TestCollectPerPatientStats:
@@ -970,14 +968,14 @@ class TestCollectPerPatientStats:
 
     @pytest.fixture(autouse=True)
     def _patch(self, monkeypatch):
-        """Patch ants and progress_bar for all tests in this class."""
+        """Patch sitk_io and progress_bar for all tests in this class."""
 
         def _image_read(path):
             if "mask" in str(path):
                 return _make_mask_image()
             return _make_channel_image()
 
-        monkeypatch.setattr(ants, "image_read", _image_read, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image", _image_read, raising=True)
         monkeypatch.setattr(pb_mod, "get_progress_bar", lambda _: FakePB(), raising=True)
 
     def _run(self, n=2, labels=(0, 1, 2), nan_channel=False):
@@ -1027,8 +1025,8 @@ class TestCollectPerPatientStats:
 
     def test_foreground_fraction_empty_foreground(self, monkeypatch):
         """Non-zero fraction is 0 when the mask is all background."""
-        empty_mask = _ants_image(np.zeros((10, 10, 10), dtype=np.float32))
-        monkeypatch.setattr(ants, "image_read", lambda _: empty_mask, raising=True)
+        empty_mask = _sitk_image(np.zeros((10, 10, 10), dtype=np.float32))
+        monkeypatch.setattr(sitk_io, "read_image", lambda _: empty_mask, raising=True)
         df = _make_paths_df(["p0_mask.nii.gz"], {"t1": ["p0_t1.nii.gz"]})
         ds_info = _make_dataset_info(labels=(0, 1), channels=("t1",))
         result = ddu.collect_per_patient_stats(df, ds_info)
@@ -1055,10 +1053,10 @@ class TestCollectPerPatientStats:
         def _read(p):
             """Return mask or channel image depending on path."""
             if "mask" in str(p):
-                return _ants_image(arr)
+                return _sitk_image(arr)
             return _make_channel_image()
 
-        monkeypatch.setattr(ants, "image_read", _read, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image", _read, raising=True)
         df = _make_paths_df(["p0_mask.nii.gz"], {"t1": ["p0_t1.nii.gz"]})
         ds_info = _make_dataset_info(labels=(0, 1, 2), channels=("t1",))
         result = ddu.collect_per_patient_stats(df, ds_info)

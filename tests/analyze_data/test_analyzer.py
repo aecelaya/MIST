@@ -17,12 +17,12 @@ from mist.analyze_data.analyzer import Analyzer
 from mist.analyze_data.data_dumper import DataDumper
 from mist.preprocessing import preprocessing_utils
 from mist.utils import io as io_mod
-from mist.utils import progress_bar
+from mist.utils import progress_bar, sitk_io
 
 # Shared test helpers.
 from tests.analyze_data.helpers import (
     fake_get_progress_bar,
-    make_ants_image,
+    make_sitk_image,
 )
 
 # Constants.
@@ -198,15 +198,24 @@ def _patch_env(monkeypatch, tmp_path):
         raising=True,
     )
 
-    # ANTs / progress / version.
-    monkeypatch.setattr(ants, "image_read", lambda _p: make_ants_image(), raising=True)
+    # ants.image_read is still real production code for check_crop_fg only
+    # (deliberately deferred to Stage 4 -- see its comment in analyzer.py),
+    # so it still needs a mock here. Everything else in Analyzer goes
+    # through sitk_io now.
     monkeypatch.setattr(
         ants,
-        "image_header_info",
+        "image_read",
+        lambda _p: ants.from_numpy(np.ones((10, 10, 10), dtype=np.float32)),
+        raising=True,
+    )
+    monkeypatch.setattr(sitk_io, "read_image", lambda _p: make_sitk_image(), raising=True)
+    monkeypatch.setattr(
+        sitk_io,
+        "read_image_header",
         fake_image_header_info,
         raising=True,
     )
-    monkeypatch.setattr(ants, "reorient_image2", fake_reorient_image2, raising=True)
+    monkeypatch.setattr(sitk_io, "reorient_image", fake_reorient_image2, raising=True)
     monkeypatch.setattr(
         progress_bar,
         "get_progress_bar",
@@ -466,20 +475,20 @@ class TestAnalyzerHelpers:
 
         def _sparse_or_dense(p):
             if "ct" in str(p):
-                img = make_ants_image(fill=0.0)
-                img.numpy()[2:4, 2:4, 2:4] = 1.0
-                return img
-            return make_ants_image(fill=0.0)
+                arr = np.zeros((10, 10, 10), dtype=np.float32)
+                arr[2:4, 2:4, 2:4] = 1.0
+                return sitk_io.image_from_array(arr)
+            return make_sitk_image(fill=0.0)
 
-        monkeypatch.setattr(ants, "image_read", _sparse_or_dense, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image", _sparse_or_dense, raising=True)
         assert bool(Analyzer(args).check_nz_ratio())
 
     def test_check_nz_ratio_dense_images(self, args, monkeypatch):
         """Dense images cause check_nz_ratio to return False."""
         monkeypatch.setattr(
-            ants,
-            "image_read",
-            lambda _p: make_ants_image(fill=1.0),
+            sitk_io,
+            "read_image",
+            lambda _p: make_sitk_image(fill=1.0),
             raising=True,
         )
         assert not bool(Analyzer(args).check_nz_ratio())
@@ -487,9 +496,9 @@ class TestAnalyzerHelpers:
     def test_get_target_spacing_handles_anisotropy(self, args, monkeypatch):
         """Anisotropic images → target spacing max equals the percentile."""
         monkeypatch.setattr(
-            ants,
-            "image_read",
-            lambda _p: make_ants_image(spacing=(1.0, 1.0, 5.0)),
+            sitk_io,
+            "read_image",
+            lambda _p: make_sitk_image(spacing=(1.0, 1.0, 5.0)),
             raising=True,
         )
         monkeypatch.setattr(np, "percentile", lambda a, q: 3.0, raising=True)
@@ -529,8 +538,8 @@ class TestAnalyzerHelpers:
     def test_check_nz_ratio_raises_on_worker_error(self, args, monkeypatch):
         """An exception in the NZ-ratio worker propagates as RuntimeError."""
         monkeypatch.setattr(
-            ants,
-            "image_read",
+            sitk_io,
+            "read_image",
             lambda _p: (_ for _ in ()).throw(RuntimeError("bad file")),
             raising=True,
         )
@@ -540,8 +549,8 @@ class TestAnalyzerHelpers:
     def test_get_target_spacing_raises_on_worker_error(self, args, monkeypatch):
         """An exception in the spacing worker propagates as RuntimeError."""
         monkeypatch.setattr(
-            ants,
-            "image_read",
+            sitk_io,
+            "read_image",
             lambda _p: (_ for _ in ()).throw(RuntimeError("bad file")),
             raising=True,
         )
@@ -551,8 +560,8 @@ class TestAnalyzerHelpers:
     def test_check_resampled_dims_raises_on_worker_error(self, args, monkeypatch):
         """An exception in the resampled-dims worker propagates as RuntimeError."""
         monkeypatch.setattr(
-            ants,
-            "image_header_info",
+            sitk_io,
+            "read_image_header",
             lambda _p: (_ for _ in ()).throw(RuntimeError("bad header")),
             raising=True,
         )
@@ -595,10 +604,10 @@ class TestGetCtNormalizationParameters:
 
         def _image_read(path):
             if "mask" in str(path):
-                return make_ants_image(fill=1.0)
-            return make_ants_image(fill=hu_value)
+                return make_sitk_image(fill=1.0)
+            return make_sitk_image(fill=hu_value)
 
-        monkeypatch.setattr(ants, "image_read", _image_read, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image", _image_read, raising=True)
         return Analyzer(args)
 
     def test_output_keys_are_present(self, args, monkeypatch):
@@ -642,13 +651,13 @@ class TestGetCtNormalizationParameters:
 
         def _image_read(path):
             if "mask" in str(path):
-                return make_ants_image(fill=1.0)
+                return make_sitk_image(fill=1.0)
             # Alternate between low and high HU across patients.
             hu = -500.0 if call_count[0] % 2 == 0 else 500.0
             call_count[0] += 1
-            return make_ants_image(fill=hu)
+            return make_sitk_image(fill=hu)
 
-        monkeypatch.setattr(ants, "image_read", _image_read, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image", _image_read, raising=True)
         result = Analyzer(args).get_ct_normalization_parameters()
         assert result["window_min"] < result["window_max"]
 
@@ -657,10 +666,10 @@ class TestGetCtNormalizationParameters:
 
         def _image_read(path):
             if "mask" in str(path):
-                return make_ants_image(fill=0.0)  # no foreground
-            return make_ants_image(fill=100.0)
+                return make_sitk_image(fill=0.0)  # no foreground
+            return make_sitk_image(fill=100.0)
 
-        monkeypatch.setattr(ants, "image_read", _image_read, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image", _image_read, raising=True)
         result = Analyzer(args).get_ct_normalization_parameters()
         assert set(result) == {
             "window_min",
@@ -674,18 +683,18 @@ class TestGetCtNormalizationParameters:
 
         def _image_read(path):
             if "mask" in str(path):
-                return make_ants_image(fill=1.0)
-            return make_ants_image(fill=5000.0)  # above CT_HU_HIST_MAX
+                return make_sitk_image(fill=1.0)
+            return make_sitk_image(fill=5000.0)  # above CT_HU_HIST_MAX
 
-        monkeypatch.setattr(ants, "image_read", _image_read, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image", _image_read, raising=True)
         Analyzer(args).get_ct_normalization_parameters()
         assert any("HU values outside the histogram range" in m for m in capture_console)
 
     def test_ct_normalization_raises_on_worker_error(self, args, monkeypatch):
         """An exception in the CT stats worker propagates as RuntimeError."""
         monkeypatch.setattr(
-            ants,
-            "image_read",
+            sitk_io,
+            "read_image",
             lambda _p: (_ for _ in ()).throw(RuntimeError("bad file")),
             raising=True,
         )
@@ -942,10 +951,10 @@ class TestValidateDataset:
             if "mask" in path:
                 arr = np.zeros((10, 10, 10), dtype=np.float32)
                 arr[2:4, 2:4, 2:4] = 99 if path.startswith("0_") or "/0_mask.nii.gz" in path else 1
-                return ants.from_numpy(arr)
-            return make_ants_image(fill=1.0)
+                return sitk_io.image_from_array(arr)
+            return make_sitk_image(fill=1.0)
 
-        monkeypatch.setattr(ants, "image_read", _dispatch, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image", _dispatch, raising=True)
         a = Analyzer(args)
         a.validate_dataset()
         assert len(a.paths_df) == TRAIN_N - 1
@@ -958,9 +967,9 @@ class TestValidateDataset:
         def _read_dispatch(path: str):
             if "0_mask.nii.gz" in str(path):
                 raise Exception("ITK internal error")
-            return ants.from_numpy(np.ones((10, 10, 10), dtype=np.float32))
+            return sitk_io.image_from_array(np.ones((10, 10, 10), dtype=np.float32))
 
-        monkeypatch.setattr(ants, "image_read", _read_dispatch, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image", _read_dispatch, raising=True)
         a = Analyzer(args)
         a.validate_dataset()
         assert len(a.paths_df) == TRAIN_N - 1
@@ -973,9 +982,9 @@ class TestValidateDataset:
         def _read_dispatch(path: str):
             if "0_mask.nii.gz" in str(path):
                 raise RuntimeError("corrupted NIfTI header")
-            return ants.from_numpy(np.ones((10, 10, 10), dtype=np.float32))
+            return sitk_io.image_from_array(np.ones((10, 10, 10), dtype=np.float32))
 
-        monkeypatch.setattr(ants, "image_read", _read_dispatch, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image", _read_dispatch, raising=True)
         a = Analyzer(args)
         a.validate_dataset()
         assert len(a.paths_df) == TRAIN_N - 1
@@ -985,8 +994,8 @@ class TestValidateDataset:
     def test_runtime_error_all_samples_raises(self, args, monkeypatch):
         """RuntimeError on every sample raises RuntimeError."""
         monkeypatch.setattr(
-            ants,
-            "image_read",
+            sitk_io,
+            "read_image",
             lambda _p: (_ for _ in ()).throw(RuntimeError("boom")),
             raising=True,
         )
@@ -1004,7 +1013,7 @@ class TestValidateDataset:
             """Compare headers by spacing tuple equality."""
             return tuple(h1.get("spacing", ())) == tuple(h2.get("spacing", ()))
 
-        monkeypatch.setattr(ants, "image_header_info", _hdr_with_path, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image_header", _hdr_with_path, raising=True)
         monkeypatch.setattr(au, "compare_headers", _compare_by_spacing, raising=True)
 
         a = Analyzer(args)
@@ -1030,7 +1039,7 @@ class TestValidateDataset:
                 "spacing": (1.0, 1.0, 1.0),
             }
 
-        monkeypatch.setattr(ants, "image_header_info", _hdr_router, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image_header", _hdr_router, raising=True)
         monkeypatch.setattr(
             au,
             "compare_headers",
@@ -1060,7 +1069,7 @@ class TestValidateDataset:
             }
 
         monkeypatch.setattr(au, "compare_headers", lambda h1, h2: True, raising=True)
-        monkeypatch.setattr(ants, "image_header_info", _hdr_router, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image_header", _hdr_router, raising=True)
 
         a = Analyzer(args)
         a.validate_dataset()
@@ -1091,7 +1100,7 @@ class TestValidateDataset:
             }
 
         monkeypatch.setattr(au, "compare_headers", lambda h1, h2: True, raising=True)
-        monkeypatch.setattr(ants, "image_header_info", _hdr_router, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image_header", _hdr_router, raising=True)
 
         a = Analyzer(args)
         a.validate_dataset()
@@ -1116,19 +1125,19 @@ class TestValidateDataset:
             }
 
         monkeypatch.setattr(au, "compare_headers", lambda h1, h2: True, raising=True)
-        monkeypatch.setattr(ants, "image_header_info", _hdr_router, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image_header", _hdr_router, raising=True)
         with pytest.raises(RuntimeError):
             Analyzer(args).validate_dataset()
 
     def test_corrupt_secondary_image_excludes_patient(self, args, monkeypatch, capture_console):
-        """RuntimeError from ants.image_header_info inside the loop excludes patient."""
+        """RuntimeError from sitk_io.read_image_header inside the loop excludes patient."""
 
         def _hdr_router(path: str):
             if "0_ct.nii.gz" in path:
                 raise RuntimeError("corrupt secondary image header")
             return {"dimensions": (10, 10, 10), "spacing": (1.0, 1.0, 1.0)}
 
-        monkeypatch.setattr(ants, "image_header_info", _hdr_router, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image_header", _hdr_router, raising=True)
         monkeypatch.setattr(au, "compare_headers", lambda h1, h2: True, raising=True)
 
         a = Analyzer(args)
@@ -1176,7 +1185,7 @@ class TestValidateDataset:
             # Image-vs-image: compare spacing.
             return tuple(h1.get("spacing", ())) == tuple(h2.get("spacing", ()))
 
-        monkeypatch.setattr(ants, "image_header_info", _hdr_router, raising=True)
+        monkeypatch.setattr(sitk_io, "read_image_header", _hdr_router, raising=True)
         monkeypatch.setattr(au, "compare_headers", _compare, raising=True)
 
         a = Analyzer(args)

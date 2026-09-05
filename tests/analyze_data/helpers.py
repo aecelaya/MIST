@@ -3,8 +3,10 @@
 import types
 from typing import Any
 
-import ants
 import numpy as np
+import SimpleITK as sitk
+
+from mist.utils import sitk_io
 
 
 class FakePB:
@@ -31,14 +33,12 @@ def fake_get_progress_bar(_text: str) -> FakePB:
     return FakePB()
 
 
-def make_ants_image(
+def make_sitk_image(
     shape: tuple[int, int, int] = (10, 10, 10),
     spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
     fill: float = 1.0,
-) -> ants.ANTsImage:
-    """Create an ANTs image filled with *fill* at the given *shape* and
+) -> sitk.Image:
+    """Create an image filled with *fill* at the given *shape* and
     *spacing*."""
     arr = np.full(shape, fill, dtype=np.float32)
-    img = ants.from_numpy(arr)
-    img.set_spacing(spacing)
-    return img
+    return sitk_io.image_from_array(arr, spacing=spacing)

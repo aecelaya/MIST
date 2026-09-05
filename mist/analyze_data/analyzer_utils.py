@@ -21,8 +21,8 @@ def compare_headers(header1: dict[str, Any], header2: dict[str, Any]) -> bool:
     We compare the dimensions, origin, spacing, and direction of the two images.
 
     Args:
-        header1: Image header information from ants.image_header_info
-        header2: Image header information from ants.image_header_info
+        header1: Image header information from sitk_io.read_image_header
+        header2: Image header information from sitk_io.read_image_header
 
     Returns:
         True if the dimensions, origin, spacing, and direction match.
@@ -47,7 +47,7 @@ def is_image_3d(header: dict[str, Any]) -> bool:
     """Check if image is 3D.
 
     Args:
-        header: Image header information from ants.image_header_info
+        header: Image header information from sitk_io.read_image_header
 
     Returns:
         True if the image is 3D.

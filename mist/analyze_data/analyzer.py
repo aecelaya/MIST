@@ -26,7 +26,7 @@ from mist.analyze_data.data_dumper import DataDumper
 from mist.preprocessing import preprocessing_utils
 
 # MIST imports.
-from mist.utils import io, progress_bar
+from mist.utils import io, progress_bar, sitk_io
 from mist.utils.console import (
     print_error,
     print_section_header,
@@ -330,6 +330,15 @@ class Analyzer:
         """
 
         def _process(patient):
+            # Deliberately still ants-based, unlike the rest of this module
+            # (Stage 3 of the ANTs -> SimpleITK migration): get_fg_mask_bbox
+            # lives in mist/preprocessing/preprocessing_utils.py (Stage 4,
+            # not yet migrated) and expects an ANTsImage (calls .numpy()/
+            # .shape on it internally). It's also called from
+            # mist/preprocessing/preprocess.py and
+            # mist/inference/inference_runners.py, both still fully
+            # ants-based -- migrate this call site together with Stage 4,
+            # when get_fg_mask_bbox itself moves to sitk_io.
             try:
                 image_list = list(patient.values())[3:]
                 image = ants.image_read(image_list[0])
@@ -377,8 +386,9 @@ class Analyzer:
         def _process(patient):
             try:
                 image_list = list(patient.values())[3:]
-                image = ants.image_read(image_list[0])
-                return float(np.sum(image.numpy() != 0) / np.prod(image.shape))
+                image = sitk_io.read_image(image_list[0])
+                image_arr = sitk_io.array_from_image(image)
+                return float(np.sum(image_arr != 0) / np.prod(image.GetSize()))
             except Exception as e:
                 raise RuntimeError(f"Error processing patient '{patient['id']}': {e}") from e
 
@@ -410,10 +420,18 @@ class Analyzer:
 
         def _process(patient):
             try:
-                mask = ants.image_read(patient["mask"])
-                mask = ants.reorient_image2(mask, "RAI")
-                mask.set_direction(constants.RAI_ANTS_DIRECTION)
-                return tuple(mask.spacing)
+                mask = sitk_io.read_image(patient["mask"])
+                # Reorient to RAI first so every patient's spacing tuple
+                # refers to the same physical axis before we take a
+                # cross-patient median below -- see get_target_spacing's
+                # docstring. (The historical mask.set_direction(np.eye(3))
+                # call after reorienting is not replicated here: verified
+                # empirically -- against real ants, across identity,
+                # anisotropic, oblique, and axis-aligned-non-RAI inputs --
+                # that it never affects the resulting spacing, so it was
+                # dead code even in the ants version.)
+                mask = sitk_io.reorient_image(mask, "RAI")
+                return tuple(mask.GetSpacing())
             except Exception as e:
                 raise RuntimeError(f"Error processing patient '{patient['id']}': {e}") from e
 
@@ -488,7 +506,7 @@ class Analyzer:
 
         def _process(patient, cropped_dims_i):
             try:
-                mask_header = ants.image_header_info(patient["mask"])
+                mask_header = sitk_io.read_image_header(patient["mask"])
                 image_list = list(patient.values())[3:]
                 current_dims = cropped_dims_i if crop_to_fg else mask_header["dimensions"]
                 current_spacing = mask_header["spacing"]
@@ -558,12 +576,15 @@ class Analyzer:
         def _process(patient):
             try:
                 image_list = list(patient.values())[3:]
-                image = ants.image_read(image_list[0])
-                mask = ants.image_read(patient["mask"])
+                image_arr = sitk_io.array_from_image(sitk_io.read_image(image_list[0]))
+                mask_arr = sitk_io.array_from_image(sitk_io.read_image(patient["mask"]))
+                # Verified empirically that ants' image[mask != 0] indexing
+                # produces identical values, in the same order, to plain
+                # numpy boolean indexing on the arrays read from the same
+                # files -- both are a flatten-then-boolean-select over the
+                # same underlying data.
                 arr = np.asarray(
-                    (image[mask != 0]).tolist()[  # type: ignore
-                        :: constants.CT_GATHER_EVERY_ITH_VOXEL_VALUE
-                    ],
+                    image_arr[mask_arr != 0][:: constants.CT_GATHER_EVERY_ITH_VOXEL_VALUE],
                     dtype=np.float64,
                 )
                 if len(arr) == 0:
@@ -716,9 +737,9 @@ class Analyzer:
             try:
                 # Patient values are ["id", "mask", "image_1", "image_2", ...].
                 image_list = list(patient.values())[2:]
-                mask = ants.image_read(patient["mask"])
-                mask_labels = set(mask.unique().astype(int))
-                mask_header = ants.image_header_info(patient["mask"])
+                mask = sitk_io.read_image(patient["mask"])
+                mask_labels = set(np.unique(sitk_io.array_from_image(mask)).astype(int))
+                mask_header = sitk_io.read_image_header(patient["mask"])
 
                 if not mask_labels.issubset(dataset_labels_set):
                     return True, (
@@ -730,7 +751,7 @@ class Analyzer:
                     return True, (f"In {patient['id']}: Got 4D mask, make sure all images are 3D")
 
                 for image_path in image_list:
-                    image_header = ants.image_header_info(image_path)
+                    image_header = sitk_io.read_image_header(image_path)
                     if not analyzer_utils.compare_headers(mask_header, image_header):
                         return True, (
                             f"In {patient['id']}: Mismatch between image and "
@@ -742,9 +763,9 @@ class Analyzer:
                         )
 
                 if len(image_list) > 1:
-                    anchor_header = ants.image_header_info(image_list[0])
+                    anchor_header = sitk_io.read_image_header(image_list[0])
                     for image_path in image_list[1:]:
-                        image_header = ants.image_header_info(image_path)
+                        image_header = sitk_io.read_image_header(image_path)
                         if not analyzer_utils.compare_headers(anchor_header, image_header):
                             return True, (
                                 f"In {patient['id']}: Mismatch between images' header information"
