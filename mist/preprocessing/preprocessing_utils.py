@@ -1,6 +1,5 @@
 """Preprocessing utilities for MIST."""
 
-import ants
 import numpy as np
 import SimpleITK as sitk
 import skimage
@@ -8,56 +7,6 @@ import skimage
 # MIST imports.
 from mist.preprocessing.preprocessing_constants import PreprocessingConstants as pc
 from mist.utils import sitk_io
-
-
-def ants_to_sitk(img_ants: ants.core.ants_image.ANTsImage) -> sitk.Image:
-    """Convert ANTs image to SimpleITK image.
-
-    Args:
-        img_ants: ANTs image object.
-
-    Returns:
-        img_sitk: SimpleITK image object.
-    """
-    # Get spacing, origin, and direction from ANTs image.
-    spacing = img_ants.spacing
-    origin = img_ants.origin
-    direction = tuple(img_ants.direction.flatten())
-
-    # Convert ANTs image to numpy array and create SimpleITK image.
-    img_sitk = sitk.GetImageFromArray(img_ants.numpy().T)
-
-    # Set spacing, origin, and direction for SimpleITK image.
-    img_sitk.SetSpacing(spacing)
-    img_sitk.SetOrigin(origin)
-    img_sitk.SetDirection(direction)
-    return img_sitk
-
-
-def sitk_to_ants(img_sitk: sitk.Image) -> ants.core.ants_image.ANTsImage:
-    """Convert SimpleITK image to ANTs image.
-
-    Args:
-        img_sitk: SimpleITK image object.
-
-    Returns:
-        img_ants: ANTs image object.
-    """
-    # Get spacing, origin, and direction from SimpleITK image.
-    spacing = img_sitk.GetSpacing()
-    origin = img_sitk.GetOrigin()
-    direction_sitk = img_sitk.GetDirection()
-    dim = int(np.sqrt(len(direction_sitk)))
-    direction = np.reshape(np.array(direction_sitk), (dim, dim))
-
-    # Convert SimpleITK image to numpy array and create ANTs image.
-    img_ants = ants.from_numpy(sitk.GetArrayFromImage(img_sitk).T)
-
-    # Set spacing, origin, and direction for ANTs image.
-    img_ants.set_spacing(spacing)
-    img_ants.set_origin(origin)
-    img_ants.set_direction(direction)
-    return img_ants
 
 
 def get_fg_mask_bbox(

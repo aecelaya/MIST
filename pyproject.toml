@@ -1,6 +1,6 @@
 [project]
 name = "mist-medical"
-version = "2.0.2-rc"
+version = "2.1.0-rc"
 requires-python = ">= 3.10"
 description = "MIST is a simple and scalable end-to-end framework for medical imaging segmentation."
 readme = "README.md"
@@ -34,7 +34,6 @@ keywords = [
 dependencies = [
     "torch",
     "monai",
-    "antspyx",
     "simpleitk",
     "numpy",
     "pandas",
@@ -43,12 +42,11 @@ dependencies = [
     "scikit-learn",
     "scikit-image",
     "tensorboard",
-    "einops",
-    "pytest",
 ]
 
 [project.optional-dependencies]
 train = ["nvidia-dali-cuda120"]
+dev = ["pytest"]
 
 [project.urls]
 homepage = "https://github.com/mist-medical/MIST"

@@ -12,7 +12,7 @@ MIST requires Python >= 3.10.
 git clone https://github.com/mist-medical/MIST.git
 cd MIST
 python -m pip install --upgrade pip
-pip install -e . pytest pytest-cov codespell
+pip install -e ".[dev]" pytest-cov codespell
 ```
 
 Installing with `-e .` pulls dependencies from `pyproject.toml`, so your

@@ -1,6 +1,5 @@
 """Tests for MIST preprocessing utilities."""
 
-import ants
 import numpy as np
 import pytest
 import SimpleITK as sitk
@@ -8,20 +7,6 @@ import SimpleITK as sitk
 # MIST imports.
 from mist.preprocessing import preprocessing_utils as pu
 from mist.utils import sitk_io
-
-
-def _make_ants_image(
-    arr_xyz: np.ndarray,
-    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
-    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
-    direction_mat: np.ndarray | None = None,
-):
-    """Create an ANTs image with metadata set."""
-    img = ants.from_numpy(arr_xyz.astype(np.float32))
-    img.set_spacing(spacing)
-    img.set_origin(origin)
-    img.set_direction(direction_mat if direction_mat is not None else np.eye(3))
-    return img
 
 
 def _make_sitk_image_from_xyz(
@@ -42,48 +27,6 @@ def _make_sitk_image_from_xyz(
     )
     img.SetDirection(direction)
     return img
-
-
-def test_ants_to_sitk_preserves_metadata_and_orientation():
-    """ants_to_sitk transfers spacing/origin/direction and transposes data."""
-    arr = np.arange(3 * 4 * 5, dtype=np.float32).reshape(3, 4, 5)
-    spacing = (1.2, 1.5, 2.5)
-    origin = (5.0, -3.0, 2.0)
-    direction = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-
-    img_ants = _make_ants_image(arr, spacing=spacing, origin=origin, direction_mat=direction)
-    img_sitk = pu.ants_to_sitk(img_ants)
-
-    # Metadata preserved.
-    assert img_sitk.GetSpacing() == spacing
-    assert img_sitk.GetOrigin() == origin
-    assert np.allclose(img_sitk.GetDirection(), direction.flatten())
-
-    # Orientation: SITK array should equal ants numpy transposed.
-    sitk_arr = sitk.GetArrayFromImage(img_sitk)
-    assert np.array_equal(sitk_arr, arr.T)
-
-
-def test_sitk_to_ants_preserves_metadata_and_orientation():
-    """sitk_to_ants transfers spacing/origin/direction and transposes back."""
-    arr = np.arange(2 * 3 * 4, dtype=np.float32).reshape(2, 3, 4)
-    spacing = (0.8, 0.9, 1.1)
-    origin = (-1.0, 2.0, 3.5)
-    direction = np.eye(3)
-
-    img_sitk = _make_sitk_image_from_xyz(
-        arr, spacing=spacing, origin=origin, direction_mat=direction
-    )
-    img_ants = pu.sitk_to_ants(img_sitk)
-
-    # Metadata preserved.
-    assert tuple(img_ants.spacing) == spacing
-    assert tuple(img_ants.origin) == origin
-    assert np.allclose(img_ants.direction, direction)
-
-    # Orientation: ANTs numpy should equal original XYZ array.
-    ants_arr = img_ants.numpy()
-    assert np.array_equal(ants_arr, arr)
 
 
 def test_get_fg_mask_bbox_detects_cube(monkeypatch):
