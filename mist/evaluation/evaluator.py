@@ -5,14 +5,14 @@ import gc
 from pathlib import Path
 from typing import Any
 
-import ants
 import numpy as np
 import pandas as pd
+import SimpleITK as sitk
 
 from mist.analyze_data import analyzer_utils
 from mist.evaluation import evaluation_utils
 from mist.metrics.metrics_registry import get_metric
-from mist.utils import progress_bar
+from mist.utils import progress_bar, sitk_io
 from mist.utils.console import print_error, print_success, print_warning
 
 
@@ -147,7 +147,7 @@ class Evaluator:
             return worst_case_value
         return None
 
-    def _load_patient_data(self, patient_id: str) -> dict[str, ants.core.ants_image.ANTsImage]:
+    def _load_patient_data(self, patient_id: str) -> dict[str, sitk.Image]:
         """Load the ground truth and prediction paths for a given patient ID."""
         try:
             row = self.filepaths_dataframe.loc[patient_id]
@@ -181,8 +181,8 @@ class Evaluator:
                 raise ValueError(f"Mask validation failed for {patient_id}: " + " | ".join(errors))
 
         # Validate headers before loading heavy image data.
-        mask_header = ants.image_header_info(row_data["mask"])
-        pred_header = ants.image_header_info(row_data["prediction"])
+        mask_header = sitk_io.read_image_header(row_data["mask"])
+        pred_header = sitk_io.read_image_header(row_data["prediction"])
 
         if not analyzer_utils.compare_headers(mask_header, pred_header):
             raise ValueError(
@@ -191,8 +191,8 @@ class Evaluator:
             )
 
         return {
-            "mask": ants.image_read(row_data["mask"]),
-            "prediction": ants.image_read(row_data["prediction"]),
+            "mask": sitk_io.read_image(row_data["mask"]),
+            "prediction": sitk_io.read_image(row_data["prediction"]),
         }
 
     def _compute_metrics(
@@ -306,11 +306,11 @@ class Evaluator:
         try:
             # 1. Load data.
             patient_data = self._load_patient_data(patient_id)
-            spacing = patient_data["mask"].spacing
+            spacing = patient_data["mask"].GetSpacing()
 
             # 2. Convert to numpy.
-            mask_np = patient_data["mask"].numpy()
-            pred_np = patient_data["prediction"].numpy()
+            mask_np = sitk_io.array_from_image(patient_data["mask"])
+            pred_np = sitk_io.array_from_image(patient_data["prediction"])
 
             # 3. Compute metrics.
             result, errors = self._evaluate_single_patient(

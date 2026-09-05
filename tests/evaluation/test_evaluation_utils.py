@@ -2,12 +2,12 @@
 
 from pathlib import Path
 
-import ants
 import numpy as np
 import pandas as pd
 import pytest
 
 from mist.evaluation import evaluation_utils
+from mist.utils import sitk_io
 
 # ---------------------------------------------------------------------------
 # Module-level helpers
@@ -19,18 +19,6 @@ def _make_eval_config(classes=None) -> dict:
     if classes is None:
         classes = {"tumor": [1]}
     return {name: {"labels": labels, "metrics": {"dice": {}}} for name, labels in classes.items()}
-
-
-class _FakeImage:
-    """Minimal stand-in for an ANTsImage used in validate_mask tests."""
-
-    def __init__(self, arr: np.ndarray):
-        """Store the underlying numpy array."""
-        self._arr = arr
-
-    def numpy(self) -> np.ndarray:
-        """Return the underlying array."""
-        return self._arr
 
 
 # ---------------------------------------------------------------------------
@@ -50,8 +38,9 @@ class TestValidateMask:
         path = tmp_path / "mask.nii.gz"
         path.touch()
         arr = np.array([[[0, 1], [1, 0]]], dtype=np.int32)
-        monkeypatch.setattr(ants, "image_header_info", lambda _: self._header(3))
-        monkeypatch.setattr(ants, "image_read", lambda _: _FakeImage(arr))
+        monkeypatch.setattr(sitk_io, "read_image_header", lambda _: self._header(3))
+        monkeypatch.setattr(sitk_io, "read_image", lambda _: None)
+        monkeypatch.setattr(sitk_io, "array_from_image", lambda _: arr)
         config = _make_eval_config()
         assert evaluation_utils.validate_mask(path, config) is None
 
@@ -60,15 +49,16 @@ class TestValidateMask:
         path = tmp_path / "mask.nii.gz"
         path.touch()
         arr = np.array([[[True, False]]], dtype=bool)
-        monkeypatch.setattr(ants, "image_header_info", lambda _: self._header(3))
-        monkeypatch.setattr(ants, "image_read", lambda _: _FakeImage(arr))
+        monkeypatch.setattr(sitk_io, "read_image_header", lambda _: self._header(3))
+        monkeypatch.setattr(sitk_io, "read_image", lambda _: None)
+        monkeypatch.setattr(sitk_io, "array_from_image", lambda _: arr)
         assert evaluation_utils.validate_mask(path, _make_eval_config()) is None
 
     def test_4d_mask_returns_error(self, monkeypatch, tmp_path):
         """A 4D mask header returns a 'not a 3D image' error string."""
         path = tmp_path / "mask.nii.gz"
         path.touch()
-        monkeypatch.setattr(ants, "image_header_info", lambda _: self._header(4))
+        monkeypatch.setattr(sitk_io, "read_image_header", lambda _: self._header(4))
         result = evaluation_utils.validate_mask(path, _make_eval_config())
         assert result is not None
         assert "not a 3D image" in result
@@ -78,8 +68,9 @@ class TestValidateMask:
         path = tmp_path / "mask.nii.gz"
         path.touch()
         arr = np.array([[[0.5, 1.0]]], dtype=np.float32)
-        monkeypatch.setattr(ants, "image_header_info", lambda _: self._header(3))
-        monkeypatch.setattr(ants, "image_read", lambda _: _FakeImage(arr))
+        monkeypatch.setattr(sitk_io, "read_image_header", lambda _: self._header(3))
+        monkeypatch.setattr(sitk_io, "read_image", lambda _: None)
+        monkeypatch.setattr(sitk_io, "array_from_image", lambda _: arr)
         result = evaluation_utils.validate_mask(path, _make_eval_config())
         assert result is not None
         assert "dtype" in result
@@ -90,8 +81,9 @@ class TestValidateMask:
         path = tmp_path / "mask.nii.gz"
         path.touch()
         arr = np.array([[[0.0, 1.0], [1.0, 0.0]]], dtype=np.float32)
-        monkeypatch.setattr(ants, "image_header_info", lambda _: self._header(3))
-        monkeypatch.setattr(ants, "image_read", lambda _: _FakeImage(arr))
+        monkeypatch.setattr(sitk_io, "read_image_header", lambda _: self._header(3))
+        monkeypatch.setattr(sitk_io, "read_image", lambda _: None)
+        monkeypatch.setattr(sitk_io, "array_from_image", lambda _: arr)
         assert evaluation_utils.validate_mask(path, _make_eval_config()) is None
 
     def test_unexpected_labels_returns_error(self, monkeypatch, tmp_path):
@@ -99,20 +91,21 @@ class TestValidateMask:
         path = tmp_path / "mask.nii.gz"
         path.touch()
         arr = np.array([[[0, 99]]], dtype=np.int32)
-        monkeypatch.setattr(ants, "image_header_info", lambda _: self._header(3))
-        monkeypatch.setattr(ants, "image_read", lambda _: _FakeImage(arr))
+        monkeypatch.setattr(sitk_io, "read_image_header", lambda _: self._header(3))
+        monkeypatch.setattr(sitk_io, "read_image", lambda _: None)
+        monkeypatch.setattr(sitk_io, "array_from_image", lambda _: arr)
         result = evaluation_utils.validate_mask(path, _make_eval_config())
         assert result is not None
         assert "unexpected labels" in result
 
     def test_runtime_error_on_read_returns_error(self, monkeypatch, tmp_path):
-        """RuntimeError during ants.image_read is caught and reported."""
+        """RuntimeError during sitk_io.read_image is caught and reported."""
         path = tmp_path / "mask.nii.gz"
         path.touch()
-        monkeypatch.setattr(ants, "image_header_info", lambda _: self._header(3))
+        monkeypatch.setattr(sitk_io, "read_image_header", lambda _: self._header(3))
         monkeypatch.setattr(
-            ants,
-            "image_read",
+            sitk_io,
+            "read_image",
             lambda _: (_ for _ in ()).throw(RuntimeError("corrupt")),
         )
         result = evaluation_utils.validate_mask(path, _make_eval_config())
@@ -123,7 +116,7 @@ class TestValidateMask:
         """The mask_type argument is included in error messages."""
         path = tmp_path / "pred.nii.gz"
         path.touch()
-        monkeypatch.setattr(ants, "image_header_info", lambda _: self._header(4))
+        monkeypatch.setattr(sitk_io, "read_image_header", lambda _: self._header(4))
         result = evaluation_utils.validate_mask(path, _make_eval_config(), mask_type="prediction")
         assert result is not None
         assert "prediction" in result

@@ -16,7 +16,7 @@ from mist.postprocessing.transform_registry import (
 )
 
 # MIST imports.
-from mist.utils import io, progress_bar
+from mist.utils import io, progress_bar, sitk_io
 from mist.utils.console import (
     console,
     print_info,
@@ -54,7 +54,7 @@ def _postprocess_single_file(
     shutil.copy(input_path, output_path)
 
     patient_id = input_path.name.removesuffix(".nii.gz")
-    mask = ants.image_read(str(input_path))
+    mask = sitk_io.read_image(str(input_path))
     messages = []
 
     for transform_name, per_label_flag, label_group, kwargs in zip(
@@ -63,16 +63,16 @@ def _postprocess_single_file(
         try:
             transform_fn = get_transform(transform_name)
             updated_npy = transform_fn(
-                mask.numpy().astype(np.uint8),
+                sitk_io.array_from_image(mask).astype(np.uint8),
                 labels_list=label_group,
                 per_label=per_label_flag,
                 **kwargs,
             ).astype(np.uint8)
-            mask = mask.new_image_like(updated_npy)  # type: ignore
+            mask = sitk_io.new_image_like(mask, updated_npy)
         except ValueError as e:
             messages.append(f"[red]Error applying {transform_name} to {patient_id}: {e}[/red]")
 
-    ants.image_write(mask, str(output_path))
+    sitk_io.write_image(mask, str(output_path))
     return messages
 
 
@@ -209,6 +209,16 @@ class Postprocessor:
         self, patient_id: str, mask: ants.core.ants_image.ANTsImage
     ) -> tuple[ants.core.ants_image.ANTsImage, list[str]]:
         """Apply all transforms in the strategy to a single ANTsImage mask.
+
+        Deliberately still ants-based, unlike the rest of this module (Stage 2
+        of the ANTs -> SimpleITK migration): this method's only caller is
+        mist/inference/inference_runners.py's mist_predict --postprocess-strategy
+        path, which is still fully ants-based (Stage 5, not yet migrated) and
+        writes this method's return value straight out via ants.image_write.
+        Migrating this method in isolation would mean bridging ants<->sitk at
+        this one call site ahead of Stage 5 actually migrating
+        inference_runners.py, rather than that stage doing it consistently
+        for the whole file. Migrate this method together with Stage 5.
 
         Args:
             patient_id: Unique identifier for the patient or example.

@@ -3,7 +3,6 @@
 import concurrent.futures
 from pathlib import Path
 
-import ants
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,11 +12,12 @@ from mist.evaluation import evaluation_utils
 from mist.evaluation.evaluator import Evaluator
 from mist.utils import console as console_mod
 from mist.utils import progress_bar as pb_mod
+from mist.utils import sitk_io
 from tests.evaluation.helpers import (
     FakeExecutor,
     fake_get_progress_bar,
-    make_ants_image,
     make_eval_config,
+    make_sitk_image,
 )
 
 # ---------------------------------------------------------------------------
@@ -234,10 +234,10 @@ class TestLoadPatientData:
 
     def test_success_returns_mask_and_prediction(self, evaluator, monkeypatch):
         """Valid patient ID returns a dict with mask and prediction keys."""
-        mock_img = make_ants_image()
+        mock_img = make_sitk_image()
         monkeypatch.setattr(
-            ants,
-            "image_header_info",
+            sitk_io,
+            "read_image_header",
             lambda _: {
                 "dimensions": (10, 10, 10),
                 "spacing": (1.0, 1.0, 1.0),
@@ -245,7 +245,7 @@ class TestLoadPatientData:
                 "direction": np.eye(3).flatten().tolist(),
             },
         )
-        monkeypatch.setattr(ants, "image_read", lambda _: mock_img)
+        monkeypatch.setattr(sitk_io, "read_image", lambda _: mock_img)
         monkeypatch.setattr(analyzer_utils, "compare_headers", lambda *_: True)
         data = evaluator._load_patient_data("p0")
         assert "mask" in data
@@ -271,8 +271,8 @@ class TestLoadPatientData:
     def test_header_mismatch_raises_value_error(self, evaluator, monkeypatch):
         """Mismatched image headers raise ValueError."""
         monkeypatch.setattr(
-            ants,
-            "image_header_info",
+            sitk_io,
+            "read_image_header",
             lambda _: {
                 "dimensions": (10, 10, 10),
                 "spacing": (1.0, 1.0, 1.0),
@@ -286,10 +286,10 @@ class TestLoadPatientData:
 
     def test_validate_masks_false_skips_validation(self, filepaths_df, tmp_path, monkeypatch):
         """When validate_masks=False, validate_mask is never called."""
-        mock_img = make_ants_image()
+        mock_img = make_sitk_image()
         monkeypatch.setattr(
-            ants,
-            "image_header_info",
+            sitk_io,
+            "read_image_header",
             lambda _: {
                 "dimensions": (10, 10, 10),
                 "spacing": (1.0, 1.0, 1.0),
@@ -297,7 +297,7 @@ class TestLoadPatientData:
                 "direction": np.eye(3).flatten().tolist(),
             },
         )
-        monkeypatch.setattr(ants, "image_read", lambda _: mock_img)
+        monkeypatch.setattr(sitk_io, "read_image", lambda _: mock_img)
         monkeypatch.setattr(analyzer_utils, "compare_headers", lambda *_: True)
 
         called = {"count": 0}
@@ -318,10 +318,10 @@ class TestLoadPatientData:
 
     def test_validate_masks_true_calls_validate_mask(self, filepaths_df, tmp_path, monkeypatch):
         """When validate_masks=True, validate_mask is called for both files."""
-        mock_img = make_ants_image()
+        mock_img = make_sitk_image()
         monkeypatch.setattr(
-            ants,
-            "image_header_info",
+            sitk_io,
+            "read_image_header",
             lambda _: {
                 "dimensions": (10, 10, 10),
                 "spacing": (1.0, 1.0, 1.0),
@@ -329,7 +329,7 @@ class TestLoadPatientData:
                 "direction": np.eye(3).flatten().tolist(),
             },
         )
-        monkeypatch.setattr(ants, "image_read", lambda _: mock_img)
+        monkeypatch.setattr(sitk_io, "read_image", lambda _: mock_img)
         monkeypatch.setattr(analyzer_utils, "compare_headers", lambda *_: True)
         monkeypatch.setattr(evaluation_utils, "validate_mask", lambda *_a, **_k: None)
 
@@ -611,10 +611,10 @@ class TestEvaluatePatientPipeline:
 
     def test_success_returns_result_and_no_error(self, evaluator, monkeypatch):
         """A successful pipeline returns a result dict and None for errors."""
-        mock_img = make_ants_image()
+        mock_img = make_sitk_image()
         monkeypatch.setattr(
-            ants,
-            "image_header_info",
+            sitk_io,
+            "read_image_header",
             lambda _: {
                 "dimensions": (10, 10, 10),
                 "spacing": (1.0, 1.0, 1.0),
@@ -622,7 +622,7 @@ class TestEvaluatePatientPipeline:
                 "direction": np.eye(3).flatten().tolist(),
             },
         )
-        monkeypatch.setattr(ants, "image_read", lambda _: mock_img)
+        monkeypatch.setattr(sitk_io, "read_image", lambda _: mock_img)
         monkeypatch.setattr(analyzer_utils, "compare_headers", lambda *_: True)
         result, err = evaluator._evaluate_patient_pipeline("p0")
         assert result is not None
@@ -643,10 +643,10 @@ class TestEvaluatePatientPipeline:
 
     def test_metric_warning_propagated_in_error_message(self, evaluator, monkeypatch):
         """Non-fatal metric warnings are surfaced in the pipeline error string."""
-        mock_img = make_ants_image()
+        mock_img = make_sitk_image()
         monkeypatch.setattr(
-            ants,
-            "image_header_info",
+            sitk_io,
+            "read_image_header",
             lambda _: {
                 "dimensions": (10, 10, 10),
                 "spacing": (1.0, 1.0, 1.0),
@@ -654,7 +654,7 @@ class TestEvaluatePatientPipeline:
                 "direction": np.eye(3).flatten().tolist(),
             },
         )
-        monkeypatch.setattr(ants, "image_read", lambda _: mock_img)
+        monkeypatch.setattr(sitk_io, "read_image", lambda _: mock_img)
         monkeypatch.setattr(analyzer_utils, "compare_headers", lambda *_: True)
         # Make _evaluate_single_patient return a warning (non-None errors).
         monkeypatch.setattr(

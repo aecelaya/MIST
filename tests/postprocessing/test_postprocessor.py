@@ -13,6 +13,7 @@ import pytest
 from mist.postprocessing import postprocessor as pp_mod
 from mist.postprocessing.postprocessor import Postprocessor
 from mist.utils import console as console_mod
+from mist.utils import sitk_io
 
 # ---------------------------------------------------------------------------
 # Strategy fixtures
@@ -212,7 +213,13 @@ def test_print_strategy(mock_table_class, mock_read_json):
 
 @pytest.fixture
 def dummy_ants_image():
-    """Create a dummy ANTsImage for testing."""
+    """Create a dummy ANTsImage for testing.
+
+    Still ants-based, unlike the rest of this file: apply_strategy_to_single_example
+    itself is still ants-based (see its docstring) -- its only caller is the
+    still-fully-ants-based mist_predict --postprocess-strategy path, deferred
+    to Stage 5.
+    """
     arr = np.zeros((10, 10), dtype=np.uint8)
     arr[1:3, 1:3] = 1
     return ants.from_numpy(arr)
@@ -268,11 +275,11 @@ def test_postprocess_single_file_happy_path(tmp_path, monkeypatch):
     """Worker copies file, applies transform, writes result, returns []."""
     arr = np.zeros((10, 10), dtype=np.uint8)
     arr[2:4, 2:4] = 1
-    img = ants.from_numpy(arr.astype(np.float32))
+    img = sitk_io.image_from_array(arr.astype(np.float32))
     input_path = tmp_path / "p1.nii.gz"
     output_path = tmp_path / "out" / "p1.nii.gz"
     output_path.parent.mkdir()
-    ants.image_write(img, str(input_path))
+    sitk_io.write_image(img, str(input_path))
 
     def _identity(arr, **kwargs):
         return arr
@@ -295,11 +302,11 @@ def test_postprocess_single_file_happy_path(tmp_path, monkeypatch):
 def test_postprocess_single_file_transform_error_returns_message(tmp_path, monkeypatch):
     """Worker returns an error message when a transform raises ValueError."""
     arr = np.zeros((4, 4), dtype=np.uint8)
-    img = ants.from_numpy(arr.astype(np.float32))
+    img = sitk_io.image_from_array(arr.astype(np.float32))
     input_path = tmp_path / "p1.nii.gz"
     output_path = tmp_path / "out" / "p1.nii.gz"
     output_path.parent.mkdir()
-    ants.image_write(img, str(input_path))
+    sitk_io.write_image(img, str(input_path))
 
     def _failing(arr, **kwargs):
         raise ValueError("boom")
@@ -332,11 +339,11 @@ def test_postprocess_single_file_per_label_and_labels_not_swapped(tmp_path):
     arr = np.zeros((10, 10, 10), dtype=np.uint8)
     arr[2:5, 2:5, 2:5] = 1
     arr[6:8, 6:8, 6:8] = 2
-    img = ants.from_numpy(arr.astype(np.float32))
+    img = sitk_io.image_from_array(arr.astype(np.float32))
     input_path = tmp_path / "p1.nii.gz"
     output_path = tmp_path / "out" / "p1.nii.gz"
     output_path.parent.mkdir()
-    ants.image_write(img, str(input_path))
+    sitk_io.write_image(img, str(input_path))
 
     # Two-step strategy: grouped (per_label=False) then per-label (per_label=True).
     # If the zip order in _postprocess_single_file is wrong, the first step will
@@ -382,8 +389,8 @@ def temp_dirs_with_nii():
     output_dir = tempfile.mkdtemp()
     arr = np.zeros((10, 10), dtype=np.uint8)
     arr[2:4, 2:4] = 1
-    ants.image_write(
-        ants.from_numpy(arr.astype(np.float32)),
+    sitk_io.write_image(
+        sitk_io.image_from_array(arr.astype(np.float32)),
         str(Path(base_dir) / "example1.nii.gz"),
     )
     return Path(base_dir), Path(output_dir)
@@ -456,7 +463,7 @@ def test_run_postprocessor(
     else:
         output_file = output_dir / "example1.nii.gz"
         assert output_file.exists()
-        result = ants.image_read(str(output_file)).numpy()
+        result = sitk_io.array_from_image(sitk_io.read_image(str(output_file)))
         assert np.all(result[2:4, 2:4] == 2)
         assert np.all(result[:2, :2] == 0)
         assert any("Postprocessing completed successfully" in msg for msg in printed)
@@ -552,7 +559,7 @@ def test_run_patient_id_preserves_dots(
     input_path = tmp_path / "patient.001.nii.gz"
     output_dir = tmp_path / "out"
     output_dir.mkdir()
-    ants.image_write(ants.from_numpy(arr.astype(np.float32)), str(input_path))
+    sitk_io.write_image(sitk_io.image_from_array(arr.astype(np.float32)), str(input_path))
 
     mock_get_progress_bar.return_value = _DummyPB()
     mock_read_json_file.return_value = dummy_strategy
