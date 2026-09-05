@@ -147,7 +147,14 @@ def predict_single_example(
             mist_configuration["preprocessing"]["crop_to_foreground"]
             and foreground_bounding_box is None
         ):
-            foreground_bounding_box = preprocessing_utils.get_fg_mask_bbox(original_ants_image)
+            # get_fg_mask_bbox now expects a SimpleITK image (Stage 4 of the
+            # ANTs -> SimpleITK migration); this whole function is still
+            # fully ants-based (Stage 5, not yet migrated), so convert
+            # locally via the still-alive ants_to_sitk glue rather than
+            # migrating this file's ants usage wholesale here.
+            foreground_bounding_box = preprocessing_utils.get_fg_mask_bbox(
+                preprocessing_utils.ants_to_sitk(original_ants_image)
+            )
 
         prediction_spacing = tuple(mist_configuration["spatial_config"]["target_spacing"])
 

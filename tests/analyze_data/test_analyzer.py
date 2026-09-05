@@ -5,7 +5,6 @@ import json
 from importlib import metadata
 from pathlib import Path
 
-import ants
 import numpy as np
 import pandas as pd
 import pytest
@@ -198,16 +197,6 @@ def _patch_env(monkeypatch, tmp_path):
         raising=True,
     )
 
-    # ants.image_read is still real production code for check_crop_fg only
-    # (deliberately deferred to Stage 4 -- see its comment in analyzer.py),
-    # so it still needs a mock here. Everything else in Analyzer goes
-    # through sitk_io now.
-    monkeypatch.setattr(
-        ants,
-        "image_read",
-        lambda _p: ants.from_numpy(np.ones((10, 10, 10), dtype=np.float32)),
-        raising=True,
-    )
     monkeypatch.setattr(sitk_io, "read_image", lambda _p: make_sitk_image(), raising=True)
     monkeypatch.setattr(
         sitk_io,

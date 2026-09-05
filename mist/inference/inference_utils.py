@@ -13,7 +13,7 @@ import torch
 from mist.analyze_data import analyzer_utils
 from mist.inference.inference_constants import InferenceConstants as ic
 from mist.models import model_loader
-from mist.preprocessing import preprocess
+from mist.preprocessing import preprocess, preprocessing_utils
 
 
 def get_default_device() -> str:
@@ -118,13 +118,18 @@ def back_to_original_space(
         # Otherwise, use the original image size.
         new_size = original_ants_image.shape
 
-    # Resample prediction to original image space.
+    # Resample prediction to original image space. resample_mask now expects
+    # a SimpleITK image (Stage 4 of the ANTs -> SimpleITK migration); this
+    # whole function is still fully ants-based (Stage 5, not yet migrated),
+    # so convert locally via the still-alive ants_to_sitk/sitk_to_ants glue
+    # rather than migrating this file's ants usage wholesale here.
     prediction = preprocess.resample_mask(
-        prediction,
+        preprocessing_utils.ants_to_sitk(prediction),
         labels=training_labels,
         target_spacing=original_ants_image.spacing,
         new_size=np.array(new_size, dtype="int").tolist(),
     )
+    prediction = preprocessing_utils.sitk_to_ants(prediction)
 
     # Appropriately pad back to original size if necessary.
     if foreground_bounding_box is not None:
@@ -192,12 +197,14 @@ def probabilities_back_to_original_space(
         channel_image.set_direction(original_ants_image.direction)
 
         # Resample to the original image's spacing using continuous
-        # interpolation.
+        # interpolation. resample_image now expects a SimpleITK image (see
+        # the comment in back_to_original_space above); convert locally.
         channel_image = preprocess.resample_image(
-            channel_image,
+            preprocessing_utils.ants_to_sitk(channel_image),
             target_spacing=original_ants_image.spacing,
             new_size=np.array(new_size, dtype="int").tolist(),
         )
+        channel_image = preprocessing_utils.sitk_to_ants(channel_image)
 
         # Appropriately pad back to original size if necessary.
         if foreground_bounding_box is not None:

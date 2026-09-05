@@ -7,6 +7,7 @@ import skimage
 
 # MIST imports.
 from mist.preprocessing.preprocessing_constants import PreprocessingConstants as pc
+from mist.utils import sitk_io
 
 
 def ants_to_sitk(img_ants: ants.core.ants_image.ANTsImage) -> sitk.Image:
@@ -60,7 +61,7 @@ def sitk_to_ants(img_sitk: sitk.Image) -> ants.core.ants_image.ANTsImage:
 
 
 def get_fg_mask_bbox(
-    img_ants: ants.core.ants_image.ANTsImage,
+    img_sitk: sitk.Image,
 ) -> dict[str, int]:
     """Get the bounding box of the foreground mask.
 
@@ -70,14 +71,15 @@ def get_fg_mask_bbox(
     box.
 
     Args:
-        img_ants: ANTs image object.
+        img_sitk: SimpleITK image object.
 
     Returns:
         fg_bbox: Dictionary containing the bounding box coordinates and original
         image size.
     """
-    # Convert ANTs image to numpy array.
-    image_npy = img_ants.numpy()
+    # Convert image to a (x, y, z)-ordered numpy array, matching ants' own
+    # numpy() convention (see sitk_io.array_from_image).
+    image_npy = sitk_io.array_from_image(img_sitk)
 
     # Clip image to remove outliers and improve foreground detection.
     lower, upper = np.percentile(
@@ -91,7 +93,8 @@ def get_fg_mask_bbox(
     fg_mask = image_npy > threshold
 
     nz = np.nonzero(fg_mask)
-    og_size = img_ants.shape
+    # GetSize() is (x, y, z), matching ants' .shape convention.
+    og_size = img_sitk.GetSize()
 
     # Create the bounding box based on non-zero values.
     if nz[0].size > 0:
@@ -197,30 +200,26 @@ def check_anisotropic(img_sitk: sitk.Image) -> dict:
     }
 
 
-def make_onehot(
-    mask_ants: ants.core.ants_image.ANTsImage, labels_list: list[int]
-) -> list[sitk.Image]:
-    """Convert a multi-class ANTs image into a list of binary sitk images.
+def make_onehot(mask_sitk: sitk.Image, labels_list: list[int]) -> list[sitk.Image]:
+    """Convert a multi-class image into a list of binary sitk images.
 
     Args:
-        mask_ants: ANTs image object.
+        mask_sitk: SimpleITK image object.
         labels_list: List of unique labels to create binary masks for.
 
     Returns:
         masks_sitk: List of binary SimpleITK images corresponding to each label.
     """
-    # Get spacing, origin, and direction from ANTs image.
-    spacing = mask_ants.spacing
-    origin = mask_ants.origin
-    direction = tuple(mask_ants.direction.flatten())
-
-    mask_npy = mask_ants.numpy()
+    mask_npy = sitk_io.array_from_image(mask_sitk)
     masks_sitk = []
     for current_label in labels_list:
-        sitk_label_i = sitk.GetImageFromArray((mask_npy == current_label).T.astype(np.float32))
-        sitk_label_i.SetSpacing(spacing)
-        sitk_label_i.SetOrigin(origin)
-        sitk_label_i.SetDirection(direction)
+        binary_arr = (mask_npy == current_label).astype(np.float32)
+        sitk_label_i = sitk_io.image_from_array(
+            binary_arr,
+            spacing=mask_sitk.GetSpacing(),
+            origin=mask_sitk.GetOrigin(),
+            direction=mask_sitk.GetDirection(),
+        )
         masks_sitk.append(sitk_label_i)
     return masks_sitk
 
@@ -256,20 +255,22 @@ def sitk_get_sum(image: sitk.Image) -> float:
 
 
 def crop_to_fg(
-    img_ants: ants.core.ants_image.ANTsImage,
+    img_sitk: sitk.Image,
     fg_bbox: dict[str, int],
-) -> ants.core.ants_image.ANTsImage:
+) -> sitk.Image:
     """Crop image to foreground bounding box.
 
     Args:
-        img_ants: ANTs image object.
+        img_sitk: SimpleITK image object.
         fg_bbox: Foreground bounding box.
 
     Returns:
-        Cropped ANTs image object.
+        Cropped SimpleITK image object.
     """
-    return ants.crop_indices(
-        img_ants,
-        lowerind=[fg_bbox["x_start"], fg_bbox["y_start"], fg_bbox["z_start"]],
-        upperind=[fg_bbox["x_end"] + 1, fg_bbox["y_end"] + 1, fg_bbox["z_end"] + 1],
-    )
+    index = [fg_bbox["x_start"], fg_bbox["y_start"], fg_bbox["z_start"]]
+    size = [
+        fg_bbox["x_end"] - fg_bbox["x_start"] + 1,
+        fg_bbox["y_end"] - fg_bbox["y_start"] + 1,
+        fg_bbox["z_end"] - fg_bbox["z_start"] + 1,
+    ]
+    return sitk_io.crop_image(img_sitk, index=index, size=size)

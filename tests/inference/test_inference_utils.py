@@ -70,6 +70,8 @@ def mock_mist_config():
         },
     ],
 )
+@patch("mist.preprocessing.preprocessing_utils.sitk_to_ants")
+@patch("mist.preprocessing.preprocessing_utils.ants_to_sitk")
 @patch("mist.inference.inference_utils.decrop_from_fg")
 @patch("mist.preprocessing.preprocess.resample_mask")
 @patch("ants.get_orientation")
@@ -81,6 +83,8 @@ def test_back_to_original_space(
     mock_get_orientation,
     mock_resample_mask,
     mock_decrop_from_fg,
+    mock_ants_to_sitk,
+    mock_sitk_to_ants,
     bbox,
 ):
     """Test back_to_original_space function with and without bounding box."""
@@ -105,6 +109,15 @@ def test_back_to_original_space(
     mock_decrop_from_fg.return_value = mock_ants_img
     final_ants_image = MagicMock(name="final_image")
     original_image.new_image_like.return_value = final_ants_image
+
+    # ants_to_sitk/sitk_to_ants are a local conversion shim around
+    # resample_mask (Stage 4 of the ANTs -> SimpleITK migration migrated
+    # resample_mask to take/return a SimpleITK image; this function is still
+    # fully ants-based, Stage 5, not yet migrated). Pass through unchanged so
+    # this test still exercises back_to_original_space's own orchestration,
+    # not the conversion glue (which is unit-tested separately).
+    mock_ants_to_sitk.side_effect = lambda img: img
+    mock_sitk_to_ants.side_effect = lambda img: img
 
     # Call back_to_original_space function.
     result = iu.back_to_original_space(

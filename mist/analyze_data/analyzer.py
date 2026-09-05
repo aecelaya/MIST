@@ -16,7 +16,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from importlib import metadata
 from pathlib import Path
 
-import ants
 import numpy as np
 import pandas as pd
 
@@ -330,25 +329,17 @@ class Analyzer:
         """
 
         def _process(patient):
-            # Deliberately still ants-based, unlike the rest of this module
-            # (Stage 3 of the ANTs -> SimpleITK migration): get_fg_mask_bbox
-            # lives in mist/preprocessing/preprocessing_utils.py (Stage 4,
-            # not yet migrated) and expects an ANTsImage (calls .numpy()/
-            # .shape on it internally). It's also called from
-            # mist/preprocessing/preprocess.py and
-            # mist/inference/inference_runners.py, both still fully
-            # ants-based -- migrate this call site together with Stage 4,
-            # when get_fg_mask_bbox itself moves to sitk_io.
             try:
                 image_list = list(patient.values())[3:]
-                image = ants.image_read(image_list[0])
+                image = sitk_io.read_image(image_list[0])
                 fg_bbox = preprocessing_utils.get_fg_mask_bbox(image)
                 cropped_dims_i = [
                     fg_bbox["x_end"] - fg_bbox["x_start"] + 1,
                     fg_bbox["y_end"] - fg_bbox["y_start"] + 1,
                     fg_bbox["z_end"] - fg_bbox["z_start"] + 1,
                 ]
-                vol_reduction_i = 1.0 - (np.prod(cropped_dims_i) / np.prod(image.shape))
+                # GetSize() is (x, y, z), matching ants' .shape convention.
+                vol_reduction_i = 1.0 - (np.prod(cropped_dims_i) / np.prod(image.GetSize()))
                 fg_bbox["id"] = patient["id"]
                 return fg_bbox, cropped_dims_i, vol_reduction_i
             except Exception as e:

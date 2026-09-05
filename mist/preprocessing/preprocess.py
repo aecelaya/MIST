@@ -5,7 +5,6 @@ import concurrent.futures
 from pathlib import Path
 from typing import Any
 
-import ants
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -16,33 +15,29 @@ from mist.preprocessing import preprocessing_utils
 from mist.preprocessing.preprocessing_constants import PreprocessingConstants as pc
 
 # MIST imports.
-from mist.utils import io, progress_bar
+from mist.utils import io, progress_bar, sitk_io
 from mist.utils.console import print_section_header, print_success, print_warning
 
 
 def resample_image(
-    img_ants: ants.core.ants_image.ANTsImage,
+    img_sitk: sitk.Image,
     target_spacing: tuple[float, float, float],
     new_size: tuple[int, int, int] | None = None,
-) -> ants.core.ants_image.ANTsImage:
+) -> sitk.Image:
     """Resample an image to a target spacing.
 
     Args:
-        img_ants: Image as ANTs image.
+        img_sitk: Image as a SimpleITK image.
         target_spacing: Target spacing as a tuple.
         new_size: New size of the image as a tuple or None.
 
     Returns:
-        Resampled image as ANTs image.
+        Resampled image as a SimpleITK image.
 
     Raises:
         ValueError: If the low resolution axis is not an integer when
             resampling an anisotropic image.
     """
-    # Convert ants image to sitk image. We do this because the resampling
-    # function in SimpleITK is more robust and faster than the one in ANTs.
-    img_sitk = preprocessing_utils.ants_to_sitk(img_ants)
-
     # Get new size if not provided. This is done to ensure that the image
     # is resampled to the correct dimensions.
     if new_size is None:
@@ -78,34 +73,32 @@ def resample_image(
         defaultPixelValue=0,
         outputPixelType=img_sitk.GetPixelID(),
     )
-
-    # Convert the resampled image back to ANTs image.
-    return preprocessing_utils.sitk_to_ants(img_sitk)
+    return img_sitk
 
 
 def resample_mask(
-    mask_ants: ants.core.ants_image.ANTsImage,
+    mask_sitk: sitk.Image,
     labels: list[int],
     target_spacing: tuple[float, float, float],
     new_size: tuple[int, int, int] | None = None,
-) -> ants.core.ants_image.ANTsImage:
+) -> sitk.Image:
     """Resample a mask to a target spacing.
 
     Args:
-        mask_ants: Mask as ANTs image.
+        mask_sitk: Mask as a SimpleITK image.
         labels: List of labels in the dataset.
         target_spacing: Target spacing as a tuple.
         new_size: New size of the mask as a tuple or None.
 
     Returns:
-        Resampled mask as ANTs image.
+        Resampled mask as a SimpleITK image.
 
     Raises:
         ValueError: If the low resolution axis is not an integer when
             resampling an anisotropic mask.
     """
     # Get mask as a series of onehot encoded series of sitk images.
-    masks_sitk = preprocessing_utils.make_onehot(mask_ants, labels)
+    masks_sitk = preprocessing_utils.make_onehot(mask_sitk, labels)
     if new_size is None:
         new_size = analyzer_utils.get_resampled_image_dimensions(
             masks_sitk[0].GetSize(), masks_sitk[0].GetSpacing(), target_spacing
@@ -143,17 +136,25 @@ def resample_mask(
             outputPixelType=masks_sitk[i].GetPixelID(),
         )
 
-    # Use the argmax function to join the masks into a single mask.
-    mask = preprocessing_utils.sitk_to_ants(sitk.JoinSeries(masks_sitk))
-    mask = mask.numpy()
-    mask = np.argmax(mask, axis=-1)
+    # Join the series of onehot masks into a single (x, y, z, label) array --
+    # sitk.GetArrayFromImage on the joined series gives (label, z, y, x), and
+    # the full-axis .T reverses every axis at once to (x, y, z, label),
+    # matching ants' own numpy() convention (the same trick used throughout
+    # sitk_io.py) -- then argmax over the label axis picks the winning label
+    # per voxel.
+    combined = sitk.GetArrayFromImage(sitk.JoinSeries(masks_sitk)).T
+    mask_arr = np.argmax(combined, axis=-1).astype(np.float32)
 
-    # Set the target spacing, origin, and direction for the mask.
-    mask = ants.from_numpy(data=mask.astype(np.float32))
-    mask.set_spacing(target_spacing)
-    mask.set_origin(mask_ants.origin)
-    mask.set_direction(mask_ants.direction)
-    return mask
+    # Set the target spacing, origin, and direction for the mask. Origin and
+    # direction come from the pre-resample mask, matching every individual
+    # label's resample call above (each used outputOrigin=<pre-resample
+    # origin>), so the combined mask's origin is unchanged by resampling.
+    return sitk_io.image_from_array(
+        mask_arr,
+        spacing=target_spacing,
+        origin=mask_sitk.GetOrigin(),
+        direction=mask_sitk.GetDirection(),
+    )
 
 
 def window_and_normalize(
@@ -230,14 +231,14 @@ def window_and_normalize(
 
 
 def compute_dtm(
-    mask_ants: ants.core.ants_image.ANTsImage,
+    mask_sitk: sitk.Image,
     labels: list[int],
     normalize_dtm: bool,
 ) -> npt.NDArray[Any]:
     """Compute distance transform map (DTM) for a mask.
 
     Args:
-        mask_ants: Mask as ANTs image.
+        mask_sitk: Mask as a SimpleITK image.
         labels: List of labels in the dataset.
         normalize_dtm: Normalize the output DTM to be between -1 and 1.
 
@@ -248,7 +249,7 @@ def compute_dtm(
     dtms_sitk = []
 
     # Get the one-hot encoded masks as a list of SimpleITK images.
-    masks_sitk = preprocessing_utils.make_onehot(mask_ants, labels)
+    masks_sitk = preprocessing_utils.make_onehot(mask_sitk, labels)
 
     for mask in masks_sitk:
         # Start with case that the mask for the label is non-empty.
@@ -307,9 +308,11 @@ def compute_dtm(
         # Append the current DTM to the final list.
         dtms_sitk.append(dtm_i)
 
-    # Join the DTMs into a single 4D image and return as a numpy array.
-    dtm = preprocessing_utils.sitk_to_ants(sitk.JoinSeries(dtms_sitk))
-    dtm = dtm.numpy()
+    # Join the DTMs into a single (x, y, z, label) array. sitk.GetArrayFromImage
+    # on the joined series gives (label, z, y, x); the full-axis .T reverses
+    # every axis at once to (x, y, z, label), matching ants' own numpy()
+    # convention (the same trick used throughout sitk_io.py).
+    dtm = sitk.GetArrayFromImage(sitk.JoinSeries(dtms_sitk)).T
     return dtm
 
 
@@ -364,11 +367,20 @@ def preprocess_example(
     normalize_dtms = config["preprocessing"]["normalize_dtms"]
     labels = config["dataset_info"]["labels"]
 
+    # RAI_ANTS_DIRECTION is the identity matrix. Verified empirically (ants
+    # 0.6.1 / SimpleITK 2.5.2) that an identity direction matrix means the
+    # same thing in both libraries' conventions (see sitk_io.py's note on
+    # _ANTS_SITK_ORIENTATION_LETTER_FLIP: the flip only translates
+    # orientation-code strings like "RAI", not identity direction matrices),
+    # so this doesn't need translating through that table -- it's applied
+    # as-is after reorienting to RAI.
+    rai_direction = tuple(float(d) for d in pc.RAI_ANTS_DIRECTION.flatten())
+
     # Read all images.
     images = []
     for i, image_path in enumerate(image_paths_list):
-        # Load image as ants image.
-        image_i = ants.image_read(image_path)
+        # Load image as a SimpleITK image.
+        image_i = sitk_io.read_image(image_path)
 
         if not skip:
             # Get foreground mask if necessary.
@@ -386,16 +398,16 @@ def preprocess_example(
                 image_i = preprocessing_utils.crop_to_fg(image_i, fg_bbox)
 
             # Put image into standard space.
-            image_i = ants.reorient_image2(image_i, "RAI")
-            image_i.set_direction(pc.RAI_ANTS_DIRECTION)
-            if not np.allclose(image_i.spacing, target_spacing):
+            image_i = sitk_io.reorient_image(image_i, "RAI")
+            image_i.SetDirection(rai_direction)
+            if not np.allclose(image_i.GetSpacing(), target_spacing):
                 image_i = resample_image(image_i, target_spacing=target_spacing)
 
         images.append(image_i)
 
     if training:
         # Read mask if we are in training mode.
-        mask = ants.image_read(mask_path)
+        mask = sitk_io.read_image(mask_path)
 
         if not skip:
             # Crop to foreground.
@@ -403,8 +415,8 @@ def preprocess_example(
                 mask = preprocessing_utils.crop_to_fg(mask, fg_bbox)
 
             # Put mask into standard space.
-            mask = ants.reorient_image2(mask, "RAI")
-            mask.set_direction(pc.RAI_ANTS_DIRECTION)
+            mask = sitk_io.reorient_image(mask, "RAI")
+            mask.SetDirection(rai_direction)
             mask = resample_mask(mask, labels=labels, target_spacing=target_spacing)
 
         # Compute DTM if requested and cast to float32.
@@ -415,20 +427,21 @@ def preprocess_example(
             dtm = None
 
         # Add channel axis to mask and cast to uint8.
-        mask = np.expand_dims(mask.numpy(), axis=-1).astype(np.uint8)
+        mask = np.expand_dims(sitk_io.array_from_image(mask), axis=-1).astype(np.uint8)
     else:
         mask = None
         dtm = None
 
-    # Build the image array from all channels.
-    image = np.zeros((*images[0].shape, len(images)), dtype=np.float32)
+    # Build the image array from all channels. GetSize() is (x, y, z),
+    # matching ants' .shape convention.
+    image = np.zeros((*images[0].GetSize(), len(images)), dtype=np.float32)
     for i, image_i in enumerate(images):
         if not skip:
             # Apply windowing and normalization if not skipping preprocessing.
-            image[..., i] = window_and_normalize(image_i.numpy(), config)
+            image[..., i] = window_and_normalize(sitk_io.array_from_image(image_i), config)
         else:
             # skip=True: pure pass-through, just convert to numpy.
-            image[..., i] = image_i.numpy()
+            image[..., i] = sitk_io.array_from_image(image_i)
 
     # Cast image to float32 for consistency.
     image = image.astype(np.float32)

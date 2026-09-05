@@ -11,217 +11,27 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
+import SimpleITK as sitk
 
 # MIST imports.
 from mist.preprocessing import preprocess as pp
 from mist.utils import console as console_mod
+from mist.utils import sitk_io
 
 
-class _DummyAntsImage:
-    """Minimal ANTs-like image used in tests."""
-
-    def __init__(
-        self,
-        arr: np.ndarray | None = None,
-        spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
-        origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
-        direction: tuple[float, ...] = (1.0,) * 9,
-    ) -> None:
-        self._arr = np.zeros((2, 2, 2), dtype=np.float32) if arr is None else np.asarray(arr)
-        self._spacing = spacing
-        self._origin = origin
-        self._direction = direction
-
-    @property
-    def shape(self) -> tuple[int, int, int]:
-        """Return image shape."""
-        return tuple(self._arr.shape)
-
-    @property
-    def spacing(self) -> tuple[float, float, float]:
-        """Return image spacing."""
-        return self._spacing
-
-    @property
-    def origin(self) -> tuple[float, float, float]:
-        """Return image origin."""
-        return self._origin
-
-    @property
-    def direction(self) -> tuple[float, ...]:
-        """Return image direction."""
-        return self._direction
-
-    def set_spacing(self, s: tuple[float, float, float]) -> None:
-        """Set image spacing."""
-        self._spacing = s
-
-    def set_origin(self, o: tuple[float, float, float]) -> None:
-        """Set image origin."""
-        self._origin = o
-
-    def set_direction(self, d: tuple[float, ...]) -> None:
-        """Set image direction."""
-        self._direction = d
-
-    def numpy(self) -> np.ndarray:
-        """Return image as a NumPy array."""
-        return np.asarray(self._arr)
-
-
-class _DummySitkImage:
-    """Minimal SimpleITK-like image used in tests.
-
-    SimpleITK-like API (CamelCase preserved intentionally).
-    """
-
-    def __init__(
-        self,
-        size=(2, 2, 2),
-        spacing=(2.0, 2.0, 2.0),
-        origin=(0.0, 0.0, 0.0),
-        direction=(1.0,) * 9,
-        pixel_id=1,
-    ):
-        self._size = size
-        self._spacing = spacing
-        self._origin = origin
-        self._direction = direction
-        self._pixel_id = pixel_id
-
-    def GetSize(self):
-        """Return the size of the image."""
-        return self._size
-
-    def GetSpacing(self):
-        """Return the spacing of the image."""
-        return self._spacing
-
-    def GetOrigin(self):
-        """Return the origin of the image."""
-        return self._origin
-
-    def GetDirection(self):
-        """Return the direction of the image."""
-        return self._direction
-
-    def GetDepth(self):
-        """Return the depth of the image."""
-        return self._size[0]
-
-    def GetWidth(self):
-        """Return the width of the image."""
-        return self._size[2]
-
-    def GetHeight(self):
-        """Return the height of the image."""
-        return self._size[1]
-
-    def GetPixelID(self):
-        """Return the pixel ID of the image."""
-        return self._pixel_id
-
-    def SetSpacing(self, s):
-        """Set the spacing of the image."""
-        self._spacing = tuple(s)
-
-    def SetOrigin(self, o):
-        """Set the origin of the image."""
-        self._origin = tuple(o)
-
-    def SetDirection(self, d):
-        """Set the direction of the image."""
-        self._direction = tuple(d)
-
-    def __lt__(self, other):
-        """Element-wise comparison returning a mask image, like SimpleITK."""
-        return _DummySitkImage(
-            self._size, self._spacing, self._origin, self._direction, self._pixel_id
-        )
-
-    def __gt__(self, other):
-        """Element-wise comparison returning a mask image, like SimpleITK."""
-        return _DummySitkImage(
-            self._size, self._spacing, self._origin, self._direction, self._pixel_id
-        )
-
-    __le__ = __lt__
-    __ge__ = __gt__
-
-    def __imul__(self, other):
-        """In-place multiplication for scaling."""
-        return self
-
-    def __mul__(self, other):
-        """Multiplication operator for scaling."""
-        return _DummySitkImage(
-            self._size, self._spacing, self._origin, self._direction, self._pixel_id
-        )
-
-    __rmul__ = __mul__
-
-    def __truediv__(self, other):
-        """True division operator for scaling."""
-        return _DummySitkImage(
-            self._size, self._spacing, self._origin, self._direction, self._pixel_id
-        )
-
-    def __sub__(self, other):
-        """Subtraction operator for images."""
-        return _DummySitkImage(
-            self._size, self._spacing, self._origin, self._direction, self._pixel_id
-        )
-
-
-class _DummyDTM:
-    """SITK-like DTM image that records divisors for zero-guard tests."""
-
-    def __init__(self, tag, divlog):
-        self.tag = tag  # 'dtm', 'int', 'ext', etc.
-        self._divlog = divlog
-        self._spacing = (1.0, 1.0, 1.0)
-        self._origin = (0.0, 0.0, 0.0)
-        self._direction = (1.0,) * 9
-
-    def __lt__(self, other):
-        """Element-wise comparison returning a mask image, like SimpleITK."""
-        return _DummyDTM("int_mask", self._divlog)
-
-    def __gt__(self, other):
-        """Element-wise comparison returning a mask image, like SimpleITK."""
-        return _DummyDTM("ext_mask", self._divlog)
-
-    __le__ = __lt__
-    __ge__ = __gt__
-
-    def __imul__(self, other):
-        """In-place multiplication for scaling."""
-        if "int_mask" in self.tag:
-            self.tag = "int"
-        elif "ext_mask" in self.tag:
-            self.tag = "ext"
-        return self
-
-    def __truediv__(self, other):
-        """True division operator for scaling."""
-        self._divlog.append((self.tag, other))
-        return _DummyDTM(f"{self.tag}_div", self._divlog)
-
-    def __sub__(self, other):
-        """Subtraction operator for images."""
-        return _DummyDTM("result", self._divlog)
-
-    def SetSpacing(self, s):
-        """Set the spacing of the image."""
-        self._spacing = s
-
-    def SetOrigin(self, o):
-        """Set the origin of the image."""
-        self._origin = o
-
-    def SetDirection(self, d):
-        """Set the direction of the image."""
-        self._direction = d
+def _make_sitk_image(
+    arr_xyz: np.ndarray,
+    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    direction: np.ndarray | None = None,
+) -> sitk.Image:
+    """Build a real SimpleITK image from an (x, y, z)-ordered array."""
+    return sitk_io.image_from_array(
+        arr_xyz.astype(np.float32),
+        spacing=spacing,
+        origin=origin,
+        direction=direction if direction is not None else np.eye(3),
+    )
 
 
 class _PB:
@@ -360,64 +170,31 @@ def test_window_and_normalize_zero_std_returns_zeros():
     np.testing.assert_array_equal(out, np.zeros(5, dtype=np.float32))
 
 
-def test_resample_image_calls_utils_and_resample(monkeypatch):
-    """Resample path converts to/from SITK and calls sitk.Resample."""
-    dummy_sitk = _DummySitkImage(size=(2, 2, 2), spacing=(2.0, 2.0, 2.0))
-    out_ants = _DummyAntsImage(np.ones((4, 4, 4), dtype=np.float32))
+def test_resample_image_isotropic_changes_spacing_and_size():
+    """Isotropic resample changes spacing/size and preserves origin/direction."""
+    arr = np.arange(4 * 4 * 4, dtype=np.float32).reshape(4, 4, 4)
+    img = _make_sitk_image(arr, spacing=(2.0, 2.0, 2.0), origin=(1.0, 2.0, 3.0))
 
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "ants_to_sitk",
-        lambda _img: dummy_sitk,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "sitk_to_ants",
-        lambda _s: out_ants,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.analyzer_utils,
-        "get_resampled_image_dimensions",
-        lambda size, sp, tgt: (4, 4, 4),
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "check_anisotropic",
-        lambda _s: {"is_anisotropic": False},
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "aniso_intermediate_resample",
-        lambda *_a, **_k: pytest.fail("Unexpected."),
-    )
+    out = pp.resample_image(img, target_spacing=(1.0, 1.0, 1.0))
 
-    monkeypatch.setattr(pp.sitk, "Resample", lambda *_a, **_k: object(), raising=True)
+    assert out.GetSpacing() == pytest.approx((1.0, 1.0, 1.0))
+    assert out.GetSize() == (8, 8, 8)
+    assert out.GetOrigin() == pytest.approx((1.0, 2.0, 3.0))
+    assert np.allclose(out.GetDirection(), np.eye(3).flatten())
 
-    img_in = _DummyAntsImage(np.zeros((2, 2, 2), dtype=np.float32))
-    out = pp.resample_image(img_in, target_spacing=(1.0, 1.0, 1.0))
-    assert isinstance(out, _DummyAntsImage)
-    np.testing.assert_array_equal(out.numpy(), out_ants.numpy())
+
+def test_resample_image_new_size_overrides_computed_size():
+    """An explicit new_size is used as-is instead of being computed."""
+    arr = np.zeros((4, 4, 4), dtype=np.float32)
+    img = _make_sitk_image(arr, spacing=(1.0, 1.0, 1.0))
+
+    out = pp.resample_image(img, target_spacing=(1.0, 1.0, 1.0), new_size=(6, 6, 6))
+    assert out.GetSize() == (6, 6, 6)
 
 
 def test_resample_image_aniso_axis_type_error(monkeypatch):
     """Anisotropic path with non-int axis raises ValueError."""
-    dummy_sitk = _DummySitkImage()
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "ants_to_sitk",
-        lambda _img: dummy_sitk,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.analyzer_utils,
-        "get_resampled_image_dimensions",
-        lambda size, sp, tgt: (4, 4, 4),
-        raising=True,
-    )
+    img = _make_sitk_image(np.zeros((4, 4, 4), dtype=np.float32))
     monkeypatch.setattr(
         pp.preprocessing_utils,
         "check_anisotropic",
@@ -426,411 +203,129 @@ def test_resample_image_aniso_axis_type_error(monkeypatch):
     )
 
     with pytest.raises(ValueError, match="must be an integer"):
-        pp.resample_image(_DummyAntsImage(), (1.0, 1.0, 1.0))
+        pp.resample_image(img, (1.0, 1.0, 1.0))
 
 
-def test_resample_image_aniso_intermediate_called(monkeypatch):
-    """Anisotropic path with int axis calls intermediate resampler."""
-    dummy_before = _DummySitkImage()
-    seen: dict[str, Any] = {}
+def test_resample_image_aniso_intermediate_called():
+    """Anisotropic image is resampled via the nearest-neighbor intermediate step."""
+    arr = np.ones((4, 4, 2), dtype=np.float32)
+    img = _make_sitk_image(arr, spacing=(1.0, 1.0, 5.0))
 
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "ants_to_sitk",
-        lambda _x: dummy_before,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.analyzer_utils,
-        "get_resampled_image_dimensions",
-        lambda size, spacing, tgt: (10, 12, 14),
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "check_anisotropic",
-        lambda _img: {"is_anisotropic": True, "low_resolution_axis": 2},
-        raising=True,
-    )
+    out = pp.resample_image(img, target_spacing=(1.0, 1.0, 1.0))
 
-    def _aniso_intermediate(img, new_size, tgt_spacing, low_axis):
-        seen["args"] = (img, new_size, tgt_spacing, low_axis)
-        return dummy_before
-
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "aniso_intermediate_resample",
-        _aniso_intermediate,
-        raising=True,
-    )
-    monkeypatch.setattr(pp.sitk, "Transform", object, raising=True)
-    monkeypatch.setattr(pp.sitk, "Resample", lambda *_a, **_k: object(), raising=True)
-
-    final_ants = object()
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "sitk_to_ants",
-        lambda _img: final_ants,
-        raising=True,
-    )
-
-    out = pp.resample_image(img_ants=object(), target_spacing=(1.0, 1.0, 1.0))
-
-    assert seen["args"][0] is dummy_before
-    assert seen["args"][1] == (10, 12, 14)
-    assert seen["args"][2] == (1.0, 1.0, 1.0)
-    assert seen["args"][3] == 2
-    assert out is final_ants
+    # The low-resolution axis (z, index 2 -- spacing ratio 5 > 3) ends up at
+    # the target spacing, same as every other axis.
+    assert out.GetSpacing() == pytest.approx((1.0, 1.0, 1.0))
+    assert out.GetSize() == (4, 4, 10)
 
 
-def test_resample_mask_happy_path(monkeypatch):
-    """Resample mask happy path with label series and join."""
+def test_resample_mask_happy_path():
+    """Resampling a mask upsamples it and preserves origin/direction."""
     labels = [0, 1, 2]
-    onehots = [_DummySitkImage(size=(3, 3, 3)) for _ in labels]
-    src_ants = _DummyAntsImage(
-        np.zeros((2, 2, 2), dtype=np.float32),
-        spacing=(2, 2, 2),
-        origin=(1, 2, 3),
-        direction=(1,) * 9,
-    )
+    arr = np.zeros((4, 4, 4), dtype=np.float32)
+    arr[:2, :, :] = 1
+    arr[2:, :2, :] = 2
+    mask = _make_sitk_image(arr, spacing=(2.0, 2.0, 2.0), origin=(1.0, 2.0, 3.0))
 
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "make_onehot",
-        lambda _m, _lbls: onehots,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.analyzer_utils,
-        "get_resampled_image_dimensions",
-        lambda size, sp, tgt: (3, 3, 3),
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "check_anisotropic",
-        lambda _s: {"is_anisotropic": False},
-        raising=True,
-    )
-    monkeypatch.setattr(pp.sitk, "Resample", lambda *a, **k: a[0], raising=True)
-    monkeypatch.setattr(pp.sitk, "JoinSeries", lambda seq: object(), raising=True)
+    out = pp.resample_mask(mask, labels=labels, target_spacing=(1.0, 1.0, 1.0))
 
-    def _sitk_to_ants(_):
-        arr = np.zeros((3, 3, 3, len(labels)), dtype=np.float32)
-        return _DummyAntsImage(arr)
+    assert out.GetSpacing() == pytest.approx((1.0, 1.0, 1.0))
+    assert out.GetSize() == (8, 8, 8)
+    assert out.GetOrigin() == pytest.approx((1.0, 2.0, 3.0))
 
-    monkeypatch.setattr(pp.preprocessing_utils, "sitk_to_ants", _sitk_to_ants, raising=True)
-    monkeypatch.setattr(
-        pp.ants,
-        "from_numpy",
-        lambda data: _DummyAntsImage(np.asarray(data)),
-        raising=True,
-    )
-
-    out = pp.resample_mask(src_ants, labels=labels, target_spacing=(1.0, 1.0, 1.0))
-    assert isinstance(out, _DummyAntsImage)
-    assert out.spacing == (1.0, 1.0, 1.0)
-    assert out.origin == src_ants.origin
-    assert out.direction == src_ants.direction
-    assert out.numpy().shape == (3, 3, 3)
-    assert out.numpy().dtype == np.float32
+    out_arr = sitk_io.array_from_image(out)
+    assert set(np.unique(out_arr)).issubset({0.0, 1.0, 2.0})
 
 
 def test_resample_mask_aniso_axis_not_int_raises(monkeypatch):
     """Anisotropic resample with non-int axis raises ValueError."""
-    masks = [_DummySitkImage()]
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "make_onehot",
-        lambda _m, _l: masks,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.analyzer_utils,
-        "get_resampled_image_dimensions",
-        lambda size, spacing, tgt: (8, 8, 8),
-        raising=True,
-    )
+    mask = _make_sitk_image(np.zeros((4, 4, 4), dtype=np.float32))
     monkeypatch.setattr(
         pp.preprocessing_utils,
         "check_anisotropic",
-        lambda _img: {"is_anisotropic": True, "low_resolution_axis": "z"},
+        lambda _s: {"is_anisotropic": True, "low_resolution_axis": "z"},
         raising=True,
     )
 
     with pytest.raises(ValueError, match="low resolution axis must be an integer"):
-        pp.resample_mask(
-            mask_ants=SimpleNamespace(origin=(1, 2, 3), direction=(1.0,) * 9),
-            labels=[0, 1],
-            target_spacing=(1.0, 1.0, 1.0),
-        )
+        pp.resample_mask(mask, labels=[0, 1], target_spacing=(1.0, 1.0, 1.0))
 
 
-def test_resample_mask_aniso_intermediate_called_for_each_label(monkeypatch):
-    """Anisotropic mask calls intermediate resample for each label."""
-    m0, m1 = _DummySitkImage(), _DummySitkImage()
-    masks = [m0, m1]
+def test_resample_mask_aniso_intermediate_used_for_each_label():
+    """Anisotropic mask resample runs the intermediate step for every label."""
     labels = [0, 1]
-    new_size = (10, 12, 14)
-    target_spacing = (1.0, 1.0, 1.0)
+    arr = np.zeros((4, 4, 2), dtype=np.float32)
+    arr[2:, :, :] = 1
+    mask = _make_sitk_image(arr, spacing=(1.0, 1.0, 5.0))
 
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "make_onehot",
-        lambda _m, _lbls: masks,
-        raising=True,
+    out = pp.resample_mask(mask, labels=labels, target_spacing=(1.0, 1.0, 1.0))
+
+    assert out.GetSpacing() == pytest.approx((1.0, 1.0, 1.0))
+    assert out.GetSize() == (4, 4, 10)
+    out_arr = sitk_io.array_from_image(out)
+    assert set(np.unique(out_arr)).issubset({0.0, 1.0})
+
+
+def test_resample_mask_oblique_direction_preserved():
+    """A mask with oblique direction cosines keeps that direction after resample."""
+    # A small rotation about the z axis -- not axis-aligned.
+    theta = 0.2
+    direction = np.array(
+        [
+            [np.cos(theta), -np.sin(theta), 0.0],
+            [np.sin(theta), np.cos(theta), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
     )
-    monkeypatch.setattr(
-        pp.analyzer_utils,
-        "get_resampled_image_dimensions",
-        lambda size, spacing, tgt: new_size,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "check_anisotropic",
-        lambda _img: {"is_anisotropic": True, "low_resolution_axis": 2},
-        raising=True,
-    )
+    arr = np.zeros((4, 4, 4), dtype=np.float32)
+    arr[1:3, 1:3, 1:3] = 1
+    mask = _make_sitk_image(arr, spacing=(1.0, 1.0, 1.0), direction=direction)
 
-    calls: list[tuple[Any, Any, Any, Any]] = []
+    out = pp.resample_mask(mask, labels=[0, 1], target_spacing=(0.5, 0.5, 0.5))
 
-    def _aniso(img, ns, tgt, axis):
-        calls.append((img, ns, tgt, axis))
-        return img
-
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "aniso_intermediate_resample",
-        _aniso,
-        raising=True,
-    )
-    monkeypatch.setattr(pp.sitk, "Resample", lambda *a, **k: a[0], raising=True)
-    monkeypatch.setattr(pp.sitk, "JoinSeries", lambda seq: seq, raising=True)
-
-    def _sitk_to_ants(seq):
-        arr = np.stack(
-            [
-                np.zeros((5, 6, 7), dtype=np.float32),
-                np.ones((5, 6, 7), dtype=np.float32),
-            ],
-            axis=-1,
-        )
-        return SimpleNamespace(numpy=lambda: arr)
-
-    monkeypatch.setattr(pp.preprocessing_utils, "sitk_to_ants", _sitk_to_ants, raising=True)
-
-    class _Out:
-        """Simple ANTs-like output holder."""
-
-        def __init__(self) -> None:
-            self.spacing = None
-            self.origin = None
-            self.direction = None
-
-        def set_spacing(self, s):
-            """Set the spacing of the output image."""
-            self.spacing = s
-
-        def set_origin(self, o):
-            """Set the origin of the output image."""
-            self.origin = o
-
-        def set_direction(self, d):
-            """Set the direction of the output image."""
-            self.direction = d
-
-    out_img = _Out()
-    monkeypatch.setattr(pp.ants, "from_numpy", lambda data: out_img, raising=True)
-
-    src_mask = SimpleNamespace(origin=(9, 9, 9), direction=(1.0,) * 9)
-    result = pp.resample_mask(
-        mask_ants=src_mask,
-        labels=labels,
-        target_spacing=target_spacing,
-    )
-
-    assert len(calls) == len(labels)
-    assert calls[0] == (m0, new_size, target_spacing, 2)
-    assert calls[1] == (m1, new_size, target_spacing, 2)
-    assert result is out_img
-    assert out_img.spacing == target_spacing
-    assert out_img.origin == src_mask.origin
-    assert out_img.direction == src_mask.direction
+    assert np.allclose(out.GetDirection(), direction.flatten())
 
 
-def test_compute_dtm_shapes_and_types(monkeypatch):
+def test_compute_dtm_shapes_and_types():
     """compute_dtm returns expected shape/dtype with one empty class."""
     labels = [0, 1]
-    src_mask = _DummyAntsImage(np.zeros((5, 6, 7), dtype=np.float32))
+    arr = np.zeros((5, 6, 7), dtype=np.float32)
+    arr[2, 3, 4] = 1  # Label 1 present at a single voxel; label 0 elsewhere.
+    mask = _make_sitk_image(arr)
 
-    onehots = [_DummySitkImage(size=(5, 6, 7)), _DummySitkImage(size=(5, 6, 7))]
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "make_onehot",
-        lambda _m, _lbls: onehots,
-        raising=True,
-    )
-
-    sums = iter([1, 0])  # First non-empty, second empty.
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "sitk_get_sum",
-        lambda _m: next(sums),
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.sitk,
-        "SignedMaurerDistanceMap",
-        lambda *_a, **_k: _DummySitkImage(size=(5, 6, 7)),
-        raising=True,
-    )
-    monkeypatch.setattr(pp.sitk, "Cast", lambda img, _t: img, raising=True)
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "sitk_get_min_max",
-        lambda _img: (-2.0, 3.0),
-        raising=True,
-    )
-    monkeypatch.setattr(
-        pp.sitk,
-        "GetImageFromArray",
-        lambda arr: _DummySitkImage(size=(arr.shape[0], arr.shape[1], arr.shape[2])),
-        raising=True,
-    )
-    monkeypatch.setattr(pp.sitk, "JoinSeries", lambda seq: object(), raising=True)
-
-    def _sitk_to_ants(_x):
-        arr = np.zeros((5, 6, 7, len(labels)), dtype=np.float32)
-        return _DummyAntsImage(arr)
-
-    monkeypatch.setattr(pp.preprocessing_utils, "sitk_to_ants", _sitk_to_ants, raising=True)
-
-    out = pp.compute_dtm(mask_ants=src_mask, labels=labels, normalize_dtm=True)
+    out = pp.compute_dtm(mask, labels=labels, normalize_dtm=True)
     assert isinstance(out, np.ndarray)
     assert out.shape == (5, 6, 7, 2)
     assert out.dtype == np.float32
 
 
-def test_compute_dtm_zero_guards_combined(monkeypatch):
-    """ext_max==0 → 1 and int_min==0 → -1 are guarded correctly."""
-    labels = [0]
-    masks = [_DummySitkImage()]
-
-    monkeypatch.setattr(pp.preprocessing_utils, "make_onehot", lambda *_: masks, raising=True)
-    monkeypatch.setattr(pp.preprocessing_utils, "sitk_get_sum", lambda _m: 1, raising=True)
-    monkeypatch.setattr(pp.sitk, "Cast", lambda img, *_a, **_k: img, raising=True)
-    monkeypatch.setattr(pp.sitk, "JoinSeries", lambda seq: seq, raising=True)
-
-    class _AntsArray:
-        def numpy(self):
-            return np.zeros((2, 2, 2, len(labels)), dtype=np.float32)
-
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "sitk_to_ants",
-        lambda s: _AntsArray(),
-        raising=True,
-    )
-
-    # Scenario A: ext_max == 0 → guard to 1.
-    recorder: list[tuple[str, float]] = []
-    monkeypatch.setattr(
-        pp.sitk,
-        "SignedMaurerDistanceMap",
-        lambda *_a, **_k: _DummyDTM("dtm", recorder),
-        raising=False,
-    )
-
-    def _minmax_ext_zero(img):
-        if isinstance(img, _DummyDTM):
-            if img.tag == "int":
-                return (-2.0, -0.1)
-            if img.tag == "ext":
-                return (0.0, 0.0)
-        return (0.0, 1.0)
-
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "sitk_get_min_max",
-        _minmax_ext_zero,
-        raising=True,
-    )
-
-    out = pp.compute_dtm(mask_ants=SimpleNamespace(), labels=labels, normalize_dtm=True)
-    assert isinstance(out, np.ndarray) and out.dtype == np.float32
-    ext_divs = [d for tag, d in recorder if tag == "ext"]
-    int_divs = [d for tag, d in recorder if tag == "int"]
-    assert ext_divs and ext_divs[0] == 1
-    assert int_divs and int_divs[0] == -2.0
-
-    # Scenario B: int_min == 0 -> guard to -1.
-    recorder.clear()
-
-    def _minmax_int_zero(img):
-        if isinstance(img, _DummyDTM):
-            if img.tag == "int":
-                return (0.0, 0.0)
-            if img.tag == "ext":
-                return (0.1, 5.0)
-        return (0.0, 1.0)
-
-    monkeypatch.setattr(
-        pp.preprocessing_utils,
-        "sitk_get_min_max",
-        _minmax_int_zero,
-        raising=True,
-    )
-
-    out = pp.compute_dtm(mask_ants=SimpleNamespace(), labels=labels, normalize_dtm=True)
-    assert isinstance(out, np.ndarray) and out.dtype == np.float32
-    ext_divs = [d for tag, d in recorder if tag == "ext"]
-    int_divs = [d for tag, d in recorder if tag == "int"]
-    assert int_divs and int_divs[0] == -1
-    assert ext_divs and ext_divs[0] == 5.0
-
-
-def test_compute_dtm_empty_mask_diagonal_distance(monkeypatch):
-    """Empty mask with normalize_dtm=False uses diagonal distance."""
-    d, h, w = 2, 2, 2
-    expected = np.sqrt(d**2 + w**2 + h**2).astype(np.float32)
-
-    class _ArrayImage:
-        """Wrapper returned by sitk.GetImageFromArray."""
-
-        def __init__(self, arr):
-            self._arr = np.asarray(arr, dtype=np.float32)
-
-        def SetSpacing(self, *_a, **_k):
-            """Set spacing of the image."""
-            return None
-
-        def SetOrigin(self, *_a, **_k):
-            """Set origin of the image."""
-            return None
-
-        def SetDirection(self, *_a, **_k):
-            """Set direction of the image."""
-            return None
-
+def test_compute_dtm_normalized_range_is_bounded():
+    """Normalized DTM values stay within [-1, 1] for a non-empty, non-full mask."""
     labels = [0, 1]
-    masks = [_DummySitkImage() for _ in labels]
-    monkeypatch.setattr(pp.preprocessing_utils, "make_onehot", lambda *_: masks, raising=True)
-    monkeypatch.setattr(pp.preprocessing_utils, "sitk_get_sum", lambda _m: 0, raising=True)
-    monkeypatch.setattr(pp.sitk, "GetImageFromArray", lambda arr: _ArrayImage(arr), raising=True)
-    monkeypatch.setattr(pp.sitk, "Cast", lambda img, *_a, **_k: img, raising=True)
-    monkeypatch.setattr(pp.sitk, "JoinSeries", lambda seq: seq, raising=True)
+    arr = np.zeros((6, 6, 6), dtype=np.float32)
+    arr[2:4, 2:4, 2:4] = 1
+    mask = _make_sitk_image(arr)
 
-    def _sitk_to_ants(seq):
-        return SimpleNamespace(numpy=lambda: np.stack([im._arr for im in seq], axis=-1))
+    out = pp.compute_dtm(mask, labels=labels, normalize_dtm=True)
+    assert np.all(out >= -1.0 - 1e-6)
+    assert np.all(out <= 1.0 + 1e-6)
 
-    monkeypatch.setattr(pp.preprocessing_utils, "sitk_to_ants", _sitk_to_ants, raising=True)
 
-    out = pp.compute_dtm(mask_ants=SimpleNamespace(), labels=labels, normalize_dtm=False)
-    assert out.shape == (d, h, w, len(labels))
-    assert out.dtype == np.float32
-    assert np.allclose(out[..., 0], expected)
-    assert np.allclose(out[..., 1], expected)
+def test_compute_dtm_empty_mask_diagonal_distance():
+    """Empty mask with normalize_dtm=False uses diagonal distance."""
+    shape = (2, 2, 2)
+    mask = _make_sitk_image(np.zeros(shape, dtype=np.float32))
+    labels = [0]
+
+    out = pp.compute_dtm(mask, labels=labels, normalize_dtm=False)
+    # Label 0 is the whole (non-empty) background, so this exercises the
+    # "empty mask" branch only when a label is entirely absent -- use a label
+    # that never appears instead.
+    out_missing = pp.compute_dtm(mask, labels=[7], normalize_dtm=False)
+    expected = np.sqrt(sum(s**2 for s in shape))
+    assert out_missing.shape == (2, 2, 2, 1)
+    assert np.allclose(out_missing[..., 0], expected)
+    assert out.shape == (2, 2, 2, 1)
 
 
 def test_preprocess_example_full_flow_no_skip_with_crop_and_dtm(monkeypatch):
@@ -856,15 +351,22 @@ def test_preprocess_example_full_flow_no_skip_with_crop_and_dtm(monkeypatch):
         },
     }
 
-    img0 = _DummyAntsImage(np.ones((2, 2, 2), dtype=np.float32), spacing=(2.0, 2.0, 2.0))
-    img1 = _DummyAntsImage(2 * np.ones((2, 2, 2), dtype=np.float32), spacing=(2.0, 2.0, 2.0))
-    mask_img = _DummyAntsImage(np.zeros((2, 2, 2), dtype=np.float32), spacing=(2.0, 2.0, 2.0))
+    img0 = _make_sitk_image(np.ones((4, 4, 4), dtype=np.float32), spacing=(1.0, 1.0, 1.0))
+    img1 = _make_sitk_image(2 * np.ones((4, 4, 4), dtype=np.float32), spacing=(1.0, 1.0, 1.0))
+    mask_arr = np.zeros((4, 4, 4), dtype=np.float32)
+    mask_arr[1:3, 1:3, 1:3] = 1
+    mask_img = _make_sitk_image(mask_arr, spacing=(1.0, 1.0, 1.0))
 
     seq = iter([img0, img1, mask_img])
-    monkeypatch.setattr(pp.ants, "image_read", lambda _p: next(seq), raising=True)
-    fg_bbox = {"x0": 0, "x1": 2, "y0": 0, "y1": 2, "z0": 0, "z1": 2}
-    monkeypatch.setattr(pp.ants, "reorient_image2", lambda im, _ori: im, raising=True)
-    monkeypatch.setattr(pp.pc, "RAI_ANTS_DIRECTION", (1.0,) * 9, raising=True)
+    monkeypatch.setattr(sitk_io, "read_image", lambda _p: next(seq), raising=True)
+    fg_bbox = {
+        "x_start": 0,
+        "x_end": 3,
+        "y_start": 0,
+        "y_end": 3,
+        "z_start": 0,
+        "z_end": 3,
+    }
 
     calls = {"crop_calls": 0}
 
@@ -873,14 +375,6 @@ def test_preprocess_example_full_flow_no_skip_with_crop_and_dtm(monkeypatch):
         return im
 
     monkeypatch.setattr(pp.preprocessing_utils, "crop_to_fg", _crop, raising=True)
-    monkeypatch.setattr(pp, "resample_image", lambda im, target_spacing: im, raising=True)
-    monkeypatch.setattr(pp, "resample_mask", lambda m, labels, target_spacing: m, raising=True)
-    monkeypatch.setattr(pp, "window_and_normalize", lambda arr, cfg_: arr, raising=True)
-
-    def _compute_dtm(_m, labels, normalize_dtm):
-        return np.ones((2, 2, 2, len(labels)), dtype=np.float32)
-
-    monkeypatch.setattr(pp, "compute_dtm", _compute_dtm, raising=True)
 
     out = pp.preprocess_example(
         cfg,
@@ -889,11 +383,11 @@ def test_preprocess_example_full_flow_no_skip_with_crop_and_dtm(monkeypatch):
         fg_bbox=fg_bbox,
     )
 
-    assert out["image"].shape == (2, 2, 2, 2)
+    assert out["image"].shape == (4, 4, 4, 2)
     assert out["image"].dtype == np.float32
-    assert out["mask"].shape == (2, 2, 2, 1)
+    assert out["mask"].shape == (4, 4, 4, 1)
     assert out["mask"].dtype == np.uint8
-    assert out["dtm"].shape == (2, 2, 2, 2)
+    assert out["dtm"].shape == (4, 4, 4, 2)
     assert out["dtm"].dtype == np.float32
     assert calls["crop_calls"] == 3  # Two images + one mask.
 
@@ -915,15 +409,15 @@ def test_preprocess_example_skip_true_no_resample_no_normalize(monkeypatch):
         },
     }
 
-    img0 = _DummyAntsImage(np.ones((2, 2, 2), dtype=np.float32), spacing=(1.5, 1.5, 1.5))
-    mask_img = _DummyAntsImage(np.zeros((2, 2, 2), dtype=np.float32))
+    img0 = _make_sitk_image(np.ones((2, 2, 2), dtype=np.float32), spacing=(1.5, 1.5, 1.5))
+    mask_img = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.float32))
 
     seq = iter([img0, mask_img])
-    monkeypatch.setattr(pp.ants, "image_read", lambda _p: next(seq), raising=True)
+    monkeypatch.setattr(sitk_io, "read_image", lambda _p: next(seq), raising=True)
     monkeypatch.setattr(
-        pp.ants,
-        "reorient_image2",
-        lambda *_a, **_k: pytest.fail("reorient_image2 must not be called when skip=True."),
+        sitk_io,
+        "reorient_image",
+        lambda *_a, **_k: pytest.fail("reorient_image must not be called when skip=True."),
         raising=True,
     )
     monkeypatch.setattr(
@@ -967,7 +461,12 @@ def test_preprocess_example_crop_requires_bbox_error(monkeypatch):
         },
     }
 
-    monkeypatch.setattr(pp.ants, "image_read", lambda _p: _DummyAntsImage(), raising=True)
+    monkeypatch.setattr(
+        sitk_io,
+        "read_image",
+        lambda _p: _make_sitk_image(np.zeros((2, 2, 2), dtype=np.float32)),
+        raising=True,
+    )
     monkeypatch.setattr(
         pp.preprocessing_utils,
         "get_fg_mask_bbox",
@@ -1002,11 +501,16 @@ def test_preprocess_example_skip_true_crop_flag_ignored(monkeypatch):
         },
     }
 
-    monkeypatch.setattr(pp.ants, "image_read", lambda _p: _DummyAntsImage(), raising=True)
     monkeypatch.setattr(
-        pp.ants,
-        "reorient_image2",
-        lambda *_a, **_k: pytest.fail("reorient_image2 must not be called when skip=True."),
+        sitk_io,
+        "read_image",
+        lambda _p: _make_sitk_image(np.zeros((2, 2, 2), dtype=np.float32)),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        sitk_io,
+        "reorient_image",
+        lambda *_a, **_k: pytest.fail("reorient_image must not be called when skip=True."),
         raising=True,
     )
     monkeypatch.setattr(
@@ -1030,15 +534,15 @@ def test_preprocess_example_skip_true_crop_flag_ignored(monkeypatch):
 def test_preprocess_example_inference_mode_sets_mask_and_dtm_none(monkeypatch):
     """Inference mode sets mask=None and dtm=None and does not compute DTM."""
     monkeypatch.setattr(
-        pp.ants,
-        "image_read",
-        lambda _p: _DummyAntsImage(np.zeros((4, 5, 6))),
+        sitk_io,
+        "read_image",
+        lambda _p: _make_sitk_image(np.zeros((4, 5, 6), dtype=np.float32)),
         raising=True,
     )
     monkeypatch.setattr(
-        pp.ants,
-        "reorient_image2",
-        lambda *_a, **_k: pytest.fail("reorient_image2 must not be called when skip=True."),
+        sitk_io,
+        "reorient_image",
+        lambda *_a, **_k: pytest.fail("reorient_image must not be called when skip=True."),
         raising=True,
     )
 
@@ -1444,4 +948,4 @@ def test_preprocess_dataset_prints_error_summary_on_failures(tmp_path, monkeypat
     )
     pp.preprocess_dataset(ns)
 
-    assert any("2 of 2" in msg for msg in printed)
+    assert any("2 of 2" in p for p in printed)

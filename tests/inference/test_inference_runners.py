@@ -417,7 +417,9 @@ def test_predict_single_example_no_remap_no_crop(
 @patch("mist.inference.inference_utils.remap_mask_labels")
 @patch("mist.inference.inference_utils.back_to_original_space")
 @patch("mist.preprocessing.preprocessing_utils.get_fg_mask_bbox")
+@patch("mist.preprocessing.preprocessing_utils.ants_to_sitk")
 def test_predict_single_example_with_crop_and_remap(
+    mock_ants_to_sitk,
     mock_get_fg_bbox,
     mock_back_to_original_space,
     mock_remap_labels,
@@ -431,6 +433,13 @@ def test_predict_single_example_with_crop_and_remap(
     cfg["dataset_info"]["labels"] = [0, 2]
 
     monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
+
+    # ants_to_sitk is a local conversion shim in front of the now-mocked
+    # get_fg_mask_bbox (Stage 4 migrated it to take a SimpleITK image; this
+    # function is still fully ants-based, Stage 5, not yet migrated). Pass
+    # through unchanged so get_fg_mask_bbox is still asserted to have been
+    # called with orig_ants itself below.
+    mock_ants_to_sitk.side_effect = lambda img: img
 
     bbox = {"x0": 0, "x1": 1, "y0": 0, "y1": 1, "z0": 0, "z1": 1}
     mock_get_fg_bbox.return_value = bbox

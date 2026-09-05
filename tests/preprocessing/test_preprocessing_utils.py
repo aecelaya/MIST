@@ -7,6 +7,7 @@ import SimpleITK as sitk
 
 # MIST imports.
 from mist.preprocessing import preprocessing_utils as pu
+from mist.utils import sitk_io
 
 
 def _make_ants_image(
@@ -97,7 +98,7 @@ def test_get_fg_mask_bbox_detects_cube(monkeypatch):
     zs, ze = 5, 15
     vol[xs : xe + 1, ys : ye + 1, zs : ze + 1] = 100.0  # Bright cube.
 
-    img = _make_ants_image(vol)
+    img = _make_sitk_image_from_xyz(vol)
     bbox = pu.get_fg_mask_bbox(img)
 
     assert bbox["x_start"] == xs and bbox["x_end"] == ze - (ze - xe)
@@ -112,7 +113,7 @@ def test_get_fg_mask_bbox_returns_full_when_empty(monkeypatch):
     monkeypatch.setattr(pu.pc, "FOREGROUND_BBOX_PERCENTILE_HIGH", 100)
 
     vol = np.zeros((8, 9, 10), dtype=np.float32)
-    img = _make_ants_image(vol)
+    img = _make_sitk_image_from_xyz(vol)
     bbox = pu.get_fg_mask_bbox(img)
 
     assert bbox == {
@@ -126,6 +127,30 @@ def test_get_fg_mask_bbox_returns_full_when_empty(monkeypatch):
         "y_og_size": 9,
         "z_og_size": 10,
     }
+
+
+def test_get_fg_mask_bbox_oblique_direction_does_not_affect_bbox(monkeypatch):
+    """Bbox is computed from voxel indices, independent of direction cosines."""
+    monkeypatch.setattr(pu.pc, "FOREGROUND_BBOX_PERCENTILE_LOW", 0)
+    monkeypatch.setattr(pu.pc, "FOREGROUND_BBOX_PERCENTILE_HIGH", 100)
+
+    vol = np.zeros((10, 10, 10), dtype=np.float32)
+    vol[2:5, 3:6, 1:4] = 100.0
+
+    theta = 0.3
+    direction = np.array(
+        [
+            [np.cos(theta), -np.sin(theta), 0.0],
+            [np.sin(theta), np.cos(theta), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    img = _make_sitk_image_from_xyz(vol, direction_mat=direction)
+    bbox = pu.get_fg_mask_bbox(img)
+
+    assert (bbox["x_start"], bbox["x_end"]) == (2, 4)
+    assert (bbox["y_start"], bbox["y_end"]) == (3, 5)
+    assert (bbox["z_start"], bbox["z_end"]) == (1, 3)
 
 
 def test_aniso_intermediate_resample_changes_only_low_axis():
@@ -166,7 +191,6 @@ def test_check_anisotropic_true_and_false():
 
 def test_make_onehot_creates_binary_masks_with_metadata():
     """One-hot conversion creates binary SITK images with preserved metadata."""
-    # Create a labeled mask in ANTs space.
     rng = np.random.default_rng(0)
     shape = (6, 5, 4)
     labels = np.array([0, 1, 2], dtype=np.int32)
@@ -175,9 +199,11 @@ def test_make_onehot_creates_binary_masks_with_metadata():
     spacing = (1.1, 2.2, 3.3)
     origin = (10.0, -2.0, 7.0)
     direction = np.eye(3)
-    mask_ants = _make_ants_image(vol, spacing=spacing, origin=origin, direction_mat=direction)
+    mask_sitk = _make_sitk_image_from_xyz(
+        vol.astype(np.float32), spacing=spacing, origin=origin, direction_mat=direction
+    )
 
-    out_masks = pu.make_onehot(mask_ants, labels_list=[0, 1, 2])
+    out_masks = pu.make_onehot(mask_sitk, labels_list=[0, 1, 2])
     assert len(out_masks) == 3
 
     # Each is binary with matching metadata and correct voxel counts.
@@ -187,7 +213,7 @@ def test_make_onehot_creates_binary_masks_with_metadata():
         assert m.GetOrigin() == origin
         assert np.allclose(m.GetDirection(), direction.flatten())
 
-        m_arr = sitk.GetArrayFromImage(m).T  # Back to XYZ order.
+        m_arr = sitk_io.array_from_image(m)  # Back to XYZ order.
         assert set(np.unique(m_arr)).issubset({0.0, 1.0})
         assert m_arr.sum() == np.count_nonzero(vol == lbl)
 
@@ -207,7 +233,7 @@ def test_sitk_get_min_max_and_sum():
 
 
 def test_crop_to_fg_returns_expected_shape():
-    """Cropping with bbox yields a correctly shaped ANTs image."""
+    """Cropping with bbox yields a correctly shaped SimpleITK image."""
     vol = np.zeros((12, 10, 8), dtype=np.float32)
     # Define a block to crop to.
     xs, xe = 2, 7
@@ -215,7 +241,7 @@ def test_crop_to_fg_returns_expected_shape():
     zs, ze = 1, 6
     vol[xs : xe + 1, ys : ye + 1, zs : ze + 1] = 5.0
 
-    img = _make_ants_image(vol)
+    img = _make_sitk_image_from_xyz(vol)
 
     bbox = {
         "x_start": xs,
@@ -226,8 +252,22 @@ def test_crop_to_fg_returns_expected_shape():
         "z_end": ze,
     }
     cropped = pu.crop_to_fg(img, bbox)
-    cropped_arr = cropped.numpy()
+    cropped_arr = sitk_io.array_from_image(cropped)
 
     exp_shape = (xe - xs + 1, ye - ys + 1, ze - zs + 1)
     assert cropped_arr.shape == exp_shape
     assert np.allclose(cropped_arr, vol[xs : xe + 1, ys : ye + 1, zs : ze + 1])
+
+
+def test_crop_to_fg_preserves_spacing_origin_direction():
+    """Cropping keeps the source image's spacing and direction, shifts origin."""
+    vol = np.zeros((10, 10, 10), dtype=np.float32)
+    spacing = (1.5, 2.0, 0.5)
+    direction = np.eye(3)
+    img = _make_sitk_image_from_xyz(vol, spacing=spacing, direction_mat=direction)
+
+    bbox = {"x_start": 1, "x_end": 4, "y_start": 2, "y_end": 5, "z_start": 0, "z_end": 3}
+    cropped = pu.crop_to_fg(img, bbox)
+
+    assert cropped.GetSpacing() == pytest.approx(spacing)
+    assert np.allclose(cropped.GetDirection(), direction.flatten())
