@@ -4,7 +4,6 @@ import argparse
 import json
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 # MIST imports.
@@ -40,24 +39,13 @@ def _patch_minimal_cli(monkeypatch) -> None:
         parser.add_argument("--results", type=str, default=None)
         parser.add_argument("--numpy", type=str, default=None)
         parser.add_argument("--gpus", nargs="+", type=int, default=[-1])
+        parser.add_argument("--folds", nargs="+", type=int, default=None)
         parser.add_argument("--num-workers-evaluate", type=int, default=1)
         parser.add_argument("--overwrite", action="store_true")
         parser.add_argument("--resume", action="store_true")
 
     monkeypatch.setattr(entry.argmod, "ArgParser", _mk_parser, raising=True)
     monkeypatch.setattr(entry.argmod, "add_train_args", _add_train_args, raising=True)
-
-
-class _NoGrad:
-    """Minimal no_grad context manager."""
-
-    def __enter__(self):
-        """Enter context."""
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        """Exit context."""
-        return False
 
 
 # =============================================================================
@@ -245,9 +233,6 @@ def test_train_entry_blocks_existing_results_csv_without_overwrite(tmp_path, mon
     _ensure_numpy_dirs(numpy_dir)
     (results_dir / "results.csv").write_text("already here")
 
-    # Ensure no GPU-driven crash by mocking device_count.
-    monkeypatch.setattr(entry.torch.cuda, "device_count", lambda: 1, raising=True)
-
     # If trainer is constructed, fail—we should block earlier.
     monkeypatch.setattr(
         entry,
@@ -261,11 +246,10 @@ def test_train_entry_blocks_existing_results_csv_without_overwrite(tmp_path, mon
         entry.train_entry(argv)
 
 
-def test_train_entry_happy_path_no_test_empty_eval(tmp_path, monkeypatch):
-    """It trains, folds infer, and prints warnings with empty eval pairs."""
+def test_train_entry_calls_finalize_when_covers_all_folds(tmp_path, monkeypatch):
+    """When this invocation trains every configured fold, it finalizes directly."""
     _patch_minimal_cli(monkeypatch)
 
-    # Folder structure & required files (no test_paths.csv).
     results_dir = tmp_path / "results"
     numpy_dir = tmp_path / "numpy"
     results_dir.mkdir()
@@ -273,22 +257,11 @@ def test_train_entry_happy_path_no_test_empty_eval(tmp_path, monkeypatch):
     _write_required_files(results_dir, include_test=False)
     _ensure_numpy_dirs(numpy_dir)
 
-    # Config returned by io.read_json_file.
-    config = {
-        "training": {"folds": [0, 1]},
-        "evaluation": {
-            "final_classes": {"background": [0], "foreground": [1]},
-            "metrics": ["dice"],
-            "params": {"surf_dice_tol": 1.0},
-        },
-    }
+    # No --folds passed, so own_folds falls back to config's "folds", which
+    # equals range(nfolds): this invocation covers the whole run.
+    config = {"training": {"folds": [0, 1], "nfolds": 2}}
     monkeypatch.setattr(entry.io, "read_json_file", lambda p: config, raising=True)
 
-    # GPU availability
-    monkeypatch.setattr(entry.torch.cuda, "device_count", lambda: 1, raising=True)
-    monkeypatch.setattr(entry.torch, "no_grad", _NoGrad, raising=True)
-
-    # Trainer stub.
     created = {}
     monkeypatch.setattr(
         entry,
@@ -297,7 +270,6 @@ def test_train_entry_happy_path_no_test_empty_eval(tmp_path, monkeypatch):
         raising=True,
     )
 
-    # Record folds for test_on_fold calls.
     folds_called: list[int] = []
     monkeypatch.setattr(
         entry,
@@ -306,59 +278,28 @@ def test_train_entry_happy_path_no_test_empty_eval(tmp_path, monkeypatch):
         raising=True,
     )
 
-    # Evaluation dataframe is empty, with warnings.
-    monkeypatch.setattr(
-        entry.evaluation_utils,
-        "build_evaluation_dataframe",
-        lambda **kwargs: (pd.DataFrame(), "[warn] something"),
-        raising=True,
-    )
-
-    # Capture console prints.
-    logs = []
-    monkeypatch.setattr(
-        console_mod.console,
-        "print",
-        lambda msg, **k: logs.append(str(msg)),
-    )
-
-    # Evaluator should not be called since dataframe is empty.
+    finalize_calls: list[argparse.Namespace] = []
     monkeypatch.setattr(
         entry,
-        "Evaluator",
-        lambda *a, **k: (_ for _ in ()).throw(
-            AssertionError("Evaluator should not be constructed")
-        ),
+        "run_finalize",
+        lambda ns: finalize_calls.append(ns),
         raising=True,
     )
 
-    argv = [
-        "--results",
-        str(results_dir),
-        "--numpy",
-        str(numpy_dir),
-        "--overwrite",
-    ]
+    argv = ["--results", str(results_dir), "--numpy", str(numpy_dir), "--overwrite"]
     entry.train_entry(argv)
 
-    # Trainer.fit called.
     assert created["trainer"].fit_called is True
-    # Folds inferred.
     assert folds_called == [0, 1]
-    # Warnings surfaced, and empty-eval message printed.
-    assert any("warn" in m.lower() for m in logs)
-    assert any("No valid prediction-mask pairs" in m for m in logs)
-    # Predictions/train/raw created.
-    assert (results_dir / "predictions" / "train" / "raw").is_dir()
-    # No evaluation_paths.csv written.
-    assert not (results_dir / "evaluation_paths.csv").exists()
+    assert len(finalize_calls) == 1
+    assert finalize_calls[0].results == str(results_dir)
+    assert finalize_calls[0].device == "cuda"
 
 
-def test_train_entry_happy_path_with_eval_and_test_infer(tmp_path, monkeypatch):
-    """Run eval and test inference when pairs exist and test set present."""
+def test_train_entry_skips_finalize_when_folds_are_a_subset(tmp_path, monkeypatch):
+    """One-fold-per-node pattern: skip finalize, point the user at mist_finalize."""
     _patch_minimal_cli(monkeypatch)
 
-    # Files and dirs including test paths.
     results_dir = tmp_path / "results"
     numpy_dir = tmp_path / "numpy"
     results_dir.mkdir()
@@ -366,99 +307,76 @@ def test_train_entry_happy_path_with_eval_and_test_infer(tmp_path, monkeypatch):
     _write_required_files(results_dir, include_test=True)
     _ensure_numpy_dirs(numpy_dir)
 
-    # Config for folds/eval params.
-    config = {
-        "training": {
-            "folds": [2],
-            "hardware": {"num_cpu_workers": 4},
-        },
-        "evaluation": {
-            "background": {"labels": [0], "metrics": {"dice": {}}},
-            "foreground": {"labels": [1], "metrics": {"dice": {}}},
-        },
-    }
-    (results_dir / "config.json").write_text(json.dumps(config))
+    # Total run has 2 folds; this invocation only trains fold 0.
+    config = {"training": {"folds": [0, 1], "nfolds": 2}}
     monkeypatch.setattr(entry.io, "read_json_file", lambda p: config, raising=True)
+    monkeypatch.setattr(entry, "Patch3DTrainer", lambda ns: _DummyTrainer(ns), raising=True)
 
-    # GPU availability.
-    monkeypatch.setattr(entry.torch.cuda, "device_count", lambda: 2, raising=True)
-    monkeypatch.setattr(entry.torch, "no_grad", _NoGrad, raising=True)
-
-    # Trainer stub.
-    trainer = _DummyTrainer(argparse.Namespace())
-    monkeypatch.setattr(entry, "Patch3DTrainer", lambda ns: trainer, raising=True)
-
-    # Fold test tracker.
     folds_called: list[int] = []
-    monkeypatch.setattr(
-        entry,
-        "test_on_fold",
-        lambda ns, f: folds_called.append(f),
-        raising=True,
-    )
+    monkeypatch.setattr(entry, "test_on_fold", lambda ns, f: folds_called.append(f), raising=True)
 
-    # Non-empty evaluation dataframe.
-    eval_df = pd.DataFrame({"prediction": ["p.nii.gz"], "mask": ["m.nii.gz"], "id": [0]})
-    monkeypatch.setattr(
-        entry.evaluation_utils,
-        "build_evaluation_dataframe",
-        lambda **kwargs: (eval_df, ""),
-        raising=True,
-    )
+    finalize_calls: list[argparse.Namespace] = []
+    monkeypatch.setattr(entry, "run_finalize", lambda ns: finalize_calls.append(ns), raising=True)
 
-    # Evaluator stub that writes results.csv.
-    runs = {"called": False}
-
-    def _mk_eval(filepaths_dataframe, evaluation_config, output_csv_path):
-        class _E:
-            def run(self, max_workers=None):
-                runs["called"] = True
-                Path(output_csv_path).write_text("metric,value\n")
-
-        return _E()
-
-    monkeypatch.setattr(entry, "Evaluator", _mk_eval, raising=True)
-
-    # test inference: patch read_csv + infer runner.
-    test_df = pd.DataFrame({"id": [9]})
-    monkeypatch.setattr(pd, "read_csv", lambda p: test_df, raising=True)
-
-    infer_calls: list[tuple[str, str]] = []
-
-    def _infer_from_dataframe(
-        paths_dataframe,
-        output_directory,
-        mist_configuration,
-        models_directory,
-        postprocessing_strategy_filepath,
-        device,
-    ):
-        infer_calls.append((output_directory, models_directory))
-        p = Path(output_directory)
-        # output_directory is .../predictions/test (the folder itself).
-        assert p.name == "test"
-        assert p.parent.name == "predictions"
-        assert Path(models_directory).name == "models"
-
-    monkeypatch.setattr(entry, "infer_from_dataframe", _infer_from_dataframe, raising=True)
+    logs = []
+    monkeypatch.setattr(console_mod.console, "print", lambda msg, **k: logs.append(str(msg)))
 
     argv = [
         "--results",
         str(results_dir),
         "--numpy",
         str(numpy_dir),
+        "--folds",
+        "0",
         "--overwrite",
     ]
     entry.train_entry(argv)
 
-    # Trainer.fit called.
-    assert trainer.fit_called is True
-    # Fold tested
-    assert folds_called == [2]
-    # Evaluation ran and produced results.csv.
-    assert runs["called"] is True
-    assert (results_dir / "results.csv").is_file()
-    # evaluation_paths.csv written.
-    assert (results_dir / "evaluation_paths.csv").is_file()
-    # Test inference invoked with expected directories.
-    assert len(infer_calls) == 1
+    # Only the requested fold was tested; finalize was never called.
+    assert folds_called == [0]
+    assert finalize_calls == []
+    assert any("mist_finalize" in m for m in logs)
+
+
+def test_train_entry_uses_cli_folds_not_config_folds_for_test_on_fold(tmp_path, monkeypatch):
+    """test_on_fold uses this invocation's own --folds, not a re-read of the
+    shared config.json's "folds" key.
+
+    Regression test: config.json's "folds" key is only safe to read *before*
+    training starts. BaseTrainer persists a --folds override into that same,
+    possibly shared, file, so another per-node invocation racing on the same
+    --results directory could have overwritten it by the time this process
+    finishes training. Simulate that by having config's "folds" disagree with
+    what this invocation was actually asked to train.
+    """
+    _patch_minimal_cli(monkeypatch)
+
+    results_dir = tmp_path / "results"
+    numpy_dir = tmp_path / "numpy"
+    results_dir.mkdir()
+    numpy_dir.mkdir()
+    _write_required_files(results_dir, include_test=False)
+    _ensure_numpy_dirs(numpy_dir)
+
+    # Deliberately disagrees with --folds 0 below, simulating another node's
+    # concurrent write to the shared config.json.
+    config = {"training": {"folds": [5, 6], "nfolds": 2}}
+    monkeypatch.setattr(entry.io, "read_json_file", lambda p: config, raising=True)
+    monkeypatch.setattr(entry, "Patch3DTrainer", lambda ns: _DummyTrainer(ns), raising=True)
+
+    folds_called: list[int] = []
+    monkeypatch.setattr(entry, "test_on_fold", lambda ns, f: folds_called.append(f), raising=True)
+    monkeypatch.setattr(entry, "run_finalize", lambda ns: None, raising=True)
+
+    argv = [
+        "--results",
+        str(results_dir),
+        "--numpy",
+        str(numpy_dir),
+        "--folds",
+        "0",
+        "--overwrite",
+    ]
+    entry.train_entry(argv)
+
+    assert folds_called == [0]

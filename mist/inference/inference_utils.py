@@ -1,5 +1,6 @@
 """Utility functions for MIST inference modules."""
 
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,40 @@ from mist.utils import sitk_io
 def get_default_device() -> str:
     """Return the default inference device (CUDA if available, else CPU)."""
     return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def resolve_device(device_str: str) -> torch.device:
+    """Resolve a device string (e.g. 'cpu', 'cuda', '0') to a torch.device.
+
+    Shared by every entrypoint that takes a --device flag (mist_predict,
+    mist_finalize) so device resolution/fallback behavior stays consistent.
+
+    Args:
+        device_str: Device specification: "cpu", "cuda", or a CUDA index
+            (e.g. "0").
+
+    Returns:
+        The resolved device. Falls back to CPU with a warning if CUDA (or the
+        requested CUDA index) isn't actually available.
+
+    Raises:
+        ValueError: If device_str isn't "cpu", "cuda", or a valid integer.
+    """
+    if device_str == "cpu":
+        return torch.device("cpu")
+    if device_str == "cuda":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Numeric (CUDA index) case.
+    try:
+        idx = int(device_str)
+    except ValueError as e:
+        raise ValueError(f"Invalid device specification: {device_str}") from e
+
+    if torch.cuda.is_available() and idx < torch.cuda.device_count():
+        return torch.device(f"cuda:{idx}")
+
+    warnings.warn(f"CUDA device {idx} not available; falling back to CPU.", stacklevel=2)
+    return torch.device("cpu")
 
 
 def decrop_from_fg(

@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import SimpleITK as sitk
+import torch
 
 # MIST imports.
 from mist.inference import inference_utils as iu
@@ -220,6 +221,44 @@ def test_probabilities_back_to_original_space_with_crop():
     # channel.
     restored = np.transpose(sitk.GetArrayFromImage(result), (2, 1, 0, 3))
     assert np.allclose(restored[og_shape[0] - 1, og_shape[1] - 1, og_shape[2] - 1, :], 0.0)
+
+
+@pytest.mark.parametrize(
+    "is_avail, dev_in, expected_type",
+    [
+        (False, "cpu", "cpu"),
+        (False, "cuda", "cpu"),  # fall back when unavailable
+        (True, "cuda", "cuda"),
+    ],
+)
+def test_resolve_device_cpu_cuda(monkeypatch, is_avail, dev_in, expected_type):
+    """Test resolve_device for CPU and CUDA."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: is_avail, raising=True)
+    dev = iu.resolve_device(dev_in)
+    assert isinstance(dev, torch.device)
+    assert dev.type == expected_type
+
+
+def test_resolve_device_numeric_available(monkeypatch):
+    """Test resolve_device with numeric CUDA index when available."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True, raising=True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=True)
+    dev = iu.resolve_device("1")
+    assert dev.type == "cuda" and dev.index == 1
+
+
+def test_resolve_device_numeric_unavailable_warns_and_cpu(monkeypatch):
+    """Test resolve_device with numeric CUDA index when unavailable."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=True)
+    with pytest.warns(UserWarning, match="falling back to CPU"):
+        dev = iu.resolve_device("0")
+    assert dev.type == "cpu"
+
+
+def test_resolve_device_invalid_string_raises():
+    """Test resolve_device raises on invalid device string."""
+    with pytest.raises(ValueError, match="Invalid device specification"):
+        iu.resolve_device("cuda:0")  # Invalid per our CLI (expects "0").
 
 
 class _DummyModel:

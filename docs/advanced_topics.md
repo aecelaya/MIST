@@ -27,7 +27,7 @@ Below is an example of a valid `config.json` file.
 
 ```json
 {
-  "mist_version": "2.1.0rc0",
+  "mist_version": "2.2.0rc0",
 
   "dataset_info": {
     "task": "ivygap",
@@ -1205,6 +1205,51 @@ same machine, each job must use a different `master_port` value — port conflic
 will cause a job to fail with an "address already in use" error. Change this
 value by editing `config.json` directly.
 
+### Distributed training across nodes (one fold per node)
+
+On an HPC cluster it's common to train each fold as its own job, spread across
+several nodes, rather than running the whole cross-validation loop as one job.
+Point every node at the same shared `--results` directory and restrict each one
+to its own fold (or folds) with `--folds`:
+
+```bash
+# Node 0:
+mist_train --numpy /shared/numpy --results /shared/results --folds 0
+# Node 1:
+mist_train --numpy /shared/numpy --results /shared/results --folds 1
+# ...and so on for the rest of nfolds.
+```
+
+Each node's job still uses DDP across that node's own GPUs exactly as
+described above — one fold per node and multi-GPU per fold are independent
+and compose normally.
+
+Because each of these jobs only trains a subset of the configured folds,
+`mist_train` skips its usual automatic finalization step (aggregating
+out-of-fold predictions into `results.csv`, and running held-out test-set
+inference if configured) rather than have every node race to overwrite the
+same shared files. Instead, each job prints a reminder and exits once its own
+fold(s) are done. Once every per-fold job has finished, run the finalize step
+once, yourself:
+
+```bash
+mist_finalize --results /shared/results
+```
+
+On a Slurm cluster this maps directly onto a job dependency, so the finalize
+step only starts once every fold job has actually completed:
+
+```bash
+sbatch --dependency=afterok:<fold-job-id-0>:<fold-job-id-1>:... finalize_job.sh
+```
+
+`mist_finalize` is safe to re-run — each run recomputes `results.csv` (and
+test-set predictions, if configured) from whatever is currently in the results
+directory, so re-running it after a straggler fold finishes late just
+refreshes both. If you run it before every fold has finished, it prints a
+warning naming the folds still missing a saved model, rather than silently
+producing partial results.
+
 ## Parallelism
 
 MIST uses two distinct forms of parallelism depending on the pipeline stage.
@@ -1219,15 +1264,19 @@ how many patients are processed in parallel using a Python thread pool:
 | -------------------------------------- | --------------------------- | ------- |
 | `mist_analyze`, `mist_run_all`         | `--num-workers-analyze`     | `1`     |
 | `mist_preprocess`, `mist_run_all`      | `--num-workers-preprocess`  | `1`     |
-| `mist_train`, `mist_run_all`           | `--num-workers-evaluate`    | `1`     |
+| `mist_train`, `mist_run_all`, `mist_finalize` | `--num-workers-evaluate` | `1`     |
 | `mist_evaluate`                        | `--num-workers-evaluate`    | `1`     |
 | `mist_postprocess`                     | `--num-workers-postprocess` | `1`     |
 | `mist_postprocess`                     | `--num-workers-evaluate`    | `1`     |
 | `mist_convert_msd`, `mist_convert_csv` | `--num-workers-conversion`  | `1`     |
 
-`mist_train` exposes `--num-workers-evaluate` because it automatically runs
-evaluation on the held-out fold predictions after each fold completes. The flag
-controls the parallelism for that built-in evaluation step.
+`mist_train` exposes `--num-workers-evaluate` because, once every configured
+fold has finished training, it automatically aggregates the held-out fold
+predictions into `results.csv`. The flag controls the parallelism for that
+built-in evaluation step. When folds are trained across separate per-node
+jobs (see [Distributed training across nodes](#distributed-training-across-nodes-one-fold-per-node)
+above), each job trains only its own fold(s) and this step runs later, via
+`mist_finalize`, which takes the same flag.
 
 Increasing these values speeds up each stage on machines with many CPU cores. A
 good starting point is to match the number of available CPU cores, capped at the

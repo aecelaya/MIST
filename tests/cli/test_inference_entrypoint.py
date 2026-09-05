@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+import torch
 
 # MIST imports.
 from mist.cli import inference_entrypoint as entry
@@ -81,44 +82,6 @@ def test_parse_inference_args_missing_required_raises(tmp_path):
                 str(tmp_path / "out"),
             ]
         )
-
-
-@pytest.mark.parametrize(
-    "is_avail, dev_in, expected_type",
-    [
-        (False, "cpu", "cpu"),
-        (False, "cuda", "cpu"),  # fall back when unavailable
-        (True, "cuda", "cuda"),
-    ],
-)
-def test_resolve_device_cpu_cuda(monkeypatch, is_avail, dev_in, expected_type):
-    """Test _resolve_device for CPU and CUDA."""
-    monkeypatch.setattr(entry.torch.cuda, "is_available", lambda: is_avail, raising=True)
-    dev = entry._resolve_device(dev_in)
-    assert isinstance(dev, entry.torch.device)
-    assert dev.type == expected_type
-
-
-def test_resolve_device_numeric_available(monkeypatch):
-    """Test _resolve_device with numeric CUDA index when available."""
-    monkeypatch.setattr(entry.torch.cuda, "is_available", lambda: True, raising=True)
-    monkeypatch.setattr(entry.torch.cuda, "device_count", lambda: 2, raising=True)
-    dev = entry._resolve_device("1")
-    assert dev.type == "cuda" and dev.index == 1
-
-
-def test_resolve_device_numeric_unavailable_warns_and_cpu(monkeypatch):
-    """Test _resolve_device with numeric CUDA index when unavailable."""
-    monkeypatch.setattr(entry.torch.cuda, "is_available", lambda: False, raising=True)
-    with pytest.warns(UserWarning, match="falling back to CPU"):
-        dev = entry._resolve_device("0")
-    assert dev.type == "cpu"
-
-
-def test_resolve_device_invalid_string_raises():
-    """Test _resolve_device raises on invalid device string."""
-    with pytest.raises(ValueError, match="Invalid device specification"):
-        entry._resolve_device("cuda:0")  # Invalid per our CLI (expects "0").
 
 
 def _touch_json(p: Path, payload=None):
@@ -233,7 +196,7 @@ def test_run_inference_calls_infer_with_expected_args(tmp_path, monkeypatch):
     )
 
     # Ensure device resolution yields a stable device (CPU).
-    monkeypatch.setattr(entry.torch.cuda, "is_available", lambda: False, raising=True)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=True)
 
     ns = argparse.Namespace(
         models_dir=str(models),
@@ -256,7 +219,7 @@ def test_run_inference_calls_infer_with_expected_args(tmp_path, monkeypatch):
     assert captured["mist_configuration"] == {"foo": "bar"}
     assert captured["models_directory"] == str(models.resolve())
     assert captured["postprocessing_strategy_filepath"] is None
-    assert isinstance(captured["device"], entry.torch.device)
+    assert isinstance(captured["device"], torch.device)
     assert captured["device"].type in ("cpu", "cuda")  # Depending on env mock.
     assert captured["output_probs"] is True
 
@@ -286,7 +249,7 @@ def test_run_inference_with_postprocess_strategy(tmp_path, monkeypatch):
         lambda **kwargs: got.update(kwargs),
         raising=True,
     )
-    monkeypatch.setattr(entry.torch.cuda, "is_available", lambda: False, raising=True)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=True)
 
     ns = argparse.Namespace(
         models_dir=str(models),
