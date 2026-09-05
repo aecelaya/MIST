@@ -16,26 +16,13 @@ plan defers to that stage; :func:`run_prediction` is a thin, optional hook for
 when a model/config is available rather than something baked into the Stage 0
 gate.
 
-For Stage 2 onward, real-data validation doesn't fit the "regenerate fixtures
-and re-run the pipeline" shape above -- the golden run (old code) and
-candidate run (migrated code) are each produced once, out-of-band (e.g. on an
-HPC box, real GPU training in between), landing as directory trees on disk.
-:func:`diff_directories` compares two such existing directories directly (any
-mix of .json/.csv/.npy/.nii.gz artifacts), no regeneration involved.
+Two ways to use it:
 
-Three ways to use this module:
-
-* Programmatically, from the pytest gates in ``test_stage0_selfdiff.py`` and
-  ``test_diff_directories.py``.
+* Programmatically, from the pytest gate in ``test_stage0_selfdiff.py``.
 * As a CLI, to capture a golden set once and diff future runs against it::
 
       python -m tests.regression.ants_sitk.harness capture --golden-dir GOLDEN
       python -m tests.regression.ants_sitk.harness diff    --golden-dir GOLDEN
-
-* As a CLI, to diff two already-produced directories (the real-data shape)::
-
-      python -m tests.regression.ants_sitk.harness diff-dirs \
-          --golden-dir GOLDEN --candidate-dir CANDIDATE
 """
 
 from __future__ import annotations
@@ -330,70 +317,6 @@ def _compare_csv(
     return diffs
 
 
-def _compare_nifti(
-    key: str,
-    golden_path: Path,
-    candidate_path: Path,
-    atol: float,
-    rtol: float,
-) -> list[str]:
-    """Compare two NIfTI images: geometry, then pixel data.
-
-    Counterpart to _compare_npy for stages whose diff target is a NIfTI file
-    rather than a raw .npy array (e.g. Stage 2's postprocessed masks, Stage
-    5's predictions). Uses plain SimpleITK directly -- this harness is
-    comparing final output *files* produced by whichever backend a given
-    stage's code happens to use, not exercising sitk_io itself.
-
-    Size/spacing/direction mismatches are reported first, for the same
-    reason as _compare_npy: an axis transpose or reorientation bug is
-    exactly the silent (non-crashing) failure mode this harness exists to
-    catch, and it's easy to miss inside a large pixel-value diff.
-    """
-    import SimpleITK as sitk
-
-    golden_img = sitk.ReadImage(str(golden_path))
-    candidate_img = sitk.ReadImage(str(candidate_path))
-
-    if golden_img.GetSize() != candidate_img.GetSize():
-        return [
-            f"{key}: size {golden_img.GetSize()} (golden) != "
-            f"{candidate_img.GetSize()} (candidate) -- possible axis transpose"
-        ]
-
-    diffs: list[str] = []
-    if not np.allclose(golden_img.GetSpacing(), candidate_img.GetSpacing(), atol=1e-6):
-        diffs.append(
-            f"{key}: spacing {golden_img.GetSpacing()} (golden) != "
-            f"{candidate_img.GetSpacing()} (candidate)"
-        )
-    if not np.allclose(golden_img.GetDirection(), candidate_img.GetDirection(), atol=1e-6):
-        diffs.append(
-            f"{key}: direction {golden_img.GetDirection()} (golden) != "
-            f"{candidate_img.GetDirection()} (candidate) -- possible reorientation bug"
-        )
-
-    golden = sitk.GetArrayFromImage(golden_img)
-    candidate = sitk.GetArrayFromImage(candidate_img)
-
-    if np.issubdtype(golden.dtype, np.integer) and np.issubdtype(candidate.dtype, np.integer):
-        if not np.array_equal(golden, candidate):
-            mismatched = int(np.count_nonzero(golden != candidate))
-            diffs.append(
-                f"{key}: {mismatched}/{golden.size} voxel(s) differ (exact integer compare)"
-            )
-        return diffs
-
-    if not np.allclose(golden, candidate, atol=atol, rtol=rtol, equal_nan=True):
-        abs_diff = np.abs(golden.astype(np.float64) - candidate.astype(np.float64))
-        n_bad = int(np.count_nonzero(abs_diff > (atol + rtol * np.abs(candidate))))
-        diffs.append(
-            f"{key}: {n_bad} voxel(s) exceed tolerance "
-            f"(max abs diff {abs_diff.max():.3e}, atol={atol}, rtol={rtol})"
-        )
-    return diffs
-
-
 def _compare_npy(
     key: str,
     golden_path: Path,
@@ -466,8 +389,6 @@ def diff_artifacts(
             report.differences.extend(_compare_csv(key, gpath, cpath, replacements, atol, rtol))
         elif key.endswith(".npy"):
             report.differences.extend(_compare_npy(key, gpath, cpath, atol, rtol))
-        elif key.endswith(".nii.gz"):
-            report.differences.extend(_compare_nifti(key, gpath, cpath, atol, rtol))
         else:  # pragma: no cover - defensive; no other artifact types today.
             report.differences.append(f"{key}: unknown artifact type, not compared")
 
@@ -537,76 +458,6 @@ def diff_against_golden(golden_dir: Path, *, atol: float = 0.0, rtol: float = 0.
         )
 
 
-# --------------------------------------------------------------------------- #
-# Diffing two existing directories (real-data workflow, Stage 2 onward)
-# --------------------------------------------------------------------------- #
-# capture()/diff_against_golden() above regenerate Stage 0's synthetic
-# fixtures and re-run analyze+preprocess on every call -- the right shape for
-# a self-contained CI-style gate, but not for later stages validated against
-# a real, perturbed dataset: there, the golden run (old code) and candidate
-# run (new/migrated code) are each produced once, out-of-band (e.g. on an
-# HPC box, possibly with real GPU training in between), and already sit on
-# disk as directory trees by the time a diff is wanted. diff_directories
-# compares two such existing directories directly, with no regeneration step.
-_KNOWN_ARTIFACT_SUFFIXES = (".json", ".csv", ".npy", ".nii.gz")
-
-
-def collect_directory_artifacts(root: Path) -> dict[str, Path]:
-    """Map path-relative-to-root -> file, for every recognized artifact.
-
-    Generic counterpart to collect_artifacts (which knows Stage 0's specific
-    results/numpy directory layout): walks an arbitrary directory tree, so it
-    works for whatever a given stage's real-data run happens to produce
-    (Stage 2's postprocessed-masks directory + results.csv, Stage 5's
-    predictions directory, etc.) without this harness needing to know that
-    layout in advance.
-    """
-    root = Path(root)
-    artifacts: dict[str, Path] = {}
-    for path in sorted(root.rglob("*")):
-        if not path.is_file() or path.name == _MANIFEST_NAME:
-            continue
-        if path.name.endswith(_KNOWN_ARTIFACT_SUFFIXES):
-            artifacts[str(path.relative_to(root))] = path
-    return artifacts
-
-
-def diff_directories(
-    golden_dir: Path,
-    candidate_dir: Path,
-    *,
-    atol: float = 1e-5,
-    rtol: float = 1e-5,
-) -> DiffReport:
-    """Diff two existing directory trees of already-produced artifacts.
-
-    Args:
-        golden_dir: Directory containing the reference run's output (e.g.
-            produced by the current, unmigrated MIST version).
-        candidate_dir: Directory containing the run to check (e.g. produced
-            by a migrated stage's code) on the same input data.
-        atol: Absolute tolerance for floating-point artifacts (image/dtm
-            arrays, NIfTI images, evaluation metric CSVs). Label/mask arrays
-            and integer NIfTI images are still compared exactly regardless.
-        rtol: Relative tolerance, used alongside atol.
-
-    Returns:
-        A DiffReport; report.identical is False if anything differs beyond
-        tolerance, or if either directory has an artifact the other lacks.
-    """
-    golden_dir = Path(golden_dir).resolve()
-    candidate_dir = Path(candidate_dir).resolve()
-    golden_map = collect_directory_artifacts(golden_dir)
-    candidate_map = collect_directory_artifacts(candidate_dir)
-    replacements = [
-        (str(golden_dir), _ROOT_PLACEHOLDER),
-        (str(candidate_dir), _ROOT_PLACEHOLDER),
-    ]
-    return diff_artifacts(
-        golden_map, candidate_map, replacements=replacements, atol=atol, rtol=rtol
-    )
-
-
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Stage 0 ANTs->SimpleITK regression harness.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -614,23 +465,10 @@ def _build_parser() -> argparse.ArgumentParser:
     cap = sub.add_parser("capture", help="Capture golden artifacts.")
     cap.add_argument("--golden-dir", required=True, type=Path)
 
-    dif = sub.add_parser("diff", help="Diff a fresh run against golden (Stage 0 fixtures).")
+    dif = sub.add_parser("diff", help="Diff a fresh run against golden.")
     dif.add_argument("--golden-dir", required=True, type=Path)
     dif.add_argument("--atol", type=float, default=0.0)
     dif.add_argument("--rtol", type=float, default=0.0)
-
-    dirs = sub.add_parser(
-        "diff-dirs",
-        help=(
-            "Diff two existing directories of already-produced artifacts "
-            "(real-data workflow: golden run from the old code, candidate "
-            "run from migrated code, on the same input data)."
-        ),
-    )
-    dirs.add_argument("--golden-dir", required=True, type=Path)
-    dirs.add_argument("--candidate-dir", required=True, type=Path)
-    dirs.add_argument("--atol", type=float, default=1e-5)
-    dirs.add_argument("--rtol", type=float, default=1e-5)
 
     return parser
 
@@ -643,12 +481,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "diff":
         report = diff_against_golden(args.golden_dir, atol=args.atol, rtol=args.rtol)
-        print(report)
-        return 0 if report.identical else 1
-    if args.command == "diff-dirs":
-        report = diff_directories(
-            args.golden_dir, args.candidate_dir, atol=args.atol, rtol=args.rtol
-        )
         print(report)
         return 0 if report.identical else 1
     return 2  # pragma: no cover
