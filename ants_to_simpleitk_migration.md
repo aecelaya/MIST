@@ -128,6 +128,16 @@ cases) and diff predictions against the golden reference — exact match or Dice
   `preprocessing_utils.py`.
 - Sweep for any remaining `import ants` across `mist/` and `tests/`.
 - Update any docs/CLAUDE.md references to ANTs.
+- Also remove `einops` from `dependencies` while we're touching that list:
+  unrelated to the ants -> sitk migration, but confirmed unused anywhere in
+  the codebase (no `import einops` in the current tree or in git history),
+  so it's dead weight worth dropping in the same pass.
+- Bump the version to `2.1.0-rc` in `pyproject.toml` -- a new minor-version
+  RC line rather than another patch-level RC on 2.0.x, since dropping
+  `antspyx` (a heavy dependency) changes the install footprint even though
+  segmentation outputs are unchanged. Double-check
+  `docs/advanced_topics.md`'s example `config.json` snippet
+  (`"mist_version": "2.0.2rc0"`) isn't left looking stale.
 
 **Release gate:** Full test suite green. `grep -r "import ants" mist/ tests/`
 returns nothing (outside `build/`).
