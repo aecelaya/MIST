@@ -498,3 +498,42 @@ class TestReadImagePixeltypes:
         assert expected.dtype == expected_dtype
         assert actual.dtype == expected_dtype
         np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize("spec", FIXTURES, ids=lambda s: s.patient_id)
+class TestNewImageLike:
+    """new_image_like vs. the ANTsImage instance method .new_image_like().
+
+    Not a top-level ants.* function (an ANTsImage method instead), found
+    while migrating mist/postprocessing/postprocessor.py (Stage 2), which
+    uses mask.new_image_like(updated_array) after an in-place transform.
+    """
+
+    def test_geometry_and_values_match(self, dataset, spec):
+        path = _mask_path(dataset, spec.patient_id)
+        ants_ref = ants.image_read(path)
+        new_arr = (ants_ref.numpy() * 2).astype(np.uint8)
+        expected = ants_ref.new_image_like(new_arr)
+
+        sitk_ref = sitk_io.read_image(path)
+        actual = sitk_io.new_image_like(sitk_ref, new_arr)
+
+        np.testing.assert_array_equal(sitk_io.array_from_image(actual), expected.numpy())
+        assert sitk_io.array_from_image(actual).dtype == expected.numpy().dtype
+        assert actual.GetSpacing() == expected.spacing
+        assert actual.GetOrigin() == expected.origin
+        np.testing.assert_allclose(
+            np.reshape(np.array(actual.GetDirection()), (3, 3)), expected.direction, atol=1e-10
+        )
+
+    def test_mismatched_shape_raises(self, dataset, spec):
+        path = _mask_path(dataset, spec.patient_id)
+        ants_ref = ants.image_read(path)
+        bad_arr = np.zeros((3, 3, 3), dtype=np.uint8)
+
+        with pytest.raises(Exception):  # noqa: B017, PT011
+            ants_ref.new_image_like(bad_arr)
+
+        sitk_ref = sitk_io.read_image(path)
+        with pytest.raises(RuntimeError):
+            sitk_io.new_image_like(sitk_ref, bad_arr)

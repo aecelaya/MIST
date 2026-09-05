@@ -353,3 +353,33 @@ def merge_channels(images: Sequence[sitk.Image]) -> sitk.Image:
             the underlying sitk.Compose call).
     """
     return sitk.Compose(list(images))
+
+
+def new_image_like(reference: sitk.Image, array: npt.NDArray[Any]) -> sitk.Image:
+    """Build a scalar image with new pixel data but a reference's geometry.
+
+    Replacement for the ANTsImage instance method `.new_image_like(array)`
+    (not a top-level ants.* function, but used the same way MIST uses the
+    other functions in this module -- e.g. after an in-place transform on a
+    mask's array, to get back an image with the mask's original spacing/
+    origin/direction). `array` may have a different dtype than `reference`
+    (ants.new_image_like doesn't force a dtype either -- the new image just
+    takes on the array's own dtype); it must have the same shape.
+
+    Args:
+        reference: Image to copy spacing/origin/direction from.
+        array: New pixel data, in (x, y, z) axis order, matching
+            `reference`'s size.
+
+    Returns:
+        A new image with `array`'s data and `reference`'s geometry.
+
+    Raises:
+        RuntimeError: If `array`'s shape doesn't match `reference`'s size
+            (from the underlying sitk.Image.CopyInformation call; ants'
+            equivalent check raises ValueError instead, a difference in
+            exception type only -- both fail loudly on a mismatch).
+    """
+    new_image = sitk.GetImageFromArray(array.T)
+    new_image.CopyInformation(reference)
+    return new_image
