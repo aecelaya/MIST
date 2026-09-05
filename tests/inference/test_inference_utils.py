@@ -3,13 +3,29 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import ants
 import numpy as np
 import pandas as pd
 import pytest
+import SimpleITK as sitk
 
 # MIST imports.
 from mist.inference import inference_utils as iu
+from mist.utils import sitk_io
+
+
+def _make_sitk_image(
+    arr_xyz: np.ndarray,
+    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    direction: np.ndarray | None = None,
+):
+    """Create a SimpleITK image with basic metadata."""
+    return sitk_io.image_from_array(
+        arr_xyz.astype(np.float32),
+        spacing=spacing,
+        origin=origin,
+        direction=direction if direction is not None else np.eye(3),
+    )
 
 
 @pytest.fixture()
@@ -53,95 +69,76 @@ def mock_mist_config():
     }
 
 
-@pytest.mark.parametrize(
-    "bbox",
-    [
-        None,
-        {
-            "x_start": 0,
-            "y_start": 0,
-            "z_start": 0,
-            "x_end": 31,
-            "y_end": 31,
-            "z_end": 31,
-            "x_og_size": 64,
-            "y_og_size": 64,
-            "z_og_size": 64,
-        },
-    ],
-)
-@patch("mist.preprocessing.preprocessing_utils.sitk_to_ants")
-@patch("mist.preprocessing.preprocessing_utils.ants_to_sitk")
-@patch("mist.inference.inference_utils.decrop_from_fg")
-@patch("mist.preprocessing.preprocess.resample_mask")
-@patch("ants.get_orientation")
-@patch("ants.reorient_image2")
-@patch("ants.from_numpy")
-def test_back_to_original_space(
-    mock_from_numpy,
-    mock_reorient_image2,
-    mock_get_orientation,
-    mock_resample_mask,
-    mock_decrop_from_fg,
-    mock_ants_to_sitk,
-    mock_sitk_to_ants,
-    bbox,
-):
-    """Test back_to_original_space function with and without bounding box."""
-    # Input data.
-    raw_prediction = np.ones((32, 32, 32))
-    target_spacing = (1.0, 1.0, 1.0)
+def test_back_to_original_space_no_crop():
+    """Restoring a discrete prediction without cropping preserves header/labels."""
+    og_shape = (10, 9, 8)
+    spacing = (1.0, 1.0, 1.0)
+    origin = (2.0, 3.0, 4.0)
+    original_image = _make_sitk_image(
+        np.zeros(og_shape, dtype=np.float32), spacing=spacing, origin=origin
+    )
     training_labels = [0, 1, 2]
 
-    # Mock original ANTs image.
-    original_image = MagicMock(name="original_image")
-    original_image.shape = (64, 64, 64)
-    original_image.spacing = (1.2, 1.2, 1.2)
-    original_image.direction = "FAKE_DIRECTION"
+    rng = np.random.default_rng(0)
+    raw_prediction = rng.integers(0, len(training_labels), size=og_shape).astype(np.float32)
 
-    # Mock prediction image steps.
-    mock_ants_img = MagicMock(name="ants_image")
-    mock_ants_img.numpy.return_value = "mock_numpy_data"
-    mock_from_numpy.return_value = mock_ants_img
-    mock_reorient_image2.return_value = mock_ants_img
-    mock_get_orientation.return_value = "RAI"
-    mock_resample_mask.return_value = mock_ants_img
-    mock_decrop_from_fg.return_value = mock_ants_img
-    final_ants_image = MagicMock(name="final_image")
-    original_image.new_image_like.return_value = final_ants_image
-
-    # ants_to_sitk/sitk_to_ants are a local conversion shim around
-    # resample_mask (Stage 4 of the ANTs -> SimpleITK migration migrated
-    # resample_mask to take/return a SimpleITK image; this function is still
-    # fully ants-based, Stage 5, not yet migrated). Pass through unchanged so
-    # this test still exercises back_to_original_space's own orchestration,
-    # not the conversion glue (which is unit-tested separately).
-    mock_ants_to_sitk.side_effect = lambda img: img
-    mock_sitk_to_ants.side_effect = lambda img: img
-
-    # Call back_to_original_space function.
     result = iu.back_to_original_space(
-        raw_prediction,
-        original_ants_image=original_image,
-        target_spacing=target_spacing,
+        raw_prediction=raw_prediction,
+        original_image=original_image,
+        target_spacing=spacing,
+        training_labels=training_labels,
+        foreground_bounding_box=None,
+    )
+
+    assert result.GetSize() == og_shape
+    assert result.GetSpacing() == pytest.approx(spacing)
+    assert result.GetOrigin() == pytest.approx(origin)
+    assert np.allclose(result.GetDirection(), original_image.GetDirection())
+
+    restored = sitk_io.array_from_image(result)
+    assert set(np.unique(restored)).issubset(set(training_labels))
+
+
+def test_back_to_original_space_with_crop():
+    """Restoring a discrete prediction with a foreground bbox pads correctly."""
+    og_shape = (10, 9, 8)
+    spacing = (1.0, 1.0, 1.0)
+    original_image = _make_sitk_image(np.zeros(og_shape, dtype=np.float32), spacing=spacing)
+    training_labels = [0, 1, 2]
+
+    bbox = {
+        "x_start": 2,
+        "x_end": 7,
+        "y_start": 1,
+        "y_end": 6,
+        "z_start": 0,
+        "z_end": 5,
+        "x_og_size": og_shape[0],
+        "y_og_size": og_shape[1],
+        "z_og_size": og_shape[2],
+    }
+    cropped_shape = (
+        bbox["x_end"] - bbox["x_start"] + 1,
+        bbox["y_end"] - bbox["y_start"] + 1,
+        bbox["z_end"] - bbox["z_start"] + 1,
+    )
+
+    rng = np.random.default_rng(1)
+    # Use only nonzero labels so the padded-zero region is distinguishable.
+    raw_prediction = rng.integers(1, len(training_labels), size=cropped_shape).astype(np.float32)
+
+    result = iu.back_to_original_space(
+        raw_prediction=raw_prediction,
+        original_image=original_image,
+        target_spacing=spacing,
         training_labels=training_labels,
         foreground_bounding_box=bbox,
     )
 
-    # Assertions.
-    assert result == final_ants_image
-
-    mock_from_numpy.assert_called_once_with(data=raw_prediction, spacing=target_spacing)
-    mock_get_orientation.assert_called_once_with(original_image)
-    mock_reorient_image2.assert_called_once_with(mock_ants_img, "RAI")
-    mock_resample_mask.assert_called_once()
-
-    if bbox is not None:
-        mock_decrop_from_fg.assert_called_once_with(mock_ants_img, bbox)
-    else:
-        mock_decrop_from_fg.assert_not_called()
-
-    original_image.new_image_like.assert_called_once_with("mock_numpy_data")
+    assert result.GetSize() == og_shape
+    restored = sitk_io.array_from_image(result)
+    # A voxel well outside the bounding box should be zero-padded.
+    assert restored[og_shape[0] - 1, og_shape[1] - 1, og_shape[2] - 1] == 0.0
 
 
 def test_probabilities_back_to_original_space_no_crop():
@@ -150,7 +147,7 @@ def test_probabilities_back_to_original_space_no_crop():
     spacing = (1.0, 1.0, 1.0)
     origin = (2.0, 3.0, 4.0)
 
-    original_image = _make_ants_image(
+    original_image = _make_sitk_image(
         np.zeros(shape, dtype=np.float32), spacing=spacing, origin=origin
     )
 
@@ -160,20 +157,23 @@ def test_probabilities_back_to_original_space_no_crop():
 
     result = iu.probabilities_back_to_original_space(
         raw_probabilities=raw_probabilities,
-        original_ants_image=original_image,
+        original_image=original_image,
         target_spacing=spacing,
         foreground_bounding_box=None,
     )
 
-    assert result.components == n_classes
-    assert result.numpy().shape == (*shape, n_classes)
-    assert result.spacing == original_image.spacing
-    assert result.origin == original_image.origin
-    assert np.allclose(result.direction, original_image.direction)
+    assert result.GetNumberOfComponentsPerPixel() == n_classes
+    assert result.GetSize() == shape
+    assert result.GetSpacing() == pytest.approx(original_image.GetSpacing())
+    assert result.GetOrigin() == pytest.approx(original_image.GetOrigin())
+    assert np.allclose(result.GetDirection(), original_image.GetDirection())
 
     # With matching spacing/orientation and no cropping, resample_image
     # samples onto the exact same grid, so values should be (near) unchanged.
-    restored = result.numpy()
+    # array_from_image doesn't apply here -- it's only for scalar images (see
+    # its docstring); a multi-component image needs the same transpose done
+    # manually, keeping the component axis last.
+    restored = np.transpose(sitk.GetArrayFromImage(result), (2, 1, 0, 3))
     for c in range(n_classes):
         assert np.allclose(restored[..., c], raw_probabilities[c], atol=1e-3)
 
@@ -183,7 +183,7 @@ def test_probabilities_back_to_original_space_with_crop():
     og_shape = (10, 9, 8)
     spacing = (1.0, 1.0, 1.0)
 
-    original_image = _make_ants_image(np.zeros(og_shape, dtype=np.float32), spacing=spacing)
+    original_image = _make_sitk_image(np.zeros(og_shape, dtype=np.float32), spacing=spacing)
 
     bbox = {
         "x_start": 2,
@@ -208,17 +208,17 @@ def test_probabilities_back_to_original_space_with_crop():
 
     result = iu.probabilities_back_to_original_space(
         raw_probabilities=raw_probabilities,
-        original_ants_image=original_image,
+        original_image=original_image,
         target_spacing=spacing,
         foreground_bounding_box=bbox,
     )
 
-    assert result.components == n_classes
-    assert result.numpy().shape == (*og_shape, n_classes)
+    assert result.GetNumberOfComponentsPerPixel() == n_classes
+    assert result.GetSize() == og_shape
 
     # A voxel well outside the bounding box should be zero-padded in every
     # channel.
-    restored = result.numpy()
+    restored = np.transpose(sitk.GetArrayFromImage(result), (2, 1, 0, 3))
     assert np.allclose(restored[og_shape[0] - 1, og_shape[1] - 1, og_shape[2] - 1, :], 0.0)
 
 
@@ -351,13 +351,13 @@ def test_remap_mask_labels(input_mask, original_labels, expected_output):
 
 @patch("mist.analyze_data.analyzer_utils.compare_headers")
 @patch("mist.analyze_data.analyzer_utils.is_image_3d")
-@patch("ants.image_read")
-@patch("ants.image_header_info")
+@patch("mist.utils.sitk_io.read_image")
+@patch("mist.utils.sitk_io.read_image_header")
 @patch("pathlib.Path.is_file")
 def test_validate_inference_images_success(
     mock_isfile,
-    mock_image_header_info,
-    mock_image_read,
+    mock_read_image_header,
+    mock_read_image,
     mock_is_image_3d,
     mock_compare_headers,
 ):
@@ -374,13 +374,13 @@ def test_validate_inference_images_success(
     # Mock headers and 3D checks.
     header1 = {"dimensions": [64, 64, 64]}
     header2 = {"dimensions": [64, 64, 64]}
-    mock_image_header_info.side_effect = [header1, header2]
+    mock_read_image_header.side_effect = [header1, header2]
     mock_is_image_3d.return_value = True
     mock_compare_headers.return_value = True
 
-    # Mock ANTs image.
+    # Mock SimpleITK image.
     mock_img = MagicMock()
-    mock_image_read.return_value = mock_img
+    mock_read_image.return_value = mock_img
 
     anchor_image, image_paths = iu.validate_inference_images(patient_dict)
 
@@ -404,17 +404,17 @@ def test_validate_inference_images_missing_file(mock_isfile):
 
 
 @patch("mist.analyze_data.analyzer_utils.is_image_3d")
-@patch("ants.image_header_info")
+@patch("mist.utils.sitk_io.read_image_header")
 @patch("pathlib.Path.is_file")
 def test_validate_inference_images_anchor_not_3d(
     mock_isfile,
-    mock_image_header_info,
+    mock_read_image_header,
     mock_is_image_3d,
 ):
     """Test that non-3D anchor image raises ValueError."""
     patient_dict = {"id": "abc", "img1": "/some/path/img.nii.gz"}
     mock_isfile.return_value = True
-    mock_image_header_info.return_value = {"dim": [2]}
+    mock_read_image_header.return_value = {"dimensions": [64, 64]}
     mock_is_image_3d.return_value = False
     with pytest.raises(ValueError, match="Anchor image is not 3D"):
         iu.validate_inference_images(patient_dict)
@@ -422,13 +422,13 @@ def test_validate_inference_images_anchor_not_3d(
 
 @patch("mist.analyze_data.analyzer_utils.compare_headers")
 @patch("mist.analyze_data.analyzer_utils.is_image_3d")
-@patch("ants.image_read")
-@patch("ants.image_header_info")
+@patch("mist.utils.sitk_io.read_image")
+@patch("mist.utils.sitk_io.read_image_header")
 @patch("pathlib.Path.is_file")
 def test_validate_inference_images_header_mismatch(
     mock_isfile,
-    mock_image_header_info,
-    mock_image_read,
+    mock_read_image_header,
+    mock_read_image,
     mock_is_image_3d,
     mock_compare_headers,
 ):
@@ -440,10 +440,13 @@ def test_validate_inference_images_header_mismatch(
     }
 
     mock_isfile.return_value = True
-    mock_image_header_info.side_effect = [{"dim": [3]}, {"dim": [3]}]
+    mock_read_image_header.side_effect = [
+        {"dimensions": [64, 64, 64]},
+        {"dimensions": [64, 64, 64]},
+    ]
     mock_is_image_3d.return_value = True
     mock_compare_headers.return_value = False
-    mock_image_read.return_value = MagicMock()
+    mock_read_image.return_value = MagicMock()
 
     with pytest.raises(ValueError, match="Image headers do not match"):
         iu.validate_inference_images(patient_dict)
@@ -462,13 +465,13 @@ def test_validate_inference_images_no_image_columns():
 
 @patch("mist.analyze_data.analyzer_utils.compare_headers")
 @patch("mist.analyze_data.analyzer_utils.is_image_3d")
-@patch("ants.image_read")
-@patch("ants.image_header_info")
+@patch("mist.utils.sitk_io.read_image")
+@patch("mist.utils.sitk_io.read_image_header")
 @patch("pathlib.Path.is_file")
 def test_validate_inference_images_secondary_image_not_3d(
     mock_isfile,
-    mock_image_header_info,
-    mock_image_read,
+    mock_read_image_header,
+    mock_read_image,
     mock_is_image_3d,
     mock_compare_headers,
 ):
@@ -483,10 +486,13 @@ def test_validate_inference_images_secondary_image_not_3d(
     mock_isfile.return_value = True
 
     # Simulate 3D anchor and non-3D second image.
-    mock_image_header_info.side_effect = [{"dim": [3]}, {"dim": [2]}]
+    mock_read_image_header.side_effect = [
+        {"dimensions": [64, 64, 64]},
+        {"dimensions": [64, 64]},
+    ]
     mock_is_image_3d.side_effect = [True, False]  # Second image fails.
     mock_compare_headers.return_value = True
-    mock_image_read.return_value = MagicMock()
+    mock_read_image.return_value = MagicMock()
 
     with pytest.raises(ValueError, match="Image is not 3D: img2.nii.gz"):
         iu.validate_inference_images(patient_dict)
@@ -538,19 +544,6 @@ def test_validate_paths_dataframe_parametrized(df, should_raise, match):
         iu.validate_paths_dataframe(df)  # Should not raise.
 
 
-def _make_ants_image(
-    arr_xyz: np.ndarray,
-    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
-    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
-):
-    """Create an ANTs image with basic metadata."""
-    img = ants.from_numpy(arr_xyz.astype(np.float32))
-    img.set_spacing(spacing)
-    img.set_origin(origin)
-    img.set_direction(np.eye(3))
-    return img
-
-
 def _crop_with_bbox(arr: np.ndarray, bbox: dict[str, int]) -> np.ndarray:
     """Numpy crop using the same inclusive end convention as crop_to_fg."""
     xs, xe = bbox["x_start"], bbox["x_end"]
@@ -593,10 +586,10 @@ def test_decrop_from_fg_restores_original_region():
     }
 
     cropped_np = _crop_with_bbox(vol, bbox)
-    cropped_img = _make_ants_image(cropped_np)
+    cropped_img = _make_sitk_image(cropped_np)
 
     decropped_img = iu.decrop_from_fg(cropped_img, bbox)
-    decropped_np = decropped_img.numpy()
+    decropped_np = sitk_io.array_from_image(decropped_img)
 
     assert decropped_np.shape == og_shape
     expected = _expected_decrop(cropped_np, og_shape, bbox)
@@ -635,10 +628,10 @@ def test_decrop_from_fg_padding_patterns(bbox):
     vol[xs : xe + 1, ys : ye + 1, zs : ze + 1] = 7.0
 
     cropped_np = _crop_with_bbox(vol, bbox)
-    cropped_img = _make_ants_image(cropped_np)
+    cropped_img = _make_sitk_image(cropped_np)
 
     decropped_img = iu.decrop_from_fg(cropped_img, bbox)
-    decropped_np = decropped_img.numpy()
+    decropped_np = sitk_io.array_from_image(decropped_img)
 
     assert decropped_np.shape == og_shape
     expected = _expected_decrop(cropped_np, og_shape, bbox)
@@ -664,10 +657,10 @@ def test_decrop_from_fg_bbox_full_image_is_noop():
     }
 
     # Cropped equals original region since bbox spans entire volume.
-    cropped_img = _make_ants_image(vol.copy())
+    cropped_img = _make_sitk_image(vol.copy())
 
     decropped_img = iu.decrop_from_fg(cropped_img, bbox)
-    decropped_np = decropped_img.numpy()
+    decropped_np = sitk_io.array_from_image(decropped_img)
 
     assert decropped_np.shape == og_shape
     assert np.allclose(decropped_np, vol)

@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import ants
 import numpy as np
 import pytest
 
@@ -212,24 +211,18 @@ def test_print_strategy(mock_table_class, mock_read_json):
 
 
 @pytest.fixture
-def dummy_ants_image():
-    """Create a dummy ANTsImage for testing.
-
-    Still ants-based, unlike the rest of this file: apply_strategy_to_single_example
-    itself is still ants-based (see its docstring) -- its only caller is the
-    still-fully-ants-based mist_predict --postprocess-strategy path, deferred
-    to Stage 5.
-    """
+def dummy_sitk_image():
+    """Create a dummy SimpleITK image for testing."""
     arr = np.zeros((10, 10), dtype=np.uint8)
     arr[1:3, 1:3] = 1
-    return ants.from_numpy(arr)
+    return sitk_io.image_from_array(arr.astype(np.float32))
 
 
 @pytest.mark.parametrize("simulate_error", [False, True])
 @patch("mist.postprocessing.postprocessor.get_transform")
 @patch("mist.utils.io.read_json_file")
 def test_apply_strategy_to_single_example(
-    mock_read_json, mock_get_transform, simulate_error, dummy_ants_image
+    mock_read_json, mock_get_transform, simulate_error, dummy_sitk_image
 ):
     """Test both successful and failing transform scenarios."""
     transform_name = "remove_small_objects" if not simulate_error else "fill_holes_with_label"
@@ -255,14 +248,17 @@ def test_apply_strategy_to_single_example(
 
     post = Postprocessor(strategy_path="fake_strategy.json")
     result_image, messages = post.apply_strategy_to_single_example(
-        patient_id="test123", mask=dummy_ants_image
+        patient_id="test123", mask=dummy_sitk_image
     )
 
     if simulate_error:
         assert len(messages) == 1
         assert "Error applying fill_holes_with_label to test123" in messages[0]
     else:
-        np.testing.assert_array_equal(result_image.numpy(), dummy_ants_image.numpy() + 1)
+        np.testing.assert_array_equal(
+            sitk_io.array_from_image(result_image),
+            sitk_io.array_from_image(dummy_sitk_image) + 1,
+        )
         assert messages == []
 
 

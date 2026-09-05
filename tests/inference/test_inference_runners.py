@@ -11,12 +11,14 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 import pytest
+import SimpleITK as sitk
 import torch
 
 from mist.inference import inference_runners as ir
 
 # MIST imports.
 from mist.training import training_utils
+from mist.utils import sitk_io
 
 # =========================
 # Shared fixtures & helpers
@@ -94,30 +96,33 @@ def noop_cuda_tensor_to(monkeypatch):
     monkeypatch.setattr(torch.Tensor, "to", _safe_to, raising=True)
 
 
-class _DummyANTsImage:
-    """Minimal stand-in for ANTsImage."""
+def _make_sitk_image(
+    arr_xyz: np.ndarray,
+    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    direction: np.ndarray | None = None,
+) -> sitk.Image:
+    """Create a real SimpleITK image from an (x, y, z)-ordered array."""
+    return sitk_io.image_from_array(
+        arr_xyz.astype(np.float32),
+        spacing=spacing,
+        origin=origin,
+        direction=direction if direction is not None else np.eye(3),
+    )
+
+
+class _DummyImage:
+    """Opaque placeholder "prediction" for tests that mock predict_single_example
+    entirely (test_on_fold / infer_from_dataframe fixtures below) -- it is never
+    passed through real sitk_io calls in those tests, just threaded through as
+    an opaque value to the (also mocked) write_image call."""
 
     def __init__(self, array: np.ndarray | None = None):
         self._array = np.array(0, dtype=np.uint8) if array is None else np.asarray(array)
-        self.astype_arg = None
-        self.new_like_last_data = None
-        self.shape = self._array.shape
 
     def numpy(self):
         """Return the underlying numpy array."""
         return np.asarray(self._array)
-
-    def astype(self, dtype: str):
-        """Simulate ANTsImage astype method."""
-        self.astype_arg = dtype
-        if dtype == "uint8":
-            self._array = self._array.astype(np.uint8)
-        return self
-
-    def new_image_like(self, data):
-        """Simulate ANTsImage new_image_like method."""
-        self.new_like_last_data = np.asarray(data)
-        return _DummyANTsImage(self.new_like_last_data)
 
 
 def _predictor_logits_two_class(_: torch.Tensor) -> torch.Tensor:
@@ -209,20 +214,20 @@ def fold_runner(mock_mist_config, monkeypatch, tmp_path):
 
     Returns a SimpleNamespace with:
       .run(fold, cfg, device, train_df, bbox_df) — calls ir.test_on_fold
-      .image_write — MagicMock for ants.image_write
+      .image_write — MagicMock for sitk_io.write_image
       .predict_single — MagicMock for predict_single_example
       .printed — list of strings passed to console.print
     """
     results_dir, numpy_dir = _prep_dirs(tmp_path)
 
     image_write = MagicMock()
-    predict_single = MagicMock(return_value=(_DummyANTsImage(), None))
+    predict_single = MagicMock(return_value=(_DummyImage(), None))
     printed = []
     mock_read_json = MagicMock()
     mock_get_test_dataset = MagicMock(return_value=_DummyLoader(n=1))
 
-    monkeypatch.setattr(ir.ants, "image_read", MagicMock(return_value=_DummyANTsImage()))
-    monkeypatch.setattr(ir.ants, "image_write", image_write)
+    monkeypatch.setattr(ir.sitk_io, "read_image", MagicMock(return_value=_DummyImage()))
+    monkeypatch.setattr(ir.sitk_io, "write_image", image_write)
     monkeypatch.setattr(ir.progress_bar, "get_progress_bar", MagicMock(return_value=_PB()))
     monkeypatch.setattr("mist.utils.console.console.print", lambda msg: printed.append(str(msg)))
     monkeypatch.setattr(ir, "predict_single_example", predict_single)
@@ -285,7 +290,7 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
 
     Returns a SimpleNamespace with:
       .run(df, cfg, device, postprocessing_strategy_filepath) — calls ir.infer_from_dataframe
-      .image_write — MagicMock for ants.image_write
+      .image_write — MagicMock for sitk_io.write_image
       .predict_single — MagicMock for predict_single_example
       .validate — MagicMock for inference_utils.validate_inference_images
       .preprocess — MagicMock for preprocess.preprocess_example
@@ -296,8 +301,8 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
     models_dir = str(_ensure_dir(tmp_path / "models"))
 
     image_write = MagicMock()
-    predict_single = MagicMock(return_value=(_DummyANTsImage(), None))
-    mock_validate = MagicMock(return_value=(_DummyANTsImage(), ["x"]))
+    predict_single = MagicMock(return_value=(_DummyImage(), None))
+    mock_validate = MagicMock(return_value=(_DummyImage(), ["x"]))
     mock_preprocess = MagicMock(
         return_value={
             "image": np.zeros((2, 2, 2), dtype=np.float32),
@@ -306,7 +311,7 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
     )
     printed = []
 
-    monkeypatch.setattr(ir.ants, "image_write", image_write)
+    monkeypatch.setattr(ir.sitk_io, "write_image", image_write)
     monkeypatch.setattr(ir.progress_bar, "get_progress_bar", MagicMock(return_value=_PB()))
     monkeypatch.setattr("mist.utils.console.console.print", lambda msg: printed.append(str(msg)))
     monkeypatch.setattr(ir, "predict_single_example", predict_single)
@@ -381,7 +386,7 @@ def test_predict_single_example_no_remap_no_crop(
     mock_mist_config,
     monkeypatch,
 ):
-    """No remap when labels match and no crop; returns uint8 ANTs-like image."""
+    """No remap when labels match and no crop; returns a uint8 sitk image."""
     cfg = copy.deepcopy(mock_mist_config)
     cfg["model"]["params"]["out_channels"] = 2
     cfg["preprocessing"]["crop_to_foreground"] = False
@@ -389,37 +394,35 @@ def test_predict_single_example_no_remap_no_crop(
 
     monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
 
-    mocked_ants_img = _DummyANTsImage(np.ones((2, 2, 2), dtype=np.int64))
-    mock_back_to_original_space.return_value = mocked_ants_img
+    mocked_img = _make_sitk_image(np.ones((2, 2, 2), dtype=np.int64))
+    mock_back_to_original_space.return_value = mocked_img
 
     pre_img = torch.randn(1, 1, 2, 2, 2)
-    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+    orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64))
 
     out, probs = ir.predict_single_example(
         preprocessed_image=pre_img,
-        original_ants_image=orig_ants,
+        original_image=orig_image,
         mist_configuration=cfg,
         predictor=_predictor_logits_two_class,
         foreground_bounding_box=None,
     )
 
     call_kwargs = mock_back_to_original_space.call_args.kwargs
-    assert call_kwargs["original_ants_image"] is orig_ants
+    assert call_kwargs["original_image"] is orig_image
     np.testing.assert_array_equal(call_kwargs["raw_prediction"], np.ones((2, 2, 2)))
     assert call_kwargs["training_labels"] == [0, 1]
     assert call_kwargs["foreground_bounding_box"] is None
-    assert isinstance(out, _DummyANTsImage)
-    assert out.astype_arg == "uint8"
-    assert out.numpy().dtype == np.uint8
+    assert isinstance(out, sitk.Image)
+    assert out.GetPixelID() == sitk.sitkUInt8
+    assert sitk_io.array_from_image(out).dtype == np.uint8
     assert probs is None
 
 
 @patch("mist.inference.inference_utils.remap_mask_labels")
 @patch("mist.inference.inference_utils.back_to_original_space")
 @patch("mist.preprocessing.preprocessing_utils.get_fg_mask_bbox")
-@patch("mist.preprocessing.preprocessing_utils.ants_to_sitk")
 def test_predict_single_example_with_crop_and_remap(
-    mock_ants_to_sitk,
     mock_get_fg_bbox,
     mock_back_to_original_space,
     mock_remap_labels,
@@ -434,44 +437,38 @@ def test_predict_single_example_with_crop_and_remap(
 
     monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
 
-    # ants_to_sitk is a local conversion shim in front of the now-mocked
-    # get_fg_mask_bbox (Stage 4 migrated it to take a SimpleITK image; this
-    # function is still fully ants-based, Stage 5, not yet migrated). Pass
-    # through unchanged so get_fg_mask_bbox is still asserted to have been
-    # called with orig_ants itself below.
-    mock_ants_to_sitk.side_effect = lambda img: img
-
     bbox = {"x0": 0, "x1": 1, "y0": 0, "y1": 1, "z0": 0, "z1": 1}
     mock_get_fg_bbox.return_value = bbox
 
-    ants_after_restore = _DummyANTsImage(np.full((2, 2, 2), 1, dtype=np.int64))
-    mock_back_to_original_space.return_value = ants_after_restore
+    restored_image = _make_sitk_image(np.full((2, 2, 2), 1, dtype=np.int64))
+    mock_back_to_original_space.return_value = restored_image
 
     remapped = np.full((2, 2, 2), 2, dtype=np.int64)
     mock_remap_labels.return_value = remapped
 
     pre_img = torch.randn(1, 1, 2, 2, 2)
-    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+    orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64))
 
     out, probs = ir.predict_single_example(
         preprocessed_image=pre_img,
-        original_ants_image=orig_ants,
+        original_image=orig_image,
         mist_configuration=cfg,
         predictor=_predictor_logits_two_class,
         foreground_bounding_box=None,
     )
 
-    mock_get_fg_bbox.assert_called_once_with(orig_ants)
+    mock_get_fg_bbox.assert_called_once_with(orig_image)
     call_kwargs = mock_back_to_original_space.call_args.kwargs
     assert call_kwargs["foreground_bounding_box"] == bbox
     assert call_kwargs["training_labels"] == [0, 1]
     mock_remap_labels.assert_called_once()
-    np.testing.assert_array_equal(mock_remap_labels.call_args.args[0], ants_after_restore.numpy())
+    np.testing.assert_array_equal(
+        mock_remap_labels.call_args.args[0], sitk_io.array_from_image(restored_image)
+    )
     assert mock_remap_labels.call_args.args[1] == [0, 2]
-    assert isinstance(out, _DummyANTsImage)
-    assert orig_ants.new_like_last_data is not None
-    np.testing.assert_array_equal(orig_ants.new_like_last_data, remapped)
-    assert out.astype_arg == "uint8"
+    assert isinstance(out, sitk.Image)
+    np.testing.assert_array_equal(sitk_io.array_from_image(out), remapped)
+    assert out.GetPixelID() == sitk.sitkUInt8
     assert probs is None
 
 
@@ -497,11 +494,12 @@ def test_predict_single_example_skip_true_bypasses_spatial_restore(
     monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
 
     pre_img = torch.randn(1, 1, 2, 2, 2)
-    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+    origin = (5.0, 6.0, 7.0)
+    orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64), origin=origin)
 
     out, probs = ir.predict_single_example(
         preprocessed_image=pre_img,
-        original_ants_image=orig_ants,
+        original_image=orig_image,
         mist_configuration=cfg,
         predictor=_predictor_logits_two_class,
         foreground_bounding_box=None,
@@ -510,9 +508,10 @@ def test_predict_single_example_skip_true_bypasses_spatial_restore(
     # back_to_original_space must NOT be called when skip=True.
     mock_back_to_original_space.assert_not_called()
 
-    # new_image_like must have been called to copy the original header.
-    assert orig_ants.new_like_last_data is not None
-    assert out.astype_arg == "uint8"
+    # new_image_like must have been called to copy the original header
+    # (origin) directly onto the raw argmax result.
+    assert out.GetOrigin() == pytest.approx(origin)
+    assert out.GetPixelID() == sitk.sitkUInt8
     assert probs is None
 
 
@@ -532,27 +531,27 @@ def test_predict_single_example_output_probs_no_crop_no_skip(
 
     monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
 
-    mock_back_to_original_space.return_value = _DummyANTsImage(np.ones((2, 2, 2), dtype=np.int64))
-    probs_sentinel = _DummyANTsImage()
+    mock_back_to_original_space.return_value = _make_sitk_image(np.ones((2, 2, 2), dtype=np.int64))
+    probs_sentinel = object()
     mock_probs_back_to_original_space.return_value = probs_sentinel
 
     pre_img = torch.randn(1, 1, 2, 2, 2)
-    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+    orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64))
 
     out, probs = ir.predict_single_example(
         preprocessed_image=pre_img,
-        original_ants_image=orig_ants,
+        original_image=orig_image,
         mist_configuration=cfg,
         predictor=_predictor_logits_two_class,
         foreground_bounding_box=None,
         output_probs=True,
     )
 
-    assert isinstance(out, _DummyANTsImage)
+    assert isinstance(out, sitk.Image)
     assert probs is probs_sentinel
     call_kwargs = mock_probs_back_to_original_space.call_args.kwargs
     assert call_kwargs["raw_probabilities"].shape == (2, 2, 2, 2)
-    assert call_kwargs["original_ants_image"] is orig_ants
+    assert call_kwargs["original_image"] is orig_image
     assert call_kwargs["foreground_bounding_box"] is None
 
 
@@ -567,15 +566,15 @@ def test_predict_single_example_output_probs_false_returns_none(mock_mist_config
     monkeypatch.setattr(
         ir.inference_utils,
         "back_to_original_space",
-        MagicMock(return_value=_DummyANTsImage(np.ones((2, 2, 2), dtype=np.int64))),
+        MagicMock(return_value=_make_sitk_image(np.ones((2, 2, 2), dtype=np.int64))),
     )
 
     pre_img = torch.randn(1, 1, 2, 2, 2)
-    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+    orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64))
 
     _, probs = ir.predict_single_example(
         preprocessed_image=pre_img,
-        original_ants_image=orig_ants,
+        original_image=orig_image,
         mist_configuration=cfg,
         predictor=_predictor_logits_two_class,
         foreground_bounding_box=None,
@@ -595,14 +594,14 @@ def test_predict_single_example_skip_true_output_probs(mock_mist_config, monkeyp
     monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
 
     merge_channels_mock = MagicMock(return_value="merged_sentinel")
-    monkeypatch.setattr(ir.ants, "merge_channels", merge_channels_mock)
+    monkeypatch.setattr(ir.sitk_io, "merge_channels", merge_channels_mock)
 
     pre_img = torch.randn(1, 1, 2, 2, 2)
-    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+    orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64))
 
     _, probs = ir.predict_single_example(
         preprocessed_image=pre_img,
-        original_ants_image=orig_ants,
+        original_image=orig_image,
         mist_configuration=cfg,
         predictor=_predictor_logits_two_class,
         foreground_bounding_box=None,
@@ -613,7 +612,7 @@ def test_predict_single_example_skip_true_output_probs(mock_mist_config, monkeyp
     merge_channels_mock.assert_called_once()
     channel_images = merge_channels_mock.call_args.args[0]
     assert len(channel_images) == 2
-    assert all(isinstance(img, _DummyANTsImage) for img in channel_images)
+    assert all(isinstance(img, sitk.Image) for img in channel_images)
 
 
 # ==================
@@ -759,8 +758,8 @@ def test_infer_from_dataframe_output_probs_writes_probability_volume(
     infer_runner, mock_mist_config
 ):
     """output_probs=True writes discrete/ and probabilities/ subdirectories."""
-    prob_image = _DummyANTsImage()
-    infer_runner.predict_single.return_value = (_DummyANTsImage(), prob_image)
+    prob_image = _DummyImage()
+    infer_runner.predict_single.return_value = (_DummyImage(), prob_image)
 
     infer_runner.run(cfg=copy.deepcopy(mock_mist_config), output_probs=True)
 
@@ -795,7 +794,7 @@ def test_infer_from_dataframe_postprocess_applied_and_messages_printed(
     with patch("mist.inference.inference_runners.Postprocessor") as MockPP:
         pp = MagicMock()
         pp.apply_strategy_to_single_example.return_value = (
-            _DummyANTsImage(),
+            _DummyImage(),
             ["warn: something"],
         )
         MockPP.return_value = pp
@@ -827,7 +826,7 @@ def test_infer_from_dataframe_logs_errors_and_continues_then_summarizes(
             {"id": "pB", "image": str(tmp_path / "images" / "pB.nii.gz")},
         ]
     )
-    infer_runner.predict_single.side_effect = [RuntimeError("boom"), (_DummyANTsImage(), None)]
+    infer_runner.predict_single.side_effect = [RuntimeError("boom"), (_DummyImage(), None)]
 
     infer_runner.run(df=df)
 

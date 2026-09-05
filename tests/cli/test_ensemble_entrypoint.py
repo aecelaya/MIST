@@ -2,7 +2,6 @@
 
 import json
 
-import ants
 import numpy as np
 import pytest
 import SimpleITK as sitk
@@ -40,9 +39,9 @@ def _write_probability_volume(
     path, channel_values: list[float], shape: tuple[int, int, int] = (4, 4, 4)
 ) -> None:
     """Write a multi-component NIfTI with constant per-channel probabilities."""
-    channels = [ants.from_numpy(np.full(shape, v, dtype=np.float32)) for v in channel_values]
-    merged = ants.merge_channels(channels)
-    ants.image_write(merged, str(path))
+    channels = [sitk.GetImageFromArray(np.full(shape, v, dtype=np.float32)) for v in channel_values]
+    merged = sitk.Compose(channels)
+    sitk.WriteImage(merged, str(path))
 
 
 def _make_prob_dir(tmp_path, name: str, patient_channel_values: dict[str, list[float]]) -> str:
@@ -425,7 +424,7 @@ def test_run_ensemble_probabilities_mode_produces_expected_labels(tmp_path):
     )
     run_ensemble(ns)
 
-    result = ants.image_read(str(tmp_path / "out" / "p1.nii.gz")).numpy()
+    result = sitk.GetArrayFromImage(sitk.ReadImage(str(tmp_path / "out" / "p1.nii.gz")))
     assert np.all(result == 2)
 
 

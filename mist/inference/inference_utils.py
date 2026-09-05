@@ -4,16 +4,17 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import ants
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+import SimpleITK as sitk
 import torch
 
 from mist.analyze_data import analyzer_utils
 from mist.inference.inference_constants import InferenceConstants as ic
 from mist.models import model_loader
-from mist.preprocessing import preprocess, preprocessing_utils
+from mist.preprocessing import preprocess
+from mist.utils import sitk_io
 
 
 def get_default_device() -> str:
@@ -22,46 +23,42 @@ def get_default_device() -> str:
 
 
 def decrop_from_fg(
-    ants_image: ants.core.ants_image.ANTsImage,
+    image: sitk.Image,
     fg_bbox: dict[str, int],
-) -> ants.core.ants_image.ANTsImage:
+) -> sitk.Image:
     """Decrop image to original size using foreground bounding box.
 
     Args:
-        ants_image: ANTs image object.
+        image: SimpleITK image object.
         fg_bbox: Foreground bounding box.
 
     Returns:
-        Decropped ANTs image object.
+        Decropped SimpleITK image object.
     """
     # The bounding box indices are inclusive, so the right padding along each
     # axis is: og_size - end - 1. Equivalently: (og_size - end) - 1. The -1
     # accounts for the fact that `x_end` is the last included voxel index,
     # not a one-past-the-end pointer.
-    padding = [
-        (
-            np.max([0, fg_bbox["x_start"]]),
-            np.max([0, fg_bbox["x_og_size"] - fg_bbox["x_end"]]) - 1,
-        ),
-        (
-            np.max([0, fg_bbox["y_start"]]),
-            np.max([0, fg_bbox["y_og_size"] - fg_bbox["y_end"]]) - 1,
-        ),
-        (
-            np.max([0, fg_bbox["z_start"]]),
-            np.max([0, fg_bbox["z_og_size"] - fg_bbox["z_end"]]) - 1,
-        ),
+    lower_padding = [
+        np.max([0, fg_bbox["x_start"]]),
+        np.max([0, fg_bbox["y_start"]]),
+        np.max([0, fg_bbox["z_start"]]),
     ]
-    return ants.pad_image(ants_image, pad_width=padding, return_padvals=False)
+    upper_padding = [
+        np.max([0, fg_bbox["x_og_size"] - fg_bbox["x_end"]]) - 1,
+        np.max([0, fg_bbox["y_og_size"] - fg_bbox["y_end"]]) - 1,
+        np.max([0, fg_bbox["z_og_size"] - fg_bbox["z_end"]]) - 1,
+    ]
+    return sitk_io.pad_image(image, lower_padding, upper_padding, constant=0.0)
 
 
 def back_to_original_space(
     raw_prediction: npt.NDArray[Any],
-    original_ants_image: ants.core.ants_image.ANTsImage,
+    original_image: sitk.Image,
     target_spacing: tuple[float, float, float],
     training_labels: list[int],
     foreground_bounding_box: dict[str, Any] | None,
-) -> ants.core.ants_image.ANTsImage:
+) -> sitk.Image:
     """Place 3D prediction back into original image space.
 
     All predictions are natively in RAI orientation, possibly cropped to the
@@ -73,7 +70,7 @@ def back_to_original_space(
     Args:
         raw_prediction: The prediction to place back into the original image
             space. This should be a numpy array.
-        original_ants_image: The original ANTs image.
+        original_image: The original SimpleITK image.
         target_spacing: The spacing used for training. This can be found in the
             MIST configuration JSON file.
         training_labels: List of training labels in the dataset. This is used to
@@ -95,16 +92,14 @@ def back_to_original_space(
             appropriately pad the prediction back to the original size.
 
     Returns:
-        The prediction in the original image space. This will be an ANTs image.
+        The prediction in the original image space, as a SimpleITK image.
     """
-    # Convert prediction to ANTs image.
-    prediction: ants.core.ants_image.ANTsImage = ants.from_numpy(
-        data=raw_prediction, spacing=target_spacing
-    )
+    # Convert prediction to a SimpleITK image.
+    prediction = sitk_io.image_from_array(raw_prediction, spacing=target_spacing)
 
     # Reorient prediction.
-    prediction = ants.reorient_image2(prediction, ants.get_orientation(original_ants_image))
-    prediction.set_direction(original_ants_image.direction)
+    prediction = sitk_io.reorient_image(prediction, sitk_io.get_orientation(original_image))
+    prediction.SetDirection(original_image.GetDirection())
 
     # Enforce size for cropped images.
     if foreground_bounding_box is not None:
@@ -116,20 +111,15 @@ def back_to_original_space(
         ]
     else:
         # Otherwise, use the original image size.
-        new_size = original_ants_image.shape
+        new_size = original_image.GetSize()
 
-    # Resample prediction to original image space. resample_mask now expects
-    # a SimpleITK image (Stage 4 of the ANTs -> SimpleITK migration); this
-    # whole function is still fully ants-based (Stage 5, not yet migrated),
-    # so convert locally via the still-alive ants_to_sitk/sitk_to_ants glue
-    # rather than migrating this file's ants usage wholesale here.
+    # Resample prediction to original image space.
     prediction = preprocess.resample_mask(
-        preprocessing_utils.ants_to_sitk(prediction),
+        prediction,
         labels=training_labels,
-        target_spacing=original_ants_image.spacing,
+        target_spacing=original_image.GetSpacing(),
         new_size=np.array(new_size, dtype="int").tolist(),
     )
-    prediction = preprocessing_utils.sitk_to_ants(prediction)
 
     # Appropriately pad back to original size if necessary.
     if foreground_bounding_box is not None:
@@ -138,17 +128,16 @@ def back_to_original_space(
     # Copy header from original image onto the prediction so they match. This
     # will take care of other details in the header like the origin and the
     # image bounding box.
-    # ANTs stubs don't annotate new_image_like's return type.
-    prediction = original_ants_image.new_image_like(prediction.numpy())  # type: ignore[no-any-return]  # noqa: E501
+    prediction = sitk_io.new_image_like(original_image, sitk_io.array_from_image(prediction))
     return prediction
 
 
 def probabilities_back_to_original_space(
     raw_probabilities: npt.NDArray[Any],
-    original_ants_image: ants.core.ants_image.ANTsImage,
+    original_image: sitk.Image,
     target_spacing: tuple[float, float, float],
     foreground_bounding_box: dict[str, Any] | None,
-) -> ants.core.ants_image.ANTsImage:
+) -> sitk.Image:
     """Place a per-class probability volume back into original image space.
 
     Mirrors back_to_original_space, but restores a continuous, multi-channel
@@ -162,7 +151,7 @@ def probabilities_back_to_original_space(
     Args:
         raw_probabilities: The per-class probability volume to place back
             into the original image space, of shape (C, D, H, W).
-        original_ants_image: The original ANTs image.
+        original_image: The original SimpleITK image.
         target_spacing: The spacing used for training. This can be found in
             the MIST configuration JSON file.
         foreground_bounding_box: The foreground bounding box. If we crop
@@ -170,9 +159,9 @@ def probabilities_back_to_original_space(
             original size. See back_to_original_space for the expected keys.
 
     Returns:
-        A multi-component ANTs image of shape (D, H, W, C), in the original
-        image's space, spacing, orientation, and header, with channels in
-        the same order as raw_probabilities.
+        A multi-component SimpleITK image of shape (D, H, W, C), in the
+        original image's space, spacing, orientation, and header, with
+        channels in the same order as raw_probabilities.
     """
     # Enforce size for cropped images, mirroring back_to_original_space.
     if foreground_bounding_box is not None:
@@ -182,29 +171,25 @@ def probabilities_back_to_original_space(
             foreground_bounding_box["z_end"] - foreground_bounding_box["z_start"] + 1,
         ]
     else:
-        new_size = original_ants_image.shape
+        new_size = original_image.GetSize()
 
     restored_channels = []
     for channel in raw_probabilities:
-        channel_image: ants.core.ants_image.ANTsImage = ants.from_numpy(
-            data=channel, spacing=target_spacing
-        )
+        channel_image = sitk_io.image_from_array(channel, spacing=target_spacing)
 
         # Reorient the channel to match the original image's orientation.
-        channel_image = ants.reorient_image2(
-            channel_image, ants.get_orientation(original_ants_image)
+        channel_image = sitk_io.reorient_image(
+            channel_image, sitk_io.get_orientation(original_image)
         )
-        channel_image.set_direction(original_ants_image.direction)
+        channel_image.SetDirection(original_image.GetDirection())
 
         # Resample to the original image's spacing using continuous
-        # interpolation. resample_image now expects a SimpleITK image (see
-        # the comment in back_to_original_space above); convert locally.
+        # interpolation.
         channel_image = preprocess.resample_image(
-            preprocessing_utils.ants_to_sitk(channel_image),
-            target_spacing=original_ants_image.spacing,
+            channel_image,
+            target_spacing=original_image.GetSpacing(),
             new_size=np.array(new_size, dtype="int").tolist(),
         )
-        channel_image = preprocessing_utils.sitk_to_ants(channel_image)
 
         # Appropriately pad back to original size if necessary.
         if foreground_bounding_box is not None:
@@ -214,10 +199,10 @@ def probabilities_back_to_original_space(
 
     # Merge the restored channels into one multi-component image and copy
     # the original image's header (spacing, origin, direction) onto it.
-    probabilities: ants.core.ants_image.ANTsImage = ants.merge_channels(restored_channels)
-    probabilities.set_spacing(original_ants_image.spacing)
-    probabilities.set_origin(original_ants_image.origin)
-    probabilities.set_direction(original_ants_image.direction)
+    probabilities = sitk_io.merge_channels(restored_channels)
+    probabilities.SetSpacing(original_image.GetSpacing())
+    probabilities.SetOrigin(original_image.GetOrigin())
+    probabilities.SetDirection(original_image.GetDirection())
     return probabilities
 
 
@@ -295,7 +280,7 @@ def remap_mask_labels(
 
 def validate_inference_images(
     patient_dict: dict[str, str],
-) -> tuple[ants.core.ants_image.ANTsImage, list[str]]:
+) -> tuple[sitk.Image, list[str]]:
     """Validate all images listed in the patient dictionary.
 
     Ensures that each image file exists, is a valid 3D image, and that all
@@ -306,8 +291,8 @@ def validate_inference_images(
             like 'id', 'mask', or 'fold' (ignored).
 
     Returns:
-        anchor_image: The anchor image (first image in the list) as an ANTs
-            image if all checks pass.
+        anchor_image: The anchor image (first image in the list) as a
+            SimpleITK image if all checks pass.
         image_paths: A list of image paths for further processing if all
             checks pass.
 
@@ -330,15 +315,15 @@ def validate_inference_images(
 
     # Load anchor image. Check if it is 3D before proceeding.
     anchor_filename = Path(image_paths[0]).name
-    anchor_header = ants.image_header_info(image_paths[0])
+    anchor_header = sitk_io.read_image_header(image_paths[0])
     if not analyzer_utils.is_image_3d(anchor_header):
         raise ValueError(f"Anchor image is not 3D: {anchor_filename}")
-    anchor_image = ants.image_read(image_paths[0])
+    anchor_image = sitk_io.read_image(image_paths[0])
 
     # Check header compatibility for additional modalities.
     for image_path in image_paths[1:]:
         current_filename = Path(image_path).name
-        current_header = ants.image_header_info(image_path)
+        current_header = sitk_io.read_image_header(image_path)
         if not analyzer_utils.is_image_3d(current_header):
             raise ValueError(f"Image is not 3D: {current_filename}")
 

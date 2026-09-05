@@ -9,16 +9,16 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-import ants
 import numpy as np
 import pandas as pd
+import SimpleITK as sitk
 import torch
 
 from mist.inference import inference_utils
 from mist.inference.inference_constants import InferenceConstants as ic
 from mist.inference.predictor import Predictor
 from mist.models import model_loader
-from mist.utils import io, progress_bar
+from mist.utils import io, progress_bar, sitk_io
 from mist.utils.console import print_error, print_section_header, print_success
 
 # DALI is a training-only dependency (nvidia-dali-cuda120). Guard the import
@@ -82,17 +82,17 @@ def _build_predictor(
 
 def predict_single_example(
     preprocessed_image: torch.Tensor,
-    original_ants_image: ants.core.ants_image.ANTsImage,
+    original_image: sitk.Image,
     mist_configuration: dict[str, Any],
     predictor: Predictor,
     foreground_bounding_box: dict[str, int] | None = None,
     output_probs: bool = False,
-) -> tuple[ants.core.ants_image.ANTsImage, ants.core.ants_image.ANTsImage | None]:
+) -> tuple[sitk.Image, sitk.Image | None]:
     """Predict on a single example using a Predictor instance.
 
     Args:
         preprocessed_image: Input image as a PyTorch tensor (1, C, D, H, W).
-        original_ants_image: Original ANTs image for spatial restoration.
+        original_image: Original SimpleITK image for spatial restoration.
         mist_configuration: Configuration dictionary with MIST parameters.
         predictor: A callable Predictor instance.
         foreground_bounding_box: Optional crop bounding box.
@@ -101,10 +101,10 @@ def predict_single_example(
             discrete prediction.
 
     Returns:
-        A tuple of (discrete prediction, probability prediction), both ANTs
-        images in original spatial space. The probability prediction is a
-        multi-component image with one component per class, or None if
-        output_probs is False.
+        A tuple of (discrete prediction, probability prediction), both
+        SimpleITK images in original spatial space. The probability
+        prediction is a multi-component image with one component per class,
+        or None if output_probs is False.
     """
     # Training vs original labels.
     n_classes = mist_configuration["model"]["params"]["out_channels"]
@@ -131,11 +131,11 @@ def predict_single_example(
         # skip=True: images were read as-is with no spatial transforms applied.
         # The prediction is already in the original image's voxel space, so
         # just copy the original header directly — no reorient or resample.
-        prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # noqa: E501
+        prediction = sitk_io.new_image_like(original_image, prediction)
         if probability_volume is not None:
-            probability_prediction = ants.merge_channels(
+            probability_prediction = sitk_io.merge_channels(
                 [
-                    original_ants_image.new_image_like(data=probability_volume[c])
+                    sitk_io.new_image_like(original_image, probability_volume[c])
                     for c in range(probability_volume.shape[0])
                 ]
             )
@@ -147,21 +147,14 @@ def predict_single_example(
             mist_configuration["preprocessing"]["crop_to_foreground"]
             and foreground_bounding_box is None
         ):
-            # get_fg_mask_bbox now expects a SimpleITK image (Stage 4 of the
-            # ANTs -> SimpleITK migration); this whole function is still
-            # fully ants-based (Stage 5, not yet migrated), so convert
-            # locally via the still-alive ants_to_sitk glue rather than
-            # migrating this file's ants usage wholesale here.
-            foreground_bounding_box = preprocessing_utils.get_fg_mask_bbox(
-                preprocessing_utils.ants_to_sitk(original_ants_image)
-            )
+            foreground_bounding_box = preprocessing_utils.get_fg_mask_bbox(original_image)
 
         prediction_spacing = tuple(mist_configuration["spatial_config"]["target_spacing"])
 
         # Restore original spacing, orientation, and header.
         prediction = inference_utils.back_to_original_space(
             raw_prediction=prediction,
-            original_ants_image=original_ants_image,
+            original_image=original_image,
             target_spacing=prediction_spacing,
             training_labels=training_labels,
             foreground_bounding_box=foreground_bounding_box,
@@ -170,7 +163,7 @@ def predict_single_example(
         if probability_volume is not None:
             probability_prediction = inference_utils.probabilities_back_to_original_space(
                 raw_probabilities=probability_volume,
-                original_ants_image=original_ants_image,
+                original_image=original_image,
                 target_spacing=prediction_spacing,
                 foreground_bounding_box=foreground_bounding_box,
             )
@@ -179,11 +172,11 @@ def predict_single_example(
 
     # Remap labels to match original dataset.
     if training_labels != original_labels:
-        prediction = inference_utils.remap_mask_labels(prediction.numpy(), original_labels)
-        prediction = (
-            original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # noqa: E501
+        prediction = inference_utils.remap_mask_labels(
+            sitk_io.array_from_image(prediction), original_labels
         )
-    return prediction.astype("uint8"), probability_prediction
+        prediction = sitk_io.new_image_like(original_image, prediction)
+    return sitk.Cast(prediction, sitk.sitkUInt8), probability_prediction
 
 
 def test_on_fold(
@@ -271,13 +264,13 @@ def test_on_fold(
             filename = str(output_directory / f"{patient_id}.nii.gz")
             try:
                 # Get image paths from patient dictionary. Load the original
-                # image using ANTs. If this is a multi-modality image, we need
-                # load the first image in the list. MIST already checks that
-                # the images are the same size and spacing.
+                # image. If this is a multi-modality image, we need load the
+                # first image in the list. MIST already checks that the
+                # images are the same size and spacing.
                 image_paths = [
                     v for k, v in patient.items() if k not in ic.PATIENT_DF_IGNORED_COLUMNS
                 ]
-                original_ants_image = ants.image_read(image_paths[0])
+                original_image = sitk_io.read_image(image_paths[0])
 
                 # DALI loader is assumed to yield batches in the same order as
                 # test_df. This is enforced upstream and is not checked here.
@@ -299,7 +292,7 @@ def test_on_fold(
                 # Perform prediction and restoration to original space.
                 prediction, _ = predict_single_example(
                     preprocessed_image=preprocessed_image,
-                    original_ants_image=original_ants_image,
+                    original_image=original_image,
                     mist_configuration=config,
                     predictor=predictor,
                     foreground_bounding_box=foreground_bounding_box,
@@ -308,7 +301,7 @@ def test_on_fold(
                 error_messages.append(f"Prediction failed for {patient_id}: {str(e)}")
             else:
                 # Write prediction as .nii.gz file.
-                ants.image_write(prediction, filename)
+                sitk_io.write_image(prediction, filename)
             finally:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -458,7 +451,7 @@ def infer_from_dataframe(
                 # Perform prediction and restoration to original space.
                 prediction, probability_prediction = predict_single_example(
                     preprocessed_image=preprocessed_image,
-                    original_ants_image=anchor_image,
+                    original_image=anchor_image,
                     mist_configuration=mist_configuration,
                     predictor=predictor,
                     # preprocess_example returns Dict[str, Any]; value type is
@@ -487,9 +480,9 @@ def infer_from_dataframe(
                 continue
             else:
                 # Write prediction as .nii.gz file.
-                ants.image_write(prediction, prediction_filename)
+                sitk_io.write_image(prediction, prediction_filename)
                 if probability_prediction is not None:
-                    ants.image_write(
+                    sitk_io.write_image(
                         probability_prediction,
                         str(probabilities_output_directory / f"{patient_id}.nii.gz"),
                     )

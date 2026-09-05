@@ -5,8 +5,8 @@ import shutil
 from pathlib import Path
 from typing import cast
 
-import ants
 import numpy as np
+import SimpleITK as sitk
 from rich.table import Table
 
 from mist.postprocessing.postprocessing_utils import StrategyStep
@@ -206,26 +206,16 @@ class Postprocessor:
         console.print(table)
 
     def apply_strategy_to_single_example(
-        self, patient_id: str, mask: ants.core.ants_image.ANTsImage
-    ) -> tuple[ants.core.ants_image.ANTsImage, list[str]]:
-        """Apply all transforms in the strategy to a single ANTsImage mask.
-
-        Deliberately still ants-based, unlike the rest of this module (Stage 2
-        of the ANTs -> SimpleITK migration): this method's only caller is
-        mist/inference/inference_runners.py's mist_predict --postprocess-strategy
-        path, which is still fully ants-based (Stage 5, not yet migrated) and
-        writes this method's return value straight out via ants.image_write.
-        Migrating this method in isolation would mean bridging ants<->sitk at
-        this one call site ahead of Stage 5 actually migrating
-        inference_runners.py, rather than that stage doing it consistently
-        for the whole file. Migrate this method together with Stage 5.
+        self, patient_id: str, mask: sitk.Image
+    ) -> tuple[sitk.Image, list[str]]:
+        """Apply all transforms in the strategy to a single mask image.
 
         Args:
             patient_id: Unique identifier for the patient or example.
-            mask: ANTsImage object to which transforms will be applied.
+            mask: SimpleITK image to which transforms will be applied.
 
         Returns:
-            A tuple of the transformed ANTsImage and a list of messages.
+            A tuple of the transformed image and a list of messages.
         """
         messages: list[str] = []
 
@@ -239,7 +229,7 @@ class Postprocessor:
             try:
                 transform_fn = get_transform(transform_name)
                 updated_npy = transform_fn(
-                    mask.numpy().astype(np.uint8),
+                    sitk_io.array_from_image(mask).astype(np.uint8),
                     labels_list=label_group,
                     per_label=per_label_flag,
                     **kwargs,
@@ -247,7 +237,7 @@ class Postprocessor:
             except ValueError as e:
                 messages.append(f"[red]Error applying {transform_name} to {patient_id}: {e}[/red]")
             else:
-                mask = mask.new_image_like(updated_npy)  # type: ignore
+                mask = sitk_io.new_image_like(mask, updated_npy)
         return mask, messages
 
     def run(
