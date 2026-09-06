@@ -85,6 +85,14 @@ def resolve_data_loader(requested: str) -> str:
     ``cpu_rocm_support_plan.md``). An explicit, non-``"auto"`` value always
     passes through unchanged.
 
+    On CUDA, "dali" is only returned if it's actually *installed* (i.e.
+    registered in ``mist.data_loading.data_loader_registry``) — a CUDA
+    machine that skipped ``pip install "mist-medical[train-cuda]"`` still
+    detects as CUDA hardware, but has no working "dali" entry to resolve to.
+    Rather than fail training outright over a plausible installation
+    mistake, this warns and falls back to "generic" instead, the same way
+    ``resolve_amp`` warns and downgrades rather than raising.
+
     Args:
         requested: The configured loader, or ``"auto"`` to detect one.
 
@@ -94,7 +102,27 @@ def resolve_data_loader(requested: str) -> str:
     """
     if requested != "auto":
         return requested
-    return "dali" if get_accelerator_type() == "cuda" else "generic"
+    if get_accelerator_type() != "cuda":
+        return "generic"
+
+    # Local import: avoids a hardware.py <-> mist.data_loading import cycle
+    # (mist.data_loading's own __init__.py imports generic_loader, which
+    # imports this module). Safe here regardless, since by the time any
+    # real training code calls this, mist.data_loading is already fully
+    # imported.
+    from mist.data_loading import data_loader_registry
+
+    if "dali" in data_loader_registry.list_registered_data_loaders():
+        return "dali"
+
+    warnings.warn(
+        "CUDA hardware was detected, but nvidia-dali-cuda120 is not "
+        "installed, so the DALI-accelerated data loader is unavailable. "
+        "Falling back to the generic data loader (slower, but fully "
+        'functional). Install it with: pip install "mist-medical[train-cuda]".',
+        stacklevel=2,
+    )
+    return "generic"
 
 
 def bf16_supported() -> bool:

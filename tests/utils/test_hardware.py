@@ -55,15 +55,49 @@ def test_resolve_communication_backend(monkeypatch, requested, accelerator, expe
     ("requested", "accelerator", "expected"),
     [
         ("auto", "cpu", "generic"),
-        ("auto", "cuda", "dali"),
         ("auto", "rocm", "generic"),
         ("generic", "cuda", "generic"),
+        ("dali", "cpu", "dali"),  # An explicit value always passes through untouched.
     ],
 )
 def test_resolve_data_loader(monkeypatch, requested, accelerator, expected) -> None:
-    """ "auto" resolves per accelerator; any other value passes through."""
+    """ "auto" resolves per accelerator; any other value passes through.
+
+    Cases that would actually reach the CUDA/"dali"-registered branch are
+    covered by the two dedicated tests below instead, since that branch
+    depends on data_loader_registry state, not just the accelerator.
+    """
     monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
     assert hardware.resolve_data_loader(requested) == expected
+
+
+def test_resolve_data_loader_cuda_with_dali_registered(monkeypatch) -> None:
+    """ "auto" resolves to "dali" on CUDA when it's actually installed."""
+    from mist.data_loading import data_loader_registry
+
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
+    monkeypatch.setattr(
+        data_loader_registry, "list_registered_data_loaders", lambda: ["dali", "generic"]
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert hardware.resolve_data_loader("auto") == "dali"
+
+
+def test_resolve_data_loader_cuda_without_dali_warns_and_falls_back(monkeypatch) -> None:
+    """ "auto" on CUDA without DALI installed warns and falls back to "generic".
+
+    Regression guard: a CUDA machine that skipped `pip install
+    "mist-medical[train-cuda]"` used to hit a ValueError deep inside
+    build_dataloaders() ("Data loader 'dali' is not registered") instead of
+    training on the generic loader with a clear warning.
+    """
+    from mist.data_loading import data_loader_registry
+
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
+    monkeypatch.setattr(data_loader_registry, "list_registered_data_loaders", lambda: ["generic"])
+    with pytest.warns(UserWarning, match="train-cuda"):
+        assert hardware.resolve_data_loader("auto") == "generic"
 
 
 @pytest.mark.parametrize(
