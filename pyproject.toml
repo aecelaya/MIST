@@ -42,6 +42,14 @@ dependencies = [
     "scikit-learn",
     "scikit-image",
     "tensorboard",
+    # monai.networks.nets.swin_unetr (MIST's swinunetr-* architectures) lazily
+    # imports einops at forward-pass time via monai's own optional_import --
+    # never a direct `import einops` anywhere in mist/ itself, which is why an
+    # earlier dependency audit (41e7c19) concluded it was unused and dropped
+    # it. That check only looked for direct imports in mist/'s own code and
+    # missed this transitive runtime requirement; a real `pip install
+    # mist-medical` + swinunetr forward pass fails without it.
+    "einops",
 ]
 
 [project.optional-dependencies]
