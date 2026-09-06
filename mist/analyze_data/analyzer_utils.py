@@ -550,6 +550,13 @@ def build_base_config() -> dict[str, Any]:
                 # training later moves to CPU-only hardware; edit it by hand
                 # (or re-run analyze) to pick up automatic resolution.
                 "communication_backend": "auto",
+                # Same resolve-and-persist story as communication_backend
+                # above: "auto" becomes "dali" on CUDA or "generic" elsewhere,
+                # resolved at train time via hardware.resolve_data_loader().
+                # No CLI flag -- a user who wants to force one edits this
+                # field directly, the same way patch_size or grad_clip_norm
+                # are hand-edited rather than exposed as flags.
+                "data_loader": "auto",
             },
         },
         "inference": {

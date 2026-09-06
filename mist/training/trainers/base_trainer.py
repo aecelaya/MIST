@@ -261,6 +261,13 @@ class BaseTrainer(ABC):
             hw["communication_backend"]
         )
 
+        # Resolve the data loader backend the same way: "auto" becomes
+        # "dali" on CUDA or "generic" on ROCm/CPU, while an explicit value is
+        # left untouched. `.get(..., "auto")` tolerates a config.json written
+        # before this key existed at all, not just one that already says
+        # "auto" -- both are treated as "not yet resolved".
+        hw["data_loader"] = hardware.resolve_data_loader(hw.get("data_loader", "auto"))
+
         # Write the updated configuration to the config.json file.
         io.write_json_file(self.config_json, self.config)
 
@@ -349,16 +356,28 @@ class BaseTrainer(ABC):
             print_info("")
 
     def _update_num_gpus_in_config(self) -> None:
-        """Get the number of GPUs and add it to the configuration."""
-        # Fast, explicit CUDA checks.
-        if not torch.cuda.is_available():
-            raise ValueError(
-                "CUDA is not available. Ensure the CUDA toolkit/driver matches "
-                "your PyTorch build, and that you're running on a GPU host."
-            )
+        """Get the number of GPUs (CUDA/ROCm) and add it to the configuration.
 
-        # If CUDA is available, check the number of GPUs. If the number of GPUs
-        # is zero, raise an error.
+        CPU-only hardware has no GPU count to report: num_gpus is set to 0
+        there, rather than raising. Downstream batch-size math
+        (`max(1, num_gpus)`, just below) and `fit()`'s own CPU world_size
+        fallback already treat 0 the same as a single process -- see
+        `cpu_rocm_support_plan.md` Stage 4, which is where this CPU-hostile
+        unconditional raise was found and fixed (a real end-to-end CPU
+        training run hit it immediately -- Stage 0's coupling-site audit
+        missed this one).
+        """
+        if hardware.get_accelerator_type() == "cpu":
+            self.config["training"]["hardware"]["num_gpus"] = 0
+            io.write_json_file(self.config_json, self.config)
+            return
+
+        # CUDA/ROCm: torch.cuda.is_available() is already known True here --
+        # that's exactly what makes get_accelerator_type() return something
+        # other than "cpu" -- so device_count() is meaningful. A count of 0
+        # despite is_available() being True would mean torch itself is
+        # reporting an inconsistent state (e.g. a driver/container
+        # misconfiguration), which is still worth a clear error.
         num_gpus = torch.cuda.device_count()
         if num_gpus <= 0:
             raise ValueError(
@@ -366,8 +385,6 @@ class BaseTrainer(ABC):
                 "Check CUDA_VISIBLE_DEVICES or container runtime GPU flags"
             )
 
-        # If there are GPUs available, update the configuration with the number
-        # of GPUs.
         self.config["training"]["hardware"]["num_gpus"] = num_gpus
         io.write_json_file(self.config_json, self.config)
 
@@ -552,10 +569,17 @@ class BaseTrainer(ABC):
         if use_ddp:
             model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
-        # Send model to device.
-        model.to(torch.device(f"cuda:{rank}"))
+        # Send model to device. Found unconditionally hardcoded to "cuda:
+        # <rank>" during Stage 4 of cpu_rocm_support_plan.md, when a real
+        # end-to-end CPU training run hit it immediately -- Stage 0's
+        # coupling-site audit missed this one.
+        model.to(hardware.get_device_for_rank(rank))
 
-        # Set up model for distributed data parallel training.
+        # Set up model for distributed data parallel training. device_ids
+        # only makes sense for a CUDA/ROCm rank; this is unreachable on
+        # CPU-only hardware today since fit() forces world_size (and so
+        # use_ddp) to False there -- multi-process CPU training is out of
+        # scope for now (cpu_rocm_support_plan.md Stage 1).
         if use_ddp:
             model = DDP(model, device_ids=[rank])
 
@@ -767,8 +791,12 @@ class BaseTrainer(ABC):
             # Path and name for best model for this fold.
             model_name = str(self.models_dir / f"fold_{fold}.pt")
 
-        # Stop training flag if we encounter nan or inf losses.
-        stop_training = torch.tensor([0], dtype=torch.int, device=f"cuda:{rank}")
+        # Stop training flag if we encounter nan or inf losses. Same
+        # accelerator-aware device as build_components()'s model.to() above
+        # -- also hardcoded to "cuda:<rank>" until Stage 4 found it.
+        stop_training = torch.tensor(
+            [0], dtype=torch.int, device=hardware.get_device_for_rank(rank)
+        )
 
         # Start training for the specified number of epochs.
         for epoch in range(state["epoch"], self.config["training"]["epochs"]):

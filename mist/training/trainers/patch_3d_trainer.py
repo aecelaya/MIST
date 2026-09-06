@@ -5,7 +5,7 @@ from typing import Any
 import torch
 from monai.inferers import sliding_window_inference
 
-from mist.data_loading import dali_loader
+from mist.data_loading import data_loader_registry
 from mist.training.trainers.base_trainer import BaseTrainer
 from mist.training.trainers.trainer_constants import TrainerConstants as constants
 from mist.utils import hardware
@@ -20,13 +20,16 @@ class Patch3DTrainer(BaseTrainer):
         rank: int,
         world_size: int,
     ) -> tuple[Any, Any]:
-        """Build DALI dataloaders for training and validation.
+        """Build dataloaders for training and validation.
 
-        This method constructs the DALI-based training and validation data
-        loaders for MIST's 3D patch training. It uses the provided fold
-        information to access the correct image and label paths, and applies
-        the necessary transformations and augmentations as specified in the
-        configuration.
+        Looks up the data loader backend resolved into
+        `training.hardware.data_loader` (`"dali"` or `"generic"` -- see
+        `hardware.resolve_data_loader()` and `cpu_rocm_support_plan.md`
+        Stage 4) in the registry and uses it to construct the training and
+        validation data loaders for MIST's 3D patch training. Both backends
+        share the exact same `.next()`/`.reset()` iterator contract (see
+        `dali_loader.py`/`generic_loader.py`), so nothing below this line
+        needs to know or care which one is active.
 
         Args:
             fold_data: Dictionary containing the following key-value pairs:
@@ -40,16 +43,19 @@ class Patch3DTrainer(BaseTrainer):
 
         Returns:
             Tuple containing:
-                - train_loader: DALI training data loader. This loader will
-                    yield batches of randomly sampled patches from the training
-                    images, applying the specified augmentations.
-                - val_loader: DALI validation data loader. This loader will
-                    yield full images for validation, without random sampling.
+                - train_loader: Training data loader. Yields batches of
+                    randomly sampled patches from the training images,
+                    applying the specified augmentations.
+                - val_loader: Validation data loader. Yields full images for
+                    validation, without random sampling.
         """
         # Build training loader.
         training = self.config["training"]
         train_labels = self.config["dataset_info"]["labels"][1:]
-        train_loader = dali_loader.get_training_dataset(
+        loader = data_loader_registry.get_data_loader_from_registry(
+            training["hardware"]["data_loader"]
+        )
+        train_loader = loader.get_training_dataset(
             extract_patches=True,
             image_paths=fold_data["train_images"],
             label_paths=fold_data["train_labels"],
@@ -72,7 +78,7 @@ class Patch3DTrainer(BaseTrainer):
         )
 
         # Build validation loader.
-        val_loader = dali_loader.get_validation_dataset(
+        val_loader = loader.get_validation_dataset(
             image_paths=fold_data["val_images"],
             label_paths=fold_data["val_labels"],
             seed=training["seed"],

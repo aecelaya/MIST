@@ -1,18 +1,30 @@
 """Stage 0 baseline for the CPU / AMD ROCm support plan.
 
-Captures what already works on CPU-only hardware today (analyze, preprocess)
-and what doesn't (mist_train can't even be *imported* without
-nvidia-dali-cuda120 installed), so later stages have a concrete baseline to
-diff their own progress against -- per cpu_rocm_support_plan.md's Stage 0.
+Originally captured what already worked on CPU-only hardware (analyze,
+preprocess) and what didn't (mist_train couldn't even be *imported* without
+nvidia-dali-cuda120 installed, because patch_3d_trainer.py had an unguarded
+top-level `from mist.data_loading import dali_loader`), so later stages had
+a concrete baseline to diff their own progress against -- per
+cpu_rocm_support_plan.md's Stage 0.
+
+Stage 4 fixed the import blocker: patch_3d_trainer.py (and
+inference_runners.py::test_on_fold, found along the way -- train_entry()
+calls it right after training) now go through a registry lookup
+(mist.data_loading.data_loader_registry) instead of importing dali_loader
+directly, so mist.cli.train_entrypoint imports fine without DALI installed.
+test_train_entrypoint_cannot_be_imported_without_dali flipped to
+test_train_entrypoint_can_be_imported_without_dali below to make that fix a
+real regression guard, per this file's own original note that it should.
 
 The train-side check deliberately runs in a real subprocess rather than
 in-process: tests/conftest.py globally stubs `nvidia.dali` in sys.modules so
 the rest of the suite can exercise patch_3d_trainer.py's own logic without
 the real (CUDA-only, heavy) DALI package installed. That's the right call
 for those tests, but it would make an in-process import here silently
-succeed via the fake stub -- masking exactly the failure this test exists to
-document. A subprocess gets a fresh interpreter that never loads conftest.py,
-so it sees what a real user without DALI installed actually sees.
+succeed via the fake stub even before Stage 4's fix -- masking the failure
+this test originally existed to document. A subprocess gets a fresh
+interpreter that never loads conftest.py, so it sees exactly what a real
+user without DALI installed sees.
 """
 
 import subprocess
@@ -45,18 +57,18 @@ def test_analyze_and_preprocess_succeed_on_cpu(tmp_path: Path) -> None:
     assert any((outputs.numpy_dir / "labels").glob("*.npy"))
 
 
-def test_train_entrypoint_cannot_be_imported_without_dali() -> None:
-    """Today, mist_train fails at import time on a machine without DALI.
+def test_train_entrypoint_can_be_imported_without_dali() -> None:
+    """mist_train now imports fine on a machine without DALI installed.
 
-    patch_3d_trainer.py has an unguarded top-level `from mist.data_loading
-    import dali_loader`, so merely importing mist.cli.train_entrypoint (let
-    alone running it) requires nvidia-dali-cuda120 to be installed -- on
-    CUDA hardware only. This is the single hardest blocker CPU/ROCm support
-    has to clear; Stage 2-4 of the plan replace this with a registry lookup
-    that only imports DALI when it's actually selected. Once that lands,
-    this test's assertion flips (or this test is deleted) -- it exists to
-    make that change visible as a real regression check, not to protect the
-    current failure.
+    Was test_train_entrypoint_cannot_be_imported_without_dali until Stage 4:
+    patch_3d_trainer.py's unguarded top-level `from mist.data_loading import
+    dali_loader` -- the single hardest blocker CPU/ROCm support had to clear
+    -- is gone, replaced by a `data_loader_registry` lookup that only
+    resolves to the real DALI module when `training.hardware.data_loader`
+    is actually `"dali"`. Run in a real subprocess (see module docstring)
+    so a regression here (some other file reintroducing an unguarded DALI
+    import into mist_train's own import graph) can't be masked by
+    tests/conftest.py's global `nvidia.dali` stub.
     """
     result = subprocess.run(
         [sys.executable, "-c", "import mist.cli.train_entrypoint"],
@@ -64,10 +76,8 @@ def test_train_entrypoint_cannot_be_imported_without_dali() -> None:
         text=True,
         check=False,
     )
-    assert result.returncode != 0, (
-        "mist.cli.train_entrypoint imported successfully -- if CPU/ROCm "
-        "support has landed, update or remove this baseline test rather "
-        "than leaving it silently green."
+    assert result.returncode == 0, (
+        f"mist.cli.train_entrypoint failed to import without DALI installed "
+        f"-- a regression in the data-loader registry wiring (Stage 4). "
+        f"stderr:\n{result.stderr}"
     )
-    assert "ModuleNotFoundError" in result.stderr
-    assert "nvidia" in result.stderr

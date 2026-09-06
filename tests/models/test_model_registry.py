@@ -13,10 +13,27 @@ from mist.models.model_registry import (
 
 @pytest.fixture(autouse=True)
 def clear_registry():
-    """Ensure model registry is clean before each test."""
+    """Isolate the model registry for each test in this file.
+
+    Snapshots and restores the *real* registrations afterward, rather than
+    just clearing to empty -- mist.models registers every real model
+    (nnunet, mednext, mgnets, swinunetr variants) exactly once, at that
+    package's own import time, so other tests rely on those still being
+    there once this file's tests are done. Clearing to empty permanently
+    (the bug this replaces -- see the identical fix and rationale in
+    tests/data_loading/test_data_loader_registry.py's clear_registry) left
+    list_registered_models() empty for any test running afterward in the
+    same session, which is exactly the trap
+    tests/regression/cpu_rocm/test_stage4_cpu_end_to_end.py fell into: its
+    real `mist_train --model nnunet-pocket` CLI parse failed with
+    "invalid choice: 'nnunet-pocket' (choose from )" whenever this file's
+    tests happened to run first.
+    """
+    saved = dict(MODEL_REGISTRY)
     MODEL_REGISTRY.clear()
     yield
     MODEL_REGISTRY.clear()
+    MODEL_REGISTRY.update(saved)
 
 
 def test_register_model_success():

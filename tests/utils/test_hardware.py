@@ -66,6 +66,20 @@ def test_resolve_data_loader(monkeypatch, requested, accelerator, expected) -> N
     assert hardware.resolve_data_loader(requested) == expected
 
 
+@pytest.mark.parametrize(
+    ("accelerator", "expected"),
+    [
+        ("cpu", torch.device("cpu")),
+        ("cuda", torch.device("cuda", 1)),
+        ("rocm", torch.device("cuda", 1)),
+    ],
+)
+def test_get_device_for_rank(monkeypatch, accelerator, expected) -> None:
+    """CPU has no per-rank device; CUDA/ROCm both target "cuda:<rank>"."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    assert hardware.get_device_for_rank(rank=1) == expected
+
+
 def test_bf16_supported_false_without_cuda(monkeypatch) -> None:
     """bf16_supported is False when CUDA is unavailable."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)

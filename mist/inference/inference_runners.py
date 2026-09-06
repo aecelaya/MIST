@@ -14,26 +14,19 @@ import pandas as pd
 import SimpleITK as sitk
 import torch
 
+from mist.data_loading import data_loader_registry
 from mist.inference import inference_utils
-from mist.inference.inference_constants import InferenceConstants as ic
-from mist.inference.predictor import Predictor
-from mist.models import model_loader
-from mist.utils import io, progress_bar, sitk_io
-from mist.utils.console import print_error, print_section_header, print_success
-
-# DALI is a training-only dependency (nvidia-dali-cuda120). Guard the import
-# so that inference_runners can be imported on CPU-only machines where only
-# mist_predict is needed.
-try:
-    from mist.data_loading import dali_loader
-except ImportError:
-    dali_loader = None  # type: ignore[assignment]
 from mist.inference.ensemblers.ensembler_registry import get_ensembler
+from mist.inference.inference_constants import InferenceConstants as ic
 from mist.inference.inferers.inferer_registry import get_inferer
+from mist.inference.predictor import Predictor
 from mist.inference.tta.strategies import get_strategy
+from mist.models import model_loader
 from mist.postprocessing.postprocessor import Postprocessor
 from mist.preprocessing import preprocess, preprocessing_utils
 from mist.training import training_utils
+from mist.utils import hardware, io, progress_bar, sitk_io
+from mist.utils.console import print_error, print_section_header, print_success
 
 
 def _build_predictor(
@@ -225,16 +218,22 @@ def test_on_fold(
     # Get bounding box data.
     foreground_bounding_boxes = pd.read_csv(results_dir / "fg_bboxes.csv")
 
-    # Get DALI loader for streaming preprocessed numpy files.
-    if dali_loader is None:
-        raise RuntimeError(
-            "NVIDIA DALI is required for test_on_fold. "
-            "Install with: pip install 'mist-medical[train]'"
-        )
-    test_loader = dali_loader.get_test_dataset(
+    # Get the data loader backend for streaming preprocessed numpy files.
+    # train_entry() calls test_on_fold() right after training, in the same
+    # process and on the same machine, so training.hardware.data_loader is
+    # already resolved by BaseTrainer._overwrite_config_from_args() -- this
+    # re-resolves anyway (a cheap no-op against an already-explicit value)
+    # so a hypothetical direct call against an unresolved config.json still
+    # picks the right backend instead of raising a confusing "'auto' is not
+    # registered" error.
+    hw = config["training"]["hardware"]
+    loader = data_loader_registry.get_data_loader_from_registry(
+        hardware.resolve_data_loader(hw.get("data_loader", "auto"))
+    )
+    test_loader = loader.get_test_dataset(
         image_paths=test_image_paths,
         seed=config["training"]["seed"],
-        num_workers=config["training"]["hardware"]["num_cpu_workers"],
+        num_workers=hw["num_cpu_workers"],
     )
 
     # Load model.
@@ -272,8 +271,9 @@ def test_on_fold(
                 ]
                 original_image = sitk_io.read_image(image_paths[0])
 
-                # DALI loader is assumed to yield batches in the same order as
-                # test_df. This is enforced upstream and is not checked here.
+                # The data loader (whichever backend is active) is assumed to
+                # yield batches in the same order as test_df. This is
+                # enforced upstream and is not checked here.
                 data = test_loader.next()[0]
                 preprocessed_image = data["image"]
 

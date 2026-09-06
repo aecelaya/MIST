@@ -13,7 +13,7 @@ exactly -- `.next()` returns `[{"image": ..., "label": ..., "dtm": ...}]`
 already on the target device, and `.reset()` starts a fresh pass -- so
 nothing downstream (`patch_3d_trainer.py`, `inference_runners.py`) needs to
 know or care which loader backend is active. See `cpu_rocm_support_plan.md`
-Stage 2.
+Stages 2-3.
 
 This is deliberately *not* a byte-for-byte reimplementation of DALI's
 pipeline. Patch extraction and foreground-oversampled patch placement are
@@ -31,19 +31,42 @@ state, making all of them draw the same "random" sequence independently.
 `training.seed` still governs the (much simpler, single-process) shuffling
 of case order between epochs, which doesn't have that pitfall.
 
-This stage (Stage 2) covers loading, DDP sharding, and patch extraction
-only -- no augmentation. That's Stage 3: the `use_*` augmentation flags
-below are accepted for call-site parity with `dali_loader.py` (so Stage 4
-doesn't need to change any call site when the generic loader is selected),
-but they currently have no effect regardless of value.
+Augmentations (Stage 3) run on CPU tensors/NumPy inside
+`Dataset.__getitem__`, matching `data_loading_utils.py`'s DALI-side
+transforms one for one -- same constants (`data_loading_constants.py`,
+which has no DALI dependency and is safe to import here), same
+probabilities and ranges -- with one asymmetry inherited directly from
+`dali_loader.py`'s own `TrainPipeline.define_graph`: zoom only ever runs
+when there is no DTM. DALI's own pipeline skips zoom outright whenever
+DTMs are present (rather than resizing the DTM to match), so this mirrors
+that rather than "fixing" it -- Stage 3's job is parity with the existing
+DALI transforms, not new behavior. No claim of exact numerical parity with
+DALI's own transforms is made or needed (different RNG stream, and likely
+different interpolation kernels for zoom) -- see the Stage 3 release gate
+in `cpu_rocm_support_plan.md`.
+
+Every `DataLoader` built here with `num_workers > 0` explicitly requests
+the "fork" multiprocessing context (see `_multiprocessing_context()`).
+Found necessary during Stage 4's real end-to-end CPU run: on macOS, whose
+default start method is "spawn", a real `mist_train` process that had used
+any multi-worker `DataLoader` here would hang *indefinitely* at interpreter
+shutdown -- confirmed via a stack sample showing the main thread stuck in
+`Py_FinalizeEx -> ... -> os.waitpid() -> __wait4`, well past the point
+training had already finished and every result had already been written to
+disk. Forcing "fork" (Linux's default anyway, so a no-op there) fixed it
+outright and, unlike falling back to `num_workers=0` everywhere, keeps real
+worker parallelism.
 """
 
+import platform
 from collections.abc import Sequence
 
 import numpy as np
 import torch
+from scipy import ndimage
 from torch.utils.data import DataLoader, Dataset
 
+from mist.data_loading.data_loading_constants import DataLoadingConstants as constants
 from mist.utils import hardware
 
 # Deliberately not imported from data_loading_utils.py: that module imports
@@ -82,16 +105,31 @@ def _validate_train_and_eval_inputs(
             raise ValueError("Number of images and DTMs do not match!")
 
 
+def _multiprocessing_context(num_workers: int) -> str | None:
+    """Pick a DataLoader multiprocessing_context for worker processes.
+
+    "fork" is requested explicitly wherever the platform supports it
+    (everywhere except Windows) instead of relying on each platform's own
+    default -- see the module docstring for why: macOS's default "spawn"
+    was found to hang the whole process indefinitely at interpreter exit.
+    Linux already defaults to "fork" so this is a no-op there, just made
+    explicit. Returns None (irrelevant either way) when num_workers == 0,
+    since no worker processes get created at all in that case.
+    """
+    if num_workers <= 0 or platform.system() == "Windows":
+        return None
+    return "fork"
+
+
 def _target_device(rank: int) -> torch.device:
     """Resolve the device .next() should move a finished batch to.
 
-    Mirrors dali_loader.py's device_id=rank convention: on CUDA/ROCm this is
-    "cuda:<rank>" (the same torch.cuda compatibility shim used everywhere
-    else in MIST); CPU-only hardware has no per-rank device to target.
+    Mirrors dali_loader.py's device_id=rank convention. Delegates to
+    hardware.get_device_for_rank() (added in Stage 4 once base_trainer.py
+    needed the identical logic at its own model.to()/tensor-device call
+    sites) rather than duplicating it here.
     """
-    if hardware.get_accelerator_type() == "cpu":
-        return torch.device("cpu")
-    return torch.device("cuda", rank)
+    return hardware.get_device_for_rank(rank)
 
 
 def _shard_indices(num_examples: int, rank: int, world_size: int) -> list[int]:
@@ -229,6 +267,179 @@ def _to_channels_first(array: np.ndarray) -> torch.Tensor:
     return torch.from_numpy(np.ascontiguousarray(np.moveaxis(array, -1, 0)))
 
 
+def _match_roi_size(array: np.ndarray, roi_size: tuple[int, int, int]) -> np.ndarray:
+    """Guarantee exactly roi_size spatial dims after a scipy zoom's rounding.
+
+    `scipy.ndimage.zoom` computes its output shape as
+    `round(input_shape * zoom_factor)` per axis; floating-point zoom
+    factors can, in principle, land one voxel short or long of the intended
+    `roi_size`. Padding (if short) then trimming (if long) forces an exact
+    match rather than let a shape mismatch propagate downstream, where it
+    would break stacking patches into a batch.
+    """
+    array = _pad_to_roi(array, roi_size)
+    return array[tuple(slice(0, roi) for roi in roi_size)]
+
+
+def _flip_fn(
+    image: np.ndarray,
+    label: np.ndarray,
+    dtm: np.ndarray | None,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Independently flip each spatial axis with probability 0.5.
+
+    Matches dali_loader.py's flips_fn: three independent coin flips --
+    depthwise (axis 0), vertical (axis 1), horizontal (axis 2) -- applied
+    identically to image, label, and DTM (when present).
+    """
+    axes = [
+        axis
+        for axis, probability in enumerate(
+            (
+                constants.DEPTH_FLIP_PROBABILITY,
+                constants.VERTICAL_FLIP_PROBABILITY,
+                constants.HORIZONTAL_FLIP_PROBABILITY,
+            )
+        )
+        if rng.random() < probability
+    ]
+    if not axes:
+        return image, label, dtm
+    image = np.flip(image, axis=axes).copy()
+    label = np.flip(label, axis=axes).copy()
+    if dtm is not None:
+        dtm = np.flip(dtm, axis=axes).copy()
+    return image, label, dtm
+
+
+def _zoom_fn(
+    image: np.ndarray,
+    label: np.ndarray,
+    roi_size: tuple[int, int, int],
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Randomly zoom in on the patch, resizing back to roi_size.
+
+    Matches dali_loader.py's zoom_fn: with probability `ZOOM_FN_PROBABILITY`,
+    center-crop to `scale` (Uniform[ZOOM_FN_RANGE_MIN, ZOOM_FN_RANGE_MAX])
+    times `roi_size` along every axis, then resize back up to `roi_size` --
+    cubic interpolation for the image, nearest-neighbor for the label so its
+    class values aren't corrupted by interpolation.
+
+    Only ever called on the DTM-free path -- see the module docstring's note
+    on the zoom/DTM asymmetry inherited from dali_loader.py.
+    """
+    if rng.random() >= constants.ZOOM_FN_PROBABILITY:
+        return image, label
+
+    scale = rng.uniform(constants.ZOOM_FN_RANGE_MIN, constants.ZOOM_FN_RANGE_MAX)
+    cropped_size = tuple(max(1, int(round(scale * roi))) for roi in roi_size)
+    starts = tuple((roi_size[axis] - cropped_size[axis]) // 2 for axis in range(3))
+    crop = tuple(
+        slice(start, start + size) for start, size in zip(starts, cropped_size, strict=True)
+    )
+    zoom_factors = tuple(roi_size[axis] / cropped_size[axis] for axis in range(3)) + (1.0,)
+
+    image = ndimage.zoom(image[crop], zoom_factors, order=3)
+    label = ndimage.zoom(label[crop], zoom_factors, order=0)
+    return _match_roi_size(image, roi_size), _match_roi_size(label, roi_size)
+
+
+def _noise_fn(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """Add zero-mean Gaussian noise, clamped to the original value range.
+
+    Matches dali_loader.py's noise_fn: stddev ~ Uniform(NOISE_FN_RANGE_MIN,
+    NOISE_FN_RANGE_MAX), applied with probability NOISE_FN_PROBABILITY.
+    """
+    if rng.random() >= constants.NOISE_FN_PROBABILITY:
+        return image
+    stddev = rng.uniform(constants.NOISE_FN_RANGE_MIN, constants.NOISE_FN_RANGE_MAX)
+    noise = rng.normal(loc=0.0, scale=stddev, size=image.shape).astype(image.dtype)
+    return np.clip(image + noise, image.min(), image.max())
+
+
+def _blur_fn(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """Apply Gaussian blur, clamped to the original value range.
+
+    Matches dali_loader.py's blur_fn: sigma ~ Uniform(BLUR_FN_RANGE_MIN,
+    BLUR_FN_RANGE_MAX), applied with probability BLUR_FN_PROBABILITY, over
+    the spatial axes only (never across the channel axis).
+    """
+    if rng.random() >= constants.BLUR_FN_PROBABILITY:
+        return image
+    sigma = rng.uniform(constants.BLUR_FN_RANGE_MIN, constants.BLUR_FN_RANGE_MAX)
+    blurred = ndimage.gaussian_filter(image, sigma=(sigma, sigma, sigma, 0))
+    return np.clip(blurred, image.min(), image.max())
+
+
+def _brightness_fn(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """Scale intensities by a random brightness factor.
+
+    Matches dali_loader.py's brightness_fn: scale ~
+    Uniform(BRIGHTNESS_FN_RANGE_MIN, BRIGHTNESS_FN_RANGE_MAX), applied with
+    probability BRIGHTNESS_FN_PROBABILITY (identity otherwise).
+    """
+    if rng.random() >= constants.BRIGHTNESS_FN_PROBABILITY:
+        return image
+    scale = rng.uniform(constants.BRIGHTNESS_FN_RANGE_MIN, constants.BRIGHTNESS_FN_RANGE_MAX)
+    return image * scale
+
+
+def _contrast_fn(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """Scale intensities about their own range, clamped back to it.
+
+    Matches dali_loader.py's contrast_fn: scale ~
+    Uniform(CONTRAST_FN_RANGE_MIN, CONTRAST_FN_RANGE_MAX), applied with
+    probability CONTRAST_FN_PROBABILITY (identity otherwise).
+    """
+    if rng.random() >= constants.CONTRAST_FN_PROBABILITY:
+        return image
+    min_, max_ = image.min(), image.max()
+    scale = rng.uniform(constants.CONTRAST_FN_RANGE_MIN, constants.CONTRAST_FN_RANGE_MAX)
+    return np.clip(image * scale, min_, max_)
+
+
+def _apply_augmentations(
+    image: np.ndarray,
+    label: np.ndarray,
+    dtm: np.ndarray | None,
+    roi_size: tuple[int, int, int],
+    use_flips: bool,
+    use_zoom: bool,
+    use_noise: bool,
+    use_blur: bool,
+    use_brightness: bool,
+    use_contrast: bool,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Apply MIST's training-time augmentations to one CPU-side patch.
+
+    Mirrors dali_loader.py's TrainPipeline.define_graph precedence exactly,
+    including the zoom/DTM asymmetry described in the module docstring:
+    zoom only ever runs on the DTM-free path.
+    """
+    if dtm is not None:
+        if use_flips:
+            image, label, dtm = _flip_fn(image, label, dtm, rng)
+    else:
+        if use_zoom:
+            image, label = _zoom_fn(image, label, roi_size, rng)
+        if use_flips:
+            image, label, dtm = _flip_fn(image, label, None, rng)
+
+    if use_noise:
+        image = _noise_fn(image, rng)
+    if use_blur:
+        image = _blur_fn(image, rng)
+    if use_brightness:
+        image = _brightness_fn(image, rng)
+    if use_contrast:
+        image = _contrast_fn(image, rng)
+
+    return image, label, dtm
+
+
 class _PatchTrainingDataset(Dataset):
     """CPU-side dataset yielding one (optionally patch-extracted) example.
 
@@ -247,6 +458,13 @@ class _PatchTrainingDataset(Dataset):
         labels: list[int] | None,
         oversampling: float | None,
         extract_patches: bool,
+        use_augmentation: bool = False,
+        use_flips: bool = False,
+        use_zoom: bool = False,
+        use_noise: bool = False,
+        use_blur: bool = False,
+        use_brightness: bool = False,
+        use_contrast: bool = False,
     ):
         self._image_paths = image_paths
         self._label_paths = label_paths
@@ -256,6 +474,17 @@ class _PatchTrainingDataset(Dataset):
         self._oversampling = oversampling
         self._extract_patches = extract_patches
 
+        # Matches dali_loader.py's TrainPipeline: the master use_augmentation
+        # switch ANDs into every individual flag, rather than being checked
+        # separately at call time.
+        self._use_augmentation = use_augmentation
+        self._use_flips = use_flips and use_augmentation
+        self._use_zoom = use_zoom and use_augmentation
+        self._use_noise = use_noise and use_augmentation
+        self._use_blur = use_blur and use_augmentation
+        self._use_brightness = use_brightness and use_augmentation
+        self._use_contrast = use_contrast and use_augmentation
+
     def __len__(self) -> int:
         return len(self._image_paths)
 
@@ -264,8 +493,9 @@ class _PatchTrainingDataset(Dataset):
         label = _load_case(self._label_paths[index])
         dtm = _load_case(self._dtm_paths[index]) if self._dtm_paths else None
 
+        rng = np.random.default_rng()
+
         if self._extract_patches:
-            rng = np.random.default_rng()
             image, label, dtm = _extract_patch(
                 image,
                 label,
@@ -274,6 +504,21 @@ class _PatchTrainingDataset(Dataset):
                 self._labels,
                 self._oversampling,
                 rng,
+            )
+
+        if self._use_augmentation:
+            image, label, dtm = _apply_augmentations(
+                image,
+                label,
+                dtm,
+                self._roi_size,
+                use_flips=self._use_flips,
+                use_zoom=self._use_zoom,
+                use_noise=self._use_noise,
+                use_blur=self._use_blur,
+                use_brightness=self._use_brightness,
+                use_contrast=self._use_contrast,
+                rng=rng,
             )
 
         batch = {
@@ -370,9 +615,10 @@ def get_training_dataset(
     """Generic-loader equivalent of dali_loader.get_training_dataset.
 
     Same signature and `.next()`/`.reset()` contract as dali_loader.py (see
-    the module docstring). The `use_*` augmentation flags are accepted here
-    purely for call-site parity -- Stage 3 of `cpu_rocm_support_plan.md`
-    implements them, so today they have no effect regardless of value.
+    the module docstring). Augmentations run per `data_loading_constants.py`
+    (same probabilities/ranges as `dali_loader.py`); the module docstring's
+    note on the zoom/DTM asymmetry applies -- zoom only ever runs when
+    `dtm_paths` is None.
 
     Args:
         image_paths: List of file paths to the image data.
@@ -391,20 +637,15 @@ def get_training_dataset(
         extract_patches: Whether to extract a roi_size patch from each
             example. If False, the entire (already roi_size-shaped) example
             is returned unmodified.
-        use_augmentation: Accepted for parity with dali_loader.py; not yet
-            implemented (Stage 3).
-        use_flips: Accepted for parity with dali_loader.py; not yet
-            implemented (Stage 3).
-        use_zoom: Accepted for parity with dali_loader.py; not yet
-            implemented (Stage 3).
-        use_noise: Accepted for parity with dali_loader.py; not yet
-            implemented (Stage 3).
-        use_blur: Accepted for parity with dali_loader.py; not yet
-            implemented (Stage 3).
-        use_brightness: Accepted for parity with dali_loader.py; not yet
-            implemented (Stage 3).
-        use_contrast: Accepted for parity with dali_loader.py; not yet
-            implemented (Stage 3).
+        use_augmentation: Master switch for all augmentations below; ANDed
+            into each individual flag, matching dali_loader.py.
+        use_flips: Whether to randomly flip each spatial axis.
+        use_zoom: Whether to randomly zoom in on the patch. Only applied
+            when dtm_paths is None -- see the module docstring.
+        use_noise: Whether to add random Gaussian noise to the image.
+        use_blur: Whether to apply random Gaussian blur to the image.
+        use_brightness: Whether to randomly scale image brightness.
+        use_contrast: Whether to randomly scale image contrast.
 
     Returns:
         A GenericIterator over training batches, already on the target
@@ -421,6 +662,13 @@ def get_training_dataset(
         labels=labels,
         oversampling=oversampling,
         extract_patches=extract_patches,
+        use_augmentation=use_augmentation,
+        use_flips=use_flips,
+        use_zoom=use_zoom,
+        use_noise=use_noise,
+        use_blur=use_blur,
+        use_brightness=use_brightness,
+        use_contrast=use_contrast,
     )
     shuffle_generator = torch.Generator().manual_seed(seed + rank)
     data_loader = DataLoader(
@@ -430,7 +678,12 @@ def get_training_dataset(
         num_workers=num_workers,
         generator=shuffle_generator,
         drop_last=False,
-        persistent_workers=num_workers > 0,
+        multiprocessing_context=_multiprocessing_context(num_workers),
+        # Deliberately NOT persistent_workers=True: MIST builds a fresh
+        # training DataLoader per fold, and worker pools from earlier folds
+        # were never explicitly torn down before the next one existed --
+        # see the module docstring for the "fork" note right above this,
+        # found via the same Stage 4 hang.
     )
     return GenericIterator(data_loader, device=_target_device(rank))
 
@@ -468,7 +721,13 @@ def get_validation_dataset(
         image_paths=[image_paths[i] for i in shard],
         label_paths=[label_paths[i] for i in shard],
     )
-    data_loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=num_workers)
+    data_loader = DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=num_workers,
+        multiprocessing_context=_multiprocessing_context(num_workers),
+    )
     return GenericIterator(data_loader, device=_target_device(rank))
 
 
@@ -505,5 +764,11 @@ def get_test_dataset(
 
     shard = _shard_indices(len(image_paths), rank, world_size)
     dataset = _FullVolumeDataset(image_paths=[image_paths[i] for i in shard])
-    data_loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=num_workers)
+    data_loader = DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=num_workers,
+        multiprocessing_context=_multiprocessing_context(num_workers),
+    )
     return GenericIterator(data_loader, device=_target_device(rank))

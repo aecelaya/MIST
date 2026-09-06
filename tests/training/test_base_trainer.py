@@ -808,15 +808,20 @@ def test_invalid_folds_subset_raises(tmp_pipeline, mist_args):
     assert "Found folds: [0, 2]" in msg
 
 
-def test_update_num_gpus_raises_when_cuda_unavailable(tmp_pipeline, mist_args, monkeypatch):
-    """Test that update_num_gpus raises when CUDA is unavailable."""
+def test_update_num_gpus_is_zero_on_cpu(tmp_pipeline, mist_args, monkeypatch):
+    """num_gpus is 0 (not a raise) on CPU-only hardware.
+
+    Regression guard for a real bug: this used to unconditionally raise
+    "CUDA is not available" here, which meant CPU-only training could never
+    even construct a trainer -- found via a real end-to-end CPU training run
+    (cpu_rocm_support_plan.md Stage 4), not by this mocked test alone.
+    """
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=False)
 
-    with pytest.raises(ValueError) as excinfo:
-        DummyTrainer(mist_args)
+    trainer = DummyTrainer(mist_args)
 
-    msg = str(excinfo.value)
-    assert "CUDA is not available" in msg
+    assert trainer.config["training"]["hardware"]["num_gpus"] == 0
+    assert trainer.batch_size == trainer.config["training"]["batch_size_per_gpu"]
 
 
 def test_update_num_gpus_raises_when_zero_devices(tmp_pipeline, mist_args, monkeypatch):
@@ -845,6 +850,16 @@ def test_update_num_gpus_sets_config_and_persists(tmp_pipeline, mist_args, monke
     cfg_path = Path(results) / "config.json"
     on_disk = json.loads(cfg_path.read_text())
     assert on_disk["training"]["hardware"]["num_gpus"] == 2
+
+
+def test_update_num_gpus_sets_config_on_rocm(tmp_pipeline, mist_args, monkeypatch):
+    """num_gpus is set from device_count() on ROCm too, same as CUDA."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "rocm")
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
+
+    trainer = DummyTrainer(mist_args)
+
+    assert trainer.config["training"]["hardware"]["num_gpus"] == 2
 
 
 def test_train_fold_raises_when_val_images_less_than_world_size(

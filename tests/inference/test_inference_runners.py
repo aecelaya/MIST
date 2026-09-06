@@ -1,9 +1,7 @@
 """Tests for mist.inference.inference_runners."""
 
 import copy
-import importlib
 import os
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -248,7 +246,12 @@ def fold_runner(mock_mist_config, monkeypatch, tmp_path):
     )
     mock_dali_module = MagicMock()
     mock_dali_module.get_test_dataset = mock_get_test_dataset
-    monkeypatch.setattr(ir, "dali_loader", mock_dali_module)
+    loader_calls = {}
+    monkeypatch.setattr(
+        ir.data_loader_registry,
+        "get_data_loader_from_registry",
+        lambda name: (loader_calls.__setitem__("name", name), mock_dali_module)[1],
+    )
     monkeypatch.setattr(ir.io, "read_json_file", mock_read_json)
     monkeypatch.setattr(ir, "ic", SimpleNamespace(PATIENT_DF_IGNORED_COLUMNS={"id", "fold"}))
     monkeypatch.setattr(
@@ -281,6 +284,7 @@ def fold_runner(mock_mist_config, monkeypatch, tmp_path):
         image_write=image_write,
         predict_single=predict_single,
         printed=printed,
+        loader_calls=loader_calls,
     )
 
 
@@ -620,15 +624,45 @@ def test_predict_single_example_skip_true_output_probs(mock_mist_config, monkeyp
 # ==================
 
 
-def test_test_on_fold_raises_if_dali_not_available(monkeypatch, tmp_path, mock_mist_config):
-    """test_on_fold raises RuntimeError when dali_loader is None (DALI not installed)."""
+def test_test_on_fold_resolves_auto_data_loader_via_registry(fold_runner, mock_mist_config):
+    """ "auto" resolves against the current hardware (CPU in this fixture --
+    see fold_runner's torch.cuda.is_available() -> False patch) before being
+    looked up in the registry."""
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["training"]["hardware"]["data_loader"] = "auto"
+    fold_runner.run(fold=0, cfg=cfg)
+    assert fold_runner.loader_calls["name"] == "generic"
+
+
+def test_test_on_fold_respects_explicit_data_loader_override(fold_runner, mock_mist_config):
+    """An explicit config.json value passes through to the registry unchanged."""
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["training"]["hardware"]["data_loader"] = "dali"
+    fold_runner.run(fold=0, cfg=cfg)
+    assert fold_runner.loader_calls["name"] == "dali"
+
+
+def test_test_on_fold_raises_if_resolved_loader_is_not_registered(
+    monkeypatch, tmp_path, mock_mist_config
+):
+    """An unregistered data_loader name surfaces the registry's own error.
+
+    There's no more DALI-specific special case here -- a resolved-but-
+    unavailable backend (e.g. "dali" resolved on a machine that trained with
+    CUDA, but DALI isn't importable in this process) is just an ordinary
+    registry lookup failure, already covered generically by
+    tests/data_loading/test_data_loader_registry.py. This only confirms
+    test_on_fold doesn't swallow or rewrap that error.
+    """
     results_dir, numpy_dir = _prep_dirs(tmp_path)
     _make_train_df(0).to_csv(results_dir / "train_paths.csv", index=False)
     _make_bbox_df().to_csv(results_dir / "fg_bboxes.csv", index=False)
     (results_dir / "config.json").write_text("{}", encoding="utf-8")
 
-    monkeypatch.setattr(ir, "dali_loader", None)
-    monkeypatch.setattr(ir.io, "read_json_file", lambda _: copy.deepcopy(mock_mist_config))
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["training"]["hardware"]["data_loader"] = "not_a_real_loader"
+
+    monkeypatch.setattr(ir.io, "read_json_file", lambda _: cfg)
     monkeypatch.setattr(
         training_utils,
         "get_npy_paths",
@@ -638,35 +672,8 @@ def test_test_on_fold_raises_if_dali_not_available(monkeypatch, tmp_path, mock_m
     )
 
     mist_args = SimpleNamespace(results=str(results_dir), numpy=str(numpy_dir))
-    with pytest.raises(RuntimeError, match="NVIDIA DALI is required"):
+    with pytest.raises(ValueError, match="'not_a_real_loader' is not registered"):
         ir.test_on_fold(mist_args=mist_args, fold_number=0, device=torch.device("cpu"))
-
-
-def test_dali_import_error_sets_dali_loader_none():
-    """inference_runners.dali_loader is None when the DALI import fails."""
-    import mist.data_loading
-    import mist.inference.inference_runners as runners_mod
-
-    original_sys = sys.modules.get("mist.data_loading.dali_loader")
-    original_attr = getattr(mist.data_loading, "dali_loader", None)
-
-    try:
-        # Setting sys.modules entry to None causes ImportError on import.
-        # type: ignore[assignment]
-        sys.modules["mist.data_loading.dali_loader"] = None
-        if hasattr(mist.data_loading, "dali_loader"):
-            delattr(mist.data_loading, "dali_loader")
-        importlib.reload(runners_mod)
-        assert runners_mod.dali_loader is None
-    finally:
-        # Restore sys.modules and the package attribute.
-        if original_sys is None:
-            sys.modules.pop("mist.data_loading.dali_loader", None)
-        else:
-            sys.modules["mist.data_loading.dali_loader"] = original_sys
-        if original_attr is not None:
-            mist.data_loading.dali_loader = original_attr
-        importlib.reload(runners_mod)
 
 
 def test_test_on_fold_success_no_crop_tta_enabled(fold_runner, mock_mist_config):

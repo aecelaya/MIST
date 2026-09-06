@@ -40,6 +40,18 @@ def get_accelerator_type() -> AcceleratorType:
     return "cuda"
 
 
+def get_device_for_rank(rank: int) -> torch.device:
+    """Resolve the ``torch.device`` a given DDP rank should use.
+
+    On CUDA/ROCm this is ``"cuda:<rank>"`` (the same ``torch.cuda``
+    compatibility shim used everywhere else in this module); CPU-only
+    hardware has no per-rank device to target.
+    """
+    if get_accelerator_type() == "cpu":
+        return torch.device("cpu")
+    return torch.device("cuda", rank)
+
+
 def resolve_communication_backend(requested: str) -> str:
     """Resolve a requested ``torch.distributed`` backend against hardware.
 

@@ -25,10 +25,21 @@ def _fake_loader_module(**overrides):
 
 @pytest.fixture(autouse=True)
 def clear_registry():
-    """Ensure the data loader registry is clean before and after each test."""
+    """Isolate the data loader registry for each test in this file.
+
+    Snapshots and restores the *real* registrations afterward, rather than
+    just clearing to empty -- mist.data_loading registers "generic"/"dali"
+    exactly once, at that package's own import time, so other test files
+    (patch_3d_trainer.py's tests, in particular) rely on those still being
+    there once this file's tests are done. Clearing to empty permanently
+    (the bug this replaces) starved every test that runs afterward in the
+    same session of a registry that was ever populated.
+    """
+    saved = dict(DATA_LOADER_REGISTRY)
     DATA_LOADER_REGISTRY.clear()
     yield
     DATA_LOADER_REGISTRY.clear()
+    DATA_LOADER_REGISTRY.update(saved)
 
 
 def test_register_data_loader_success():
