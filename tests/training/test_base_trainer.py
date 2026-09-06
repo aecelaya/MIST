@@ -351,10 +351,23 @@ def patch_ddp_and_tb_and_save(monkeypatch):
     monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", lambda *a, **k: None)
 
 
+_NO_DEVICE_ID = object()
+
+
 @pytest.fixture(autouse=True)
 def patch_dist(monkeypatch):
     """Patch torch.distributed to be inert but count calls."""
-    calls = {"init": 0, "destroy": 0, "all_reduce": 0, "broadcast": 0, "barrier": 0}
+    calls = {
+        "init": 0,
+        "destroy": 0,
+        "all_reduce": 0,
+        "broadcast": 0,
+        "barrier": 0,
+        # Sentinel so tests can tell "device_id kwarg omitted" (CPU) apart
+        # from "device_id=None passed explicitly" -- setup() never does the
+        # latter, but the fake shouldn't quietly conflate the two.
+        "last_device_id": _NO_DEVICE_ID,
+    }
 
     class FakeDist:
         """Fake distributed module to track calls."""
@@ -384,9 +397,10 @@ def patch_dist(monkeypatch):
             return FakeDist._world_size
 
         @staticmethod
-        def init_process_group(backend, rank, world_size, device_id=None):
+        def init_process_group(backend, rank, world_size, device_id=_NO_DEVICE_ID):
             """Initialize the process group."""
             calls["init"] += 1
+            calls["last_device_id"] = device_id
             FakeDist._initialized = True
             FakeDist._rank = int(rank)
             FakeDist._world_size = int(world_size)
@@ -536,6 +550,52 @@ def test_setup_initializes_process_group_once(tmp_pipeline, mist_args, monkeypat
     assert patch_dist["init"] == 1
 
 
+@pytest.mark.parametrize("accelerator", ["cuda", "rocm"])
+def test_setup_passes_device_id_on_cuda_and_rocm(
+    tmp_pipeline, mist_args, monkeypatch, patch_dist, accelerator
+):
+    """setup() passes an explicit device_id on CUDA/ROCm (for NCCL/RCCL)."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: accelerator)
+    trainer = DummyTrainer(mist_args)
+    trainer.setup(rank=0, world_size=2)
+    assert patch_dist["last_device_id"] == torch.device("cuda", 0)
+
+
+def test_setup_omits_device_id_on_cpu(tmp_pipeline, mist_args, monkeypatch, patch_dist):
+    """setup() omits device_id on CPU -- gloo has no GPU device concept."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
+    trainer = DummyTrainer(mist_args)
+    trainer.setup(rank=0, world_size=2)
+    assert patch_dist["last_device_id"] is _NO_DEVICE_ID
+
+
+def test_train_fold_skips_cuda_set_device_on_cpu(tmp_pipeline, mist_args, monkeypatch, patch_dist):
+    """train_fold() must not call torch.cuda.set_device on CPU-only hardware."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
+    called = {"count": 0}
+    monkeypatch.setattr(
+        torch.cuda, "set_device", lambda *a, **k: called.__setitem__("count", called["count"] + 1)
+    )
+    trainer = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=2.0)
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+    assert called["count"] == 0
+
+
+@pytest.mark.parametrize("accelerator", ["cuda", "rocm"])
+def test_train_fold_calls_cuda_set_device_on_cuda_and_rocm(
+    tmp_pipeline, mist_args, monkeypatch, patch_dist, accelerator
+):
+    """train_fold() still calls torch.cuda.set_device on CUDA/ROCm."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: accelerator)
+    called = {"count": 0}
+    monkeypatch.setattr(
+        torch.cuda, "set_device", lambda *a, **k: called.__setitem__("count", called["count"] + 1)
+    )
+    trainer = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=2.0)
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+    assert called["count"] == 1
+
+
 def test_train_fold_runs_full_epoch(tmp_pipeline, mist_args, monkeypatch, patch_dist):
     """Test that train_fold runs a full epoch with correct steps."""
     """With world_size=1, no collectives are called in the new code path."""
@@ -610,6 +670,45 @@ def test_overwrite_config_from_args(tmp_pipeline, mist_args, monkeypatch):
     assert cfg["training"]["val_percent"] == pytest.approx(0.025)
 
 
+@pytest.mark.parametrize(
+    ("accelerator", "expected_backend"),
+    [("cuda", "nccl"), ("rocm", "nccl"), ("cpu", "gloo")],
+)
+def test_overwrite_config_from_args_resolves_auto_communication_backend(
+    tmp_pipeline, mist_args, monkeypatch, accelerator, expected_backend
+):
+    """ "auto" is resolved and persisted to config.json at train time.
+
+    Mirrors training.amp's resolve-and-persist pattern: the analyze-time
+    machine that wrote "auto" may not be the train-time machine, so
+    resolution has to happen here, not in analyzer_utils.py.
+    """
+    results, _ = tmp_pipeline
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["hardware"]["communication_backend"] = "auto"
+    cfg_path.write_text(json.dumps(cfg))
+
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: accelerator)
+    trainer = DummyTrainer(mist_args)
+
+    assert trainer.config["training"]["hardware"]["communication_backend"] == expected_backend
+    persisted = json.loads(cfg_path.read_text())
+    assert persisted["training"]["hardware"]["communication_backend"] == expected_backend
+
+
+def test_overwrite_config_from_args_leaves_explicit_communication_backend(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """An explicit (non-"auto") backend from config.json is never overridden."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
+    trainer = DummyTrainer(mist_args)
+    # tmp_pipeline's base config.json already hardcodes "nccl" explicitly
+    # (not "auto"), even though this test pins the accelerator to "cpu" --
+    # confirming resolution is skipped entirely for explicit values.
+    assert trainer.config["training"]["hardware"]["communication_backend"] == "nccl"
+
+
 def test_fit_single_gpu_calls_run_directly(tmp_pipeline, mist_args, monkeypatch):
     """Test that fit with single GPU calls run directly."""
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1, raising=False)
@@ -650,6 +749,44 @@ def test_fit_sets_cudnn_conv_fp32_precision_when_available(tmp_pipeline, mist_ar
     trainer.run_cross_validation = lambda rank, world_size: None
     trainer.fit()
     assert fake_conv.fp32_precision == "tf32"
+
+
+def test_fit_skips_cudnn_tuning_on_cpu(tmp_pipeline, mist_args, monkeypatch):
+    """fit() must not touch cudnn/TF32 settings on CPU-only hardware."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
+    fake_conv = SimpleNamespace(fp32_precision=None)
+    monkeypatch.setattr(torch.backends.cudnn, "conv", fake_conv, raising=False)
+    monkeypatch.setattr(torch.backends.cudnn, "benchmark", False, raising=False)
+    trainer = DummyTrainer(mist_args)
+    trainer.run_cross_validation = lambda rank, world_size: None
+    trainer.fit()
+    assert fake_conv.fp32_precision is None
+    assert torch.backends.cudnn.benchmark is False
+
+
+def test_fit_world_size_is_one_on_cpu_regardless_of_device_count(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """Regression guard for the world_size = torch.cuda.device_count() bug.
+
+    torch.cuda.device_count() is 0 on CPU-only hardware, which used to flow
+    straight into run_cross_validation and break its world_size == 1 single-
+    process assumptions. Also covers a stale/misreported device_count > 0 on
+    a machine get_accelerator_type() has determined is CPU-only -- fit()
+    must still run as a single process.
+    """
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
+    called = {}
+
+    def spy_run(rank, world_size):
+        called["rank"] = rank
+        called["world_size"] = world_size
+
+    trainer = DummyTrainer(mist_args)
+    trainer.run_cross_validation = spy_run
+    trainer.fit()
+    assert called == {"rank": 0, "world_size": 1}
 
 
 def test_invalid_folds_subset_raises(tmp_pipeline, mist_args):

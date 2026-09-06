@@ -830,6 +830,17 @@ class TestBuildBaseConfig:
         cfg = au.build_base_config()
         assert cfg["model"]["architecture"] == "nnunet"
 
+    def test_communication_backend_defaults_to_auto(self):
+        """training.hardware.communication_backend defaults to "auto".
+
+        Resolved against the actual train-time hardware in
+        BaseTrainer._overwrite_config_from_args (mirrors training.amp), not
+        here at analyze time -- the analyze-time machine may not be the
+        train-time machine.
+        """
+        cfg = au.build_base_config()
+        assert cfg["training"]["hardware"]["communication_backend"] == "auto"
+
 
 # ---------------------------------------------------------------------------
 # build_evaluation_config

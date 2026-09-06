@@ -541,7 +541,15 @@ def build_base_config() -> dict[str, Any]:
                 "num_cpu_workers": 8,
                 "master_addr": "localhost",
                 "master_port": 12345,
-                "communication_backend": "nccl",
+                # Resolved against the current hardware at train time (mirrors
+                # "amp" above), not here at analyze time, since the machine
+                # that runs analyze may not be the machine that trains --
+                # see hardware.resolve_communication_backend(). A config.json
+                # from before this key existed already has a literal "nccl"
+                # here rather than "auto", so it will keep using NCCL even if
+                # training later moves to CPU-only hardware; edit it by hand
+                # (or re-run analyze) to pick up automatic resolution.
+                "communication_backend": "auto",
             },
         },
         "inference": {

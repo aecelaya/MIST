@@ -250,6 +250,17 @@ class BaseTrainer(ABC):
         # downstream inference read a hardware-appropriate setting.
         self.config["training"]["amp"] = hardware.resolve_amp(self.config["training"]["amp"])
 
+        # Resolve the communication backend against the current hardware, the
+        # same way: "auto" becomes "nccl" on CUDA/ROCm (ROCm routes "nccl"
+        # transparently to RCCL) or "gloo" on CPU-only hardware, while an
+        # explicit value from config.json is left untouched. Resolved here
+        # for the same reason as AMP -- the analyze-time machine that wrote
+        # the original config may differ from the train-time machine.
+        hw = self.config["training"]["hardware"]
+        hw["communication_backend"] = hardware.resolve_communication_backend(
+            hw["communication_backend"]
+        )
+
         # Write the updated configuration to the config.json file.
         io.write_json_file(self.config_json, self.config)
 
@@ -679,16 +690,23 @@ class BaseTrainer(ABC):
         hw = self.config["training"]["hardware"]
         os.environ["MASTER_ADDR"] = hw["master_addr"]
         os.environ["MASTER_PORT"] = str(hw["master_port"])
-        # device_id tells NCCL which GPU this rank's collective ops (e.g.
-        # barrier()) run on explicitly, instead of relying on the ambient
-        # "current CUDA device" set by train_fold's torch.cuda.set_device(rank)
-        # call just before this -- silences a UserWarning on newer torch
-        # versions and is what that warning itself recommends.
+
+        init_kwargs = {}
+        if hardware.get_accelerator_type() != "cpu":
+            # device_id tells NCCL/RCCL which GPU this rank's collective ops
+            # (e.g. barrier()) run on explicitly, instead of relying on the
+            # ambient "current CUDA device" set by train_fold's
+            # torch.cuda.set_device(rank) call just before this -- silences a
+            # UserWarning on newer torch versions and is what that warning
+            # itself recommends. Gloo (CPU, no GPU devices) has no
+            # equivalent concept.
+            init_kwargs["device_id"] = torch.device("cuda", rank)
+
         dist.init_process_group(
             hw["communication_backend"],
             rank=rank,
             world_size=world_size,
-            device_id=torch.device("cuda", rank),
+            **init_kwargs,
         )
 
     # Clean up processes after distributed training
@@ -701,7 +719,8 @@ class BaseTrainer(ABC):
         """Generic training loop for a single fold."""
         # Set up for distributed training.
         use_ddp = world_size > 1
-        torch.cuda.set_device(rank)
+        if hardware.get_accelerator_type() != "cpu":
+            torch.cuda.set_device(rank)
         self.setup(rank, world_size)
 
         # Set random seed for reproducibility.
@@ -969,18 +988,29 @@ class BaseTrainer(ABC):
         It uses the `torch.multiprocessing.spawn` function to create multiple
         instances of the training function, each on a separate GPU.
         """
-        # Enable some performance optimizations.
-        torch.set_float32_matmul_precision("high")
-        # torch.backends.cudnn.conv.fp32_precision was added in PyTorch 2.5;
-        # fall back to allow_tf32 which achieves the same effect on older builds.
-        if hasattr(torch.backends.cudnn, "conv"):
-            torch.backends.cudnn.conv.fp32_precision = "tf32"
-        else:
-            torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
+        accelerator = hardware.get_accelerator_type()
 
-        # Train model.
-        world_size = torch.cuda.device_count()
+        # Enable some performance optimizations. These tune cuDNN (CUDA) /
+        # its MIOpen equivalent (ROCm, via the same torch.backends.cudnn
+        # compatibility shim) and are meaningless on CPU-only hardware --
+        # empirically confirmed harmless no-ops there today, but skipped
+        # explicitly rather than relying on that continuing to hold.
+        if accelerator != "cpu":
+            torch.set_float32_matmul_precision("high")
+            # torch.backends.cudnn.conv.fp32_precision was added in PyTorch
+            # 2.5; fall back to allow_tf32 which achieves the same effect on
+            # older builds.
+            if hasattr(torch.backends.cudnn, "conv"):
+                torch.backends.cudnn.conv.fp32_precision = "tf32"
+            else:
+                torch.backends.cudnn.allow_tf32 = True
+            torch.backends.cudnn.benchmark = True
+
+        # Train model. torch.cuda.device_count() is 0 on CPU-only hardware
+        # (there are no CUDA/ROCm devices to count), so it can't be used
+        # directly as the process count -- CPU training always runs as a
+        # single process today (see cpu_rocm_support_plan.md Stage 1).
+        world_size = torch.cuda.device_count() if accelerator != "cpu" else 1
         if world_size > 1:
             mp.spawn(  # type: ignore
                 self.run_cross_validation,
