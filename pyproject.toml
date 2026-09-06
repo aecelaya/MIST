@@ -45,7 +45,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-train = ["nvidia-dali-cuda120"]
+# NVIDIA-GPU-accelerated data loading (DALI). Not required to train at all --
+# the base install trains on CPU (and AMD ROCm) via a generic, DALI-free data
+# loader; this extra only matters on CUDA hardware, where it's the default,
+# faster path. See cpu_rocm_support_plan.md.
+train-cuda = ["nvidia-dali-cuda120"]
 dev = ["pytest"]
 
 [project.urls]

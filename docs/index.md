@@ -17,16 +17,17 @@ a configuration file for when you need more control.
 
 ## Installation
 
-**Training** (NVIDIA GPU required):
-
-```console
-pip install "mist-medical[train]"
-```
-
-**Inference only** (CPU-compatible, works on Mac):
+**CPU** (default — runs the full pipeline: train, predict, evaluate, everything.
+Works on Mac):
 
 ```console
 pip install mist-medical
+```
+
+**NVIDIA GPU** (adds DALI-accelerated data loading):
+
+```console
+pip install "mist-medical[train-cuda]"
 ```
 
 ## Key Features

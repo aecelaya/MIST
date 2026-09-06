@@ -23,16 +23,16 @@ a configuration file for when you need more control.
 
 ## Installation
 
-**Training** (NVIDIA GPU required):
-
-```bash
-pip install "mist-medical[train]"
-```
-
-**Inference only** (CPU-compatible):
+**CPU** (default — runs the full pipeline: train, predict, evaluate, everything):
 
 ```bash
 pip install mist-medical
+```
+
+**NVIDIA GPU** (adds DALI-accelerated data loading):
+
+```bash
+pip install "mist-medical[train-cuda]"
 ```
 
 **Development**:
@@ -40,8 +40,8 @@ pip install mist-medical
 ```bash
 git clone https://github.com/mist-medical/MIST.git
 cd MIST
-pip install -e ".[train]"    # full
-pip install -e .             # inference only
+pip install -e .                # CPU
+pip install -e ".[train-cuda]"  # NVIDIA GPU acceleration
 ```
 
 **Docker** (NVIDIA GPU required, driver ≥ 525.x):

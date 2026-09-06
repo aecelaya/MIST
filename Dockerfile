@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_BREAK_SYSTEM_PACKAGES=1
 
 # Install MIST.
-RUN pip install --no-cache-dir "mist-medical[train]"
+RUN pip install --no-cache-dir "mist-medical[train-cuda]"
 
 # Create app directory.
 RUN mkdir /app

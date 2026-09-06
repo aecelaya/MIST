@@ -10,43 +10,43 @@ Getting Started
 
 ### System Requirements
 
-**Training** requires at least one NVIDIA GPU and sufficient memory to handle 3D
-medical images.
+MIST runs the full pipeline — analyze, preprocess, **train**, predict, evaluate
+— on **CPU**, with no NVIDIA-specific dependencies, and sufficient memory to
+handle 3D medical images. CPU training is slower than GPU-accelerated
+training, so scale patch size, batch size, and epochs accordingly.
 
-**Inference** (`mist_predict`) runs on any machine, including CPU-only systems
-and Macs, and does not require an NVIDIA GPU.
+An **NVIDIA GPU** is optional: install the `train-cuda` extra for
+DALI-accelerated data loading, which is substantially faster than the base CPU
+data loader.
 
 ### Install
 
-#### Inference only (CPU-compatible)
+#### CPU (default)
 
-To run `mist_predict` on any machine — including laptops and Macs without an
-NVIDIA GPU — install the base package:
+Runs the full pipeline, including training, on any machine — laptops, Macs,
+Linux workstations, HPC nodes without a GPU:
 
 ```console
 pip install mist-medical
 ```
 
-#### Training (NVIDIA GPU required)
-
-To train models, install the `train` extra, which includes NVIDIA DALI for
-GPU-accelerated data loading:
+#### NVIDIA GPU (DALI-accelerated data loading)
 
 ```console
-pip install "mist-medical[train]"
+pip install "mist-medical[train-cuda]"
 ```
 
 #### Development install
 
 To install MIST and customize the underlying code (e.g., add a loss function or
-new architecture), clone the repo and install in editable mode. Add `[train]` if
-you need to run training:
+new architecture), clone the repo and install in editable mode. Add
+`[train-cuda]` if you want DALI-accelerated data loading:
 
 ```console
 git clone https://github.com/mist-medical/MIST.git
 cd MIST
-pip install -e .          # inference only
-pip install -e ".[train]" # training
+pip install -e .                # CPU
+pip install -e ".[train-cuda]"  # NVIDIA GPU acceleration
 ```
 
 ### Data Format
