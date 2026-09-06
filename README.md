@@ -94,12 +94,16 @@ mist_predict --models-dir /path/to/results/models \
 - **Automatic configuration** — analysis step determines target spacing, patch
   size, normalization, and foreground cropping from your data
 - **Five-fold cross-validation** by default, with custom fold assignment support
-- **Multi-GPU training** via PyTorch DDP; uses all visible GPUs automatically
-- **GPU-accelerated data loading** via NVIDIA DALI during training
+- **Multi-GPU training** via PyTorch DDP on NVIDIA CUDA or AMD ROCm; uses all
+  visible GPUs automatically
+- **GPU-accelerated data loading** via NVIDIA DALI during training, with a
+  generic CPU-based data loader used automatically on AMD ROCm or CPU-only
+  hardware — no NVIDIA-specific dependencies required to train at all
 - **Sliding window inference** with configurable overlap and patch blending
 - **Test-time augmentation** and **multi-model ensembling** at inference
 - **Postprocessing** with learnable, per-class morphological strategies
-- **CPU inference** — `mist_predict` runs on any machine, including Macs
+- **CPU training and inference** — the full pipeline, `mist_train` included,
+  runs on any machine, including Macs and laptops without an NVIDIA GPU
 
 ## Supported Architectures
 
@@ -155,6 +159,16 @@ Full documentation, including configuration reference and advanced topics, is at
 
 ## What's New
 
+- September 2026 — **CPU and AMD ROCm training support** — the full pipeline,
+  including `mist_train`, now runs on CPU-only machines and AMD ROCm GPUs via
+  a new generic, pure-PyTorch data loader, auto-selected whenever NVIDIA
+  DALI isn't the right fit for the detected hardware (or isn't installed).
+  Communication backend (`nccl`/RCCL on ROCm, `gloo` on CPU) and data loader
+  selection are both detected automatically and persisted to `config.json`.
+  The `train` install extra is renamed to `train-cuda` (no backward-compatible
+  alias) to reflect that it now gates DALI's CUDA acceleration specifically,
+  not training capability in general — `pip install mist-medical` trains
+  everywhere on its own.
 - July 2026 — **Probability-level ensembling** — `mist_predict --output-probs`
   writes each model's final softmax probability volume alongside its discrete
   prediction; `mist_ensemble --input-type probabilities` averages probability

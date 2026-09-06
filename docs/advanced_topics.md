@@ -104,7 +104,8 @@ Below is an example of a valid `config.json` file.
       "num_cpu_workers": 8,
       "master_addr": "localhost",
       "master_port": 12345,
-      "communication_backend": "nccl"
+      "communication_backend": "nccl",
+      "data_loader": "dali"
     }
   },
 
@@ -953,7 +954,8 @@ Setting `training.amp` to `true` in `config.json` enables automatic mixed
 precision (AMP) using bfloat16 (BF16). BF16 has the same exponent range as
 float32, so it never requires gradient loss scaling and is numerically more
 stable than float16. It is supported on NVIDIA Ampere and later GPUs (A100, RTX
-30 series, and newer).
+30 series, and newer) and on AMD ROCm GPUs; CPU-only hardware has no BF16
+acceleration and always trains in float32 regardless of this setting.
 
 AMP applies to the full training loop and is also propagated to inference:
 
@@ -962,10 +964,12 @@ AMP applies to the full training loop and is also propagated to inference:
   consistent with training.
 - **Fold testing** and **standalone prediction** (`mist_predict`) — the
   `Predictor` enters `torch.autocast` for all forward passes. AMP is silently
-  skipped if CUDA is unavailable (CPU-only inference always runs in float32).
+  skipped if no GPU is available (CPU-only inference always runs in float32).
 
-`training.amp` is set to `true` by default. To disable AMP, set it to `false` in
-`config.json`:
+`training.amp` is set to `true` by default. If BF16 isn't supported on the
+detected hardware, MIST downgrades to float32 automatically and prints a
+warning explaining why, rather than requiring you to set this by hand. To
+disable AMP explicitly, set it to `false` in `config.json`:
 
 ```json
 "training": {
@@ -975,10 +979,11 @@ AMP applies to the full training loop and is also propagated to inference:
 
 !!! note
 
-    BF16 AMP is only applied on CUDA devices. CPU inference always runs in
+    BF16 AMP only applies on NVIDIA or AMD GPUs. CPU inference always runs in
     float32 regardless of this setting. Pre-Ampere NVIDIA GPUs (e.g. V100,
-    T4, RTX 20 series) do not support BF16; on those devices, disable AMP and
-    train in float32.
+    T4, RTX 20 series) do not support BF16 either; on those devices, MIST
+    downgrades to float32 automatically (see the warning above) rather than
+    require you to disable AMP by hand.
 
 ## Transfer learning
 
@@ -1189,14 +1194,67 @@ Adjusting this value can improve convergence on highly imbalanced datasets, but
 setting it too high may reduce the model’s ability to distinguish foreground
 from background.
 
+## Accelerator support (NVIDIA, AMD ROCm, CPU)
+
+MIST auto-detects the accelerator it's running on — NVIDIA CUDA, AMD ROCm, or
+CPU-only — and configures itself accordingly. You don't need to set anything
+for this to work; it's resolved once, the first time you run `mist_train`,
+and the resolved values are written back to `config.json` so every later
+run and all downstream inference read the same settings.
+
+Two things get resolved this way:
+
+- **`training.hardware.data_loader`** — which data-loading backend to use.
+  `"dali"` (NVIDIA's GPU-accelerated data loading library) is used
+  automatically on CUDA hardware where it's installed; everywhere else — AMD
+  ROCm, CPU-only machines, or a CUDA machine that skipped installing DALI —
+  MIST falls back to its own generic, pure-PyTorch data loader
+  automatically. The generic loader implements the same augmentations
+  (flips, zoom, noise, blur, brightness, contrast) but runs them on CPU
+  instead of as part of a GPU pipeline, so it's slower per batch than DALI
+  but requires no NVIDIA-specific dependencies. If your hardware is CUDA but
+  DALI isn't installed, MIST warns and falls back to the generic loader
+  rather than failing outright — install
+  `pip install "mist-medical[train-cuda]"` to get DALI's acceleration back.
+- **`training.hardware.communication_backend`** — the `torch.distributed`
+  backend used for multi-GPU coordination. Resolves to `"nccl"` on both
+  NVIDIA CUDA and AMD ROCm (on ROCm, the `"nccl"` backend name transparently
+  routes to RCCL, AMD's NCCL-compatible collective communications library —
+  no code or config change needed), and to `"gloo"` on CPU-only hardware.
+
+Both fields default to `"auto"` in a freshly analyzed `config.json` and are
+resolved the first time you run `mist_train`. If you set either one
+explicitly instead (e.g. `"data_loader": "generic"` to force the generic
+loader even on a CUDA machine), MIST respects that choice and never
+overrides it automatically. Because resolution happens once and is
+persisted, moving an already-resolved `config.json` to a different kind of
+machine (say, from a CUDA analyze node to a CPU-only training node) means
+you'll need to edit these two fields by hand, or restore the `"auto"`
+sentinel, to get them to re-resolve for the new hardware.
+
+CPU-only training is single-process — MIST does not (yet) support
+distributed training across multiple CPU processes, only across multiple
+GPUs (see [Multi-GPU training](#multi-gpu-training) below, which applies
+identically to AMD ROCm GPUs as it does to NVIDIA ones).
+
 ## Multi-GPU training
 
 MIST uses PyTorch's DistributedDataParallel (DDP) for multi-GPU data
-parallelism. MIST will use all GPUs visible to the process. On HPC clusters
-(SLURM, LSF, PBS), the job scheduler controls which GPUs are visible via
-`CUDA_VISIBLE_DEVICES` — MIST respects that assignment automatically. On shared
-workstations, set `CUDA_VISIBLE_DEVICES` yourself before running MIST to
-restrict which GPUs are used.
+parallelism, on both NVIDIA CUDA and AMD ROCm GPUs. MIST will use all GPUs
+visible to the process. On HPC clusters (SLURM, LSF, PBS), the job scheduler
+controls which GPUs are visible via `CUDA_VISIBLE_DEVICES` — MIST respects
+that assignment automatically. On shared workstations, set
+`CUDA_VISIBLE_DEVICES` yourself before running MIST to restrict which GPUs
+are used.
+
+!!! note
+
+    `CUDA_VISIBLE_DEVICES` also works on AMD ROCm — PyTorch's ROCm build
+    recognizes it directly. ROCm additionally has its own native
+    `ROCR_VISIBLE_DEVICES` (and the older alias `HIP_VISIBLE_DEVICES`) if you
+    ever need it, but don't set a ROCm-specific variable and
+    `CUDA_VISIBLE_DEVICES` at the same time — having both set is unsupported
+    and can cause unexpected device selection.
 
 `training.hardware.master_port` is a TCP port number used by PyTorch's
 distributed training backend to coordinate the GPU worker processes during
@@ -1294,18 +1352,28 @@ number of patients in the dataset.
     On memory-constrained systems it may be necessary to use a higher worker
     count for analysis than for preprocessing.
 
-### Training data-loading parallelism (DALI)
+### Training data-loading parallelism
 
-Training uses a different mechanism. MIST uses NVIDIA DALI to build a
-GPU-accelerated data pipeline that reads, augments, and assembles batches while
-the GPU is busy computing gradients. DALI's parallelism is controlled by CPU
-threads _within_ the pipeline, not by Python workers.
+Training uses a different mechanism from analysis/preprocessing/evaluation,
+and it depends on which data loader backend was resolved (see
+[Accelerator support](#accelerator-support-nvidia-amd-rocm-cpu) above).
 
-The number of DALI CPU threads is set via `training.hardware.num_cpu_workers` in
-`config.json` (default: `8`). There is no CLI flag for this — it is a
-hardware-tuning setting that belongs in the configuration file alongside the
-rest of the training hardware parameters. Edit it directly if your machine has
-significantly more or fewer CPU cores than the default assumes:
+On NVIDIA GPUs with DALI installed, MIST builds a GPU-accelerated data
+pipeline that reads, augments, and assembles batches while the GPU is busy
+computing gradients. DALI's parallelism is controlled by CPU threads
+_within_ the pipeline, not by Python worker processes.
+
+On AMD ROCm, CPU-only hardware, or a CUDA machine without DALI installed,
+MIST uses its generic data loader instead — a plain
+`torch.utils.data.DataLoader` running the same augmentations on CPU, in
+separate worker processes rather than pipeline threads.
+
+Either way, the number of workers/threads is set via
+`training.hardware.num_cpu_workers` in `config.json` (default: `8`). There is
+no CLI flag for this — it is a hardware-tuning setting that belongs in the
+configuration file alongside the rest of the training hardware parameters.
+Edit it directly if your machine has significantly more or fewer CPU cores
+than the default assumes:
 
 ```json
 "hardware": {
@@ -1316,9 +1384,10 @@ significantly more or fewer CPU cores than the default assumes:
 !!! note
 
     `num_cpu_workers` is not the same as the `--num-workers-*` flags. It does
-    not control how many patients are loaded in parallel — it controls how many
-    CPU threads DALI uses internally to prepare the next batch while the current
-    batch is on the GPU.
+    not control how many patients are loaded in parallel — it controls how
+    many CPU threads/processes the active data loader (DALI or MIST's
+    generic loader) uses internally to prepare the next batch while the
+    current batch is on the accelerator.
 
 ## Evaluation metrics
 
