@@ -127,6 +127,15 @@ mist_analyze --data /path/to/dataset.json \
 
 ### Data Dump
 
+!!! warning "Experimental feature"
+
+    The data dump is still under active development. The statistics and
+    shape descriptors it reports are useful today, but the format of
+    `data_dump.json`/`data_dump.md` and the set of fields they contain may
+    still change. You are welcome to try it, but you may encounter rough
+    edges. If you run into problems, please
+    [open an issue on GitHub](https://github.com/mist-medical/MIST/issues).
+
 When the `--data-dump` flag is passed, the analysis step produces two additional
 files alongside `config.json`: `data_dump.json` and `data_dump.md`.
 
