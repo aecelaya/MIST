@@ -157,6 +157,7 @@ weighted by a scheduled alpha. Schedules: `constant`, `linear`, `cosine`.
 | `mist_analyze`         | Analyze dataset and generate `config.json`                                                   |
 | `mist_preprocess`      | Preprocess images into NumPy arrays                                                          |
 | `mist_train`           | Train models                                                                                 |
+| `mist_finalize`        | Aggregate out-of-fold predictions into `results.csv` and run test-set inference              |
 | `mist_predict`         | Run inference on new data                                                                    |
 | `mist_ensemble`        | Combine predictions from multiple models via STAPLE, majority vote, or probability averaging |
 | `mist_evaluate`        | Evaluate predictions against ground truth                                                    |
