@@ -20,6 +20,7 @@ augmentations matching data_loading_constants.py's probabilities/ranges (not
 DALI's exact numerical output).
 """
 
+import warnings
 from itertools import combinations
 
 import numpy as np
@@ -188,6 +189,50 @@ def test_to_channels_first_moves_channel_axis_to_front():
     tensor = gl._to_channels_first(array)
     assert tensor.shape == (5, 2, 3, 4)
     assert torch.equal(tensor, torch.from_numpy(np.moveaxis(array, -1, 0)))
+
+
+def test_to_channels_first_never_warns_on_a_real_memory_mapped_input(tmp_path):
+    """No writable-tensor warning, given a genuine memmap (not just a copy).
+
+    Regression guard: np.ascontiguousarray is a no-op (returns the *same*
+    array, no copy) whenever its input is already C-contiguous -- which a
+    moveaxis view over `_load_case`'s memory-mapped (mmap_mode="r") reads
+    can be, e.g. for `_FullVolumeDataset`, which never crops. Using
+    ascontiguousarray there used to silently hand back a read-only array
+    wrapped in a torch.Tensor, and PyTorch warns loudly about exactly that
+    ("writing to this tensor will result in undefined behavior").
+
+    This must use a *real* memmap, not a plain array with its writeable flag
+    toggled off: torch.from_numpy() reports the resulting tensor as writable
+    either way (that's the "undefined behavior" part -- the flag doesn't
+    propagate reliably), so the only safe, reliable signal is whether
+    PyTorch's own warning fires -- and actually attempting to write to a
+    tensor genuinely backed by a read-only mmap crashes the whole process
+    with SIGBUS rather than raising a catchable Python exception, so this
+    test must never attempt that write, only check for the warning.
+    """
+    path = tmp_path / "single_channel.npy"
+    np.save(path, np.arange(2 * 3 * 4).reshape(2, 3, 4, 1).astype(np.float32))
+    array = gl._load_case(str(path))
+    assert np.moveaxis(array, -1, 0).flags["C_CONTIGUOUS"] is True  # the trigger condition
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        gl._to_channels_first(array)
+
+
+def test_load_case_returns_a_memory_mapped_array(tmp_path):
+    """_load_case mmaps rather than fully reading the file into memory.
+
+    Regression guard for the fix that stopped re-reading whole volumes from
+    disk on every single patch draw (see _load_case's docstring) -- confirms
+    it's actually memory-mapped, not just that the values happen to match.
+    """
+    path = tmp_path / "case.npy"
+    np.save(path, np.zeros((4, 5, 6, 1), dtype=np.float32))
+    array = gl._load_case(str(path))
+    assert isinstance(array, np.memmap)
+    assert array.flags["WRITEABLE"] is False
 
 
 # --------------------------------------------------------------------------- #

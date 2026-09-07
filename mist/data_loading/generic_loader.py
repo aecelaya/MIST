@@ -146,8 +146,38 @@ def _shard_indices(num_examples: int, rank: int, world_size: int) -> list[int]:
 
 
 def _load_case(path: str) -> np.ndarray:
-    """Load one preprocessed .npy array (image, label, or DTM) from disk."""
-    return np.load(path)
+    """Memory-map one preprocessed .npy array (image, label, or DTM).
+
+    ``mmap_mode="r"`` avoids reading the whole file into a fresh in-memory
+    array on every call -- the OS page cache handles caching transparently
+    instead, with no explicit allocation and no unbounded-growth risk (the
+    kernel evicts pages under memory pressure the same way it already does
+    for any file read, unlike an app-level cache that would just keep
+    growing). This matters a lot here: `_PatchTrainingDataset` calls this
+    once per patch drawn, and MIST's epochs are step-count-based
+    (`min_steps_per_epoch`), not dataset-length-based (`GenericIterator`
+    auto-restarts the underlying `DataLoader` iterator on `StopIteration`),
+    so on any dataset where `steps_per_epoch * batch_size` exceeds the case
+    count -- true for most real training runs -- the same case's full
+    volume gets reloaded from scratch many times within a single epoch. A
+    plain `np.load()` pays that cost in full every time; mmap only pages in
+    the bytes actually touched, which for `_extract_patch`'s final crop
+    (`image[slices]`) is roughly the patch's own size, not the whole
+    volume, whenever no padding is needed (the common case -- see
+    `_pad_to_roi`). Confirmed as the real bottleneck, not a CPU/worker-count
+    one, on a real 2x A100 run: doubling `num_cpu_workers` (8 -> 16) made no
+    difference, which rules out augmentation-compute throughput and points
+    at disk read throughput instead.
+
+    Safe to do unconditionally: every augmentation function in this module
+    (`_flip_fn`, `_zoom_fn`, `_noise_fn`, `_blur_fn`, `_brightness_fn`,
+    `_contrast_fn`) already only reads its input and returns a new array
+    rather than mutating in place, and `_to_channels_first` forces a real
+    writable, contiguous copy (`np.ascontiguousarray`) as the last step
+    before wrapping in a `torch.Tensor` -- so a read-only memmap view never
+    hits an in-place write anywhere in this pipeline.
+    """
+    return np.load(path, mmap_mode="r")
 
 
 def _pad_to_roi(array: np.ndarray, roi_size: tuple[int, int, int]) -> np.ndarray:
@@ -263,8 +293,19 @@ def _to_channels_first(array: np.ndarray) -> torch.Tensor:
     """Move a (D, H, W, C) array to (C, D, H, W).
 
     Matches dali_loader.py's final `fn.transpose(image, perm=[3, 0, 1, 2])`.
+
+    Uses `np.array(..., order="C")` (default `copy=True`) rather than
+    `np.ascontiguousarray`, which is a no-op -- returns the input unchanged,
+    no copy -- whenever it's already C-contiguous. That's not just a missed
+    optimization: a moveaxis view over `_load_case`'s memory-mapped (read-
+    only) `.npy` reads can already be C-contiguous (e.g. `_FullVolumeDataset`,
+    which never crops), so `ascontiguousarray` would silently hand back a
+    read-only array wrapped in a torch.Tensor -- PyTorch warns loudly about
+    exactly this ("writing to this tensor will result in undefined
+    behavior"). `np.array()`'s default `copy=True` guarantees an actually
+    new, writable buffer regardless of the input's contiguity.
     """
-    return torch.from_numpy(np.ascontiguousarray(np.moveaxis(array, -1, 0)))
+    return torch.from_numpy(np.array(np.moveaxis(array, -1, 0), order="C"))
 
 
 def _match_roi_size(array: np.ndarray, roi_size: tuple[int, int, int]) -> np.ndarray:
