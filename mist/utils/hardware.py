@@ -1,11 +1,14 @@
 """Hardware capability and accelerator-detection helpers for MIST.
 
 MIST's AMP uses BF16 autocast, which is only hardware-accelerated on NVIDIA
-Ampere or newer GPUs (A100, RTX 30xx, H100). On pre-Ampere cards (T4, V100,
-RTX 20xx) BF16 autocast runs without tensor-core support and is slower than
-plain FP32 — and on CPU it is unavailable entirely. These helpers resolve a
-requested AMP setting against the current hardware so callers can transparently
-fall back to FP32 instead of silently running a slow or unsupported path.
+Ampere or newer GPUs (A100, RTX 30xx, H100) and on AMD CDNA (MI100/200/300
+series) or RDNA3+ GPUs (RX 7000 series and newer, WMMA-capable). On
+pre-Ampere NVIDIA cards (T4, V100, RTX 20xx) and on AMD RDNA1/2 GPUs (RX
+5000/6000 series), BF16 autocast runs without matrix/tensor-core support and
+is slower than plain FP32 — and on CPU it is unavailable entirely. These
+helpers resolve a requested AMP setting against the current hardware so
+callers can transparently fall back to FP32 instead of silently running a
+slow or unsupported path.
 
 This module also detects which accelerator (CUDA, AMD ROCm, or CPU-only) MIST
 is running on, so training can pick a working `torch.distributed` backend and
@@ -20,6 +23,38 @@ from typing import Literal
 import torch
 
 AcceleratorType = Literal["cuda", "rocm", "cpu"]
+
+# gcnArchName prefixes (before ROCm's trailing ":sramecc+:xnack-" feature
+# suffix, hence the .split(":")[0] normalization below) of AMD GPUs with
+# hardware matrix-acceleration for BF16: CDNA (MFMA -- MI100/MI200/MI300/
+# MI350 series) and RDNA3+ (WMMA -- RX 7000 series and newer, plus the
+# Strix/Strix Halo APUs). RDNA1/2 (gfx10xx, e.g. the RX 5000/6000 series and
+# Radeon PRO W6000 series) has no matrix hardware at all and executes BF16 on
+# plain shader ALUs -- confirmed empirically on a Radeon RX 6800-class
+# (gfx1030) card, where torch.cuda.is_bf16_supported() reports True but
+# enabling AMP measurably regressed training speed vs. FP32. This list is
+# intentionally an allow-list, not a denylist: an unrecognized gcnArchName
+# (a future architecture, or one we haven't confirmed) falls back to False
+# and a warning via resolve_amp, the same conservative-by-default posture
+# bf16_supported() already takes for pre-Ampere NVIDIA GPUs.
+_ROCM_BF16_ACCELERATED_ARCHES = frozenset(
+    {
+        "gfx908",  # MI100 (CDNA1)
+        "gfx90a",  # MI210 / MI250 / MI250X (CDNA2)
+        "gfx940",
+        "gfx941",
+        "gfx942",  # MI300 series (CDNA3)
+        "gfx950",  # MI350 series (CDNA4)
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",  # RDNA3 (RX 7000 series)
+        "gfx1150",
+        "gfx1151",  # RDNA3.5 (Strix/Strix Halo APUs)
+        "gfx1200",
+        "gfx1201",  # RDNA4 (RX 9000 series)
+    }
+)
 
 
 def get_accelerator_type() -> AcceleratorType:
@@ -131,16 +166,25 @@ def bf16_supported() -> bool:
     On CUDA, checks the compute capability (Ampere / SM 8.0 or newer) rather
     than ``torch.cuda.is_bf16_supported()``, which by default returns True on
     pre-Ampere GPUs (T4, V100) via slow software emulation — which would defeat
-    the FP32 fallback this module exists to provide. ROCm has no documented
-    equivalent emulation quirk, so ``torch.cuda.is_bf16_supported()`` (which
-    already dispatches to the current ROCm device via the same compatibility
-    shim as the rest of ``torch.cuda``) is trusted directly there.
+    the FP32 fallback this module exists to provide.
+
+    On ROCm, ``torch.cuda.is_bf16_supported()`` turns out to have the exact
+    same quirk: it reports True on RDNA1/2 GPUs (e.g. the RX 6800, gfx1030),
+    which have no BF16 matrix hardware at all and run it on plain shader
+    ALUs, with no speed benefit — confirmed empirically, not just by
+    documentation gap, since it measurably regressed training speed on such
+    a card. So instead this checks the GPU's ``gcnArchName`` against
+    ``_ROCM_BF16_ACCELERATED_ARCHES``, an allow-list of architectures known
+    to have hardware matrix acceleration for BF16 (CDNA's MFMA, RDNA3+'s
+    WMMA). An unrecognized architecture is treated as unsupported, the same
+    conservative default used for pre-Ampere NVIDIA GPUs.
     """
     accelerator = get_accelerator_type()
     if accelerator == "cpu":
         return False
     if accelerator == "rocm":
-        return torch.cuda.is_bf16_supported()
+        arch = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+        return arch in _ROCM_BF16_ACCELERATED_ARCHES
     major, _ = torch.cuda.get_device_capability()
     return major >= 8
 

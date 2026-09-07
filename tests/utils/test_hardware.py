@@ -140,19 +140,53 @@ def test_bf16_supported_false_on_pre_ampere(monkeypatch) -> None:
     assert hardware.bf16_supported() is False
 
 
-def test_bf16_supported_on_rocm_trusts_is_bf16_supported(monkeypatch) -> None:
-    """On ROCm, bf16_supported defers to torch.cuda.is_bf16_supported().
+class _FakeDeviceProperties:
+    """Minimal stand-in for torch.cuda.get_device_properties()'s return."""
 
-    Unlike NVIDIA pre-Ampere GPUs, there's no documented ROCm emulation quirk
-    that would make this report a false positive, so no SM-style capability
-    check is applied here.
-    """
+    def __init__(self, gcn_arch_name: str) -> None:
+        self.gcnArchName = gcn_arch_name
+
+
+def test_bf16_supported_true_on_cdna(monkeypatch) -> None:
+    """bf16_supported is True on CDNA (MFMA matrix hardware), e.g. MI210."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.version, "hip", "6.2.41134", raising=False)
-    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+    monkeypatch.setattr(
+        torch.cuda,
+        "get_device_properties",
+        lambda idx=0: _FakeDeviceProperties("gfx90a:sramecc+:xnack-"),
+    )
     assert hardware.bf16_supported() is True
 
-    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
+
+def test_bf16_supported_true_on_rdna3(monkeypatch) -> None:
+    """bf16_supported is True on RDNA3+ (WMMA matrix hardware), e.g. RX 7900."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.version, "hip", "6.2.41134", raising=False)
+    monkeypatch.setattr(
+        torch.cuda,
+        "get_device_properties",
+        lambda idx=0: _FakeDeviceProperties("gfx1100"),
+    )
+    assert hardware.bf16_supported() is True
+
+
+def test_bf16_supported_false_on_rdna2(monkeypatch) -> None:
+    """bf16_supported is False on RDNA1/2 (no matrix hardware), e.g. RX 6800.
+
+    Regression guard: torch.cuda.is_bf16_supported() reports True on RDNA2
+    via software emulation on plain shader ALUs -- confirmed empirically to
+    regress training speed vs. FP32 on a real gfx1030 card -- so the
+    gcnArchName allow-list must be used instead of trusting it.
+    """
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.version, "hip", "6.3.42134", raising=False)
+    monkeypatch.setattr(
+        torch.cuda,
+        "get_device_properties",
+        lambda idx=0: _FakeDeviceProperties("gfx1030"),
+    )
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
     assert hardware.bf16_supported() is False
 
 

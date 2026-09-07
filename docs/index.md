@@ -30,6 +30,18 @@ pip install mist-medical
 pip install "mist-medical[train-cuda]"
 ```
 
+**AMD ROCm GPU** (install a ROCm-enabled PyTorch build first — PyPI's default
+`torch` wheel has no ROCm support — matching your driver's ROCm version, then
+MIST on top with no extra needed):
+
+```console
+pip install torch --index-url https://download.pytorch.org/whl/rocm6.4
+pip install mist-medical
+```
+
+See [Accelerator support](advanced_topics.md#accelerator-support-nvidia-amd-rocm-cpu)
+for details and how to pick the right `rocmX.Y` version for your machine.
+
 ## Key Features
 
 - **Automatic configuration** — analysis step determines target spacing, patch

@@ -953,9 +953,14 @@ Or set it directly in `config.json`:
 Setting `training.amp` to `true` in `config.json` enables automatic mixed
 precision (AMP) using bfloat16 (BF16). BF16 has the same exponent range as
 float32, so it never requires gradient loss scaling and is numerically more
-stable than float16. It is supported on NVIDIA Ampere and later GPUs (A100, RTX
-30 series, and newer) and on AMD ROCm GPUs; CPU-only hardware has no BF16
-acceleration and always trains in float32 regardless of this setting.
+stable than float16. It is hardware-accelerated on NVIDIA Ampere and later
+GPUs (A100, RTX 30 series, and newer) and on AMD GPUs with matrix-acceleration
+hardware — CDNA (MI100/200/300 series) and RDNA3 and newer (RX 7000 series and
+newer). Older AMD RDNA1/2 GPUs (RX 5000/6000 series, Radeon PRO W6000 series)
+report BF16 as available but have no matrix hardware for it, so MIST treats
+them the same as pre-Ampere NVIDIA GPUs and downgrades to FP32. CPU-only
+hardware has no BF16 acceleration and always trains in float32 regardless of
+this setting.
 
 AMP applies to the full training loop and is also propagated to inference:
 
@@ -981,9 +986,10 @@ disable AMP explicitly, set it to `false` in `config.json`:
 
     BF16 AMP only applies on NVIDIA or AMD GPUs. CPU inference always runs in
     float32 regardless of this setting. Pre-Ampere NVIDIA GPUs (e.g. V100,
-    T4, RTX 20 series) do not support BF16 either; on those devices, MIST
-    downgrades to float32 automatically (see the warning above) rather than
-    require you to disable AMP by hand.
+    T4, RTX 20 series) and pre-RDNA3 AMD GPUs (e.g. RX 6000 series) do not
+    have BF16 matrix hardware either; on those devices, MIST downgrades to
+    float32 automatically (see the warning above) rather than require you to
+    disable AMP by hand.
 
 ## Transfer learning
 
