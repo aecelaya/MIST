@@ -1,12 +1,16 @@
-"""Deterministic edge-case fixtures for the ANTs -> SimpleITK regression harness.
+"""Deterministic edge-case fixtures for the shared regression test harness.
 
-The fixtures are intentionally built with SimpleITK only, so their geometry
-(spacing, origin, direction cosines) is defined independently of the
-ANTs-vs-SimpleITK code path that the migration is changing. That keeps the
-fixtures a neutral ground truth: neither implementation "owns" how they were
-written.
+Originally written for the ANTs -> SimpleITK migration (now complete);
+`generate_dataset` is genuinely reused, load-bearing infrastructure for
+unrelated tests that need a small, real, deterministic MIST-format dataset --
+see this package's README. The fixtures are intentionally built with
+SimpleITK only, so their geometry (spacing, origin, direction cosines) was
+originally defined independently of the ANTs-vs-SimpleITK code path the
+migration was changing; that history is why they remain a clean, neutral
+dataset for any test that just needs realistic 3D imaging data.
 
-Each patient stresses a specific class of bug the migration plan calls out:
+Each patient stresses a specific class of bug the original migration plan
+called out (still useful edge cases for any pipeline test, migration or not):
 
     iso_small       Tiny isotropic identity-direction volume. Multi-label mask.
     anisotropic     Strongly anisotropic spacing (1, 1, 3). Exercises the

@@ -1,13 +1,12 @@
-"""SimpleITK-based replacements for the ANTs functions MIST currently uses.
+"""SimpleITK-based image I/O and array-conversion utilities for MIST.
 
-Stage 1 of the ANTs -> SimpleITK migration (see ants_to_simpleitk_migration.md).
-This module is not wired into the pipeline yet; later stages replace each
-`ants.*` call site with the corresponding function here. Keeping the
-(x, y, z) <-> (z, y, x) array-axis conversion in exactly two places
+Originally written as SimpleITK replacements for MIST's former ANTs-based
+image I/O; MIST no longer depends on ants at all. Keeping the (x, y, z) <->
+(z, y, x) array-axis conversion in exactly two places
 (`image_from_array`/`array_from_image`) is the point: everywhere else in
 MIST's business logic (bounding boxes, target_spacing tuples, crop/pad
-indices) is written in ANTs' (x, y, z) convention, and a transpose bug
-anywhere else would be silent, not a crash.
+indices) is written in ANTs' original (x, y, z) convention, and a transpose
+bug anywhere else would be silent, not a crash.
 """
 
 from collections.abc import Sequence

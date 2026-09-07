@@ -1,25 +1,27 @@
-"""Stage 0 regression harness: run the current pipeline and diff its artifacts.
+"""Pipeline-running test harness: run the real pipeline and capture its artifacts.
 
-This module drives ``mist_analyze`` -> ``mist_preprocess`` over the fixed
-fixture set (see :mod:`fixtures`) and captures every intermediate artifact that
-later migration stages are expected to reproduce exactly:
+Originally the Stage 0 regression harness for the ANTs -> SimpleITK
+migration (now complete); ``run_pipeline`` is genuinely reused, load-bearing
+infrastructure for unrelated tests that need a real, deterministic
+``mist_analyze -> mist_preprocess`` run rather than mocked pipeline
+internals -- see ``tests/data_loading/test_generic_loader.py`` and
+``tests/regression/cpu_rocm/``. This module drives that over the fixed
+fixture set (see :mod:`fixtures`) and captures every intermediate artifact:
 
     results/config.json         (analyze)
     results/train_paths.csv     (analyze)
-    results/fg_bboxes.csv       (analyze)  -- Stage 3 / Stage 4 diff target
-    numpy/images/<id>.npy       (preprocess) -- Stage 4 diff target
-    numpy/labels/<id>.npy       (preprocess) -- Stage 4 diff target
-    numpy/dtms/<id>.npy         (preprocess) -- Stage 4 diff target
+    results/fg_bboxes.csv       (analyze)
+    numpy/images/<id>.npy       (preprocess)
+    numpy/labels/<id>.npy       (preprocess)
+    numpy/dtms/<id>.npy         (preprocess)
 
-Prediction artifacts (Stage 5) require a trained model, which the migration
-plan defers to that stage; :func:`run_prediction` is a thin, optional hook for
-when a model/config is available rather than something baked into the Stage 0
-gate.
+Prediction artifacts require a trained model; :func:`run_prediction` is a
+thin, optional hook for when a model/config is available.
 
-Two ways to use it:
-
-* Programmatically, from the pytest gate in ``test_stage0_selfdiff.py``.
-* As a CLI, to capture a golden set once and diff future runs against it::
+The module also still has a `capture`/`diff` CLI from its original migration
+role, for capturing a golden artifact set once and diffing future runs
+against it -- no longer part of any current regression gate, but left in
+case a future cross-implementation change needs the same technique::
 
       python -m tests.regression.ants_sitk.harness capture --golden-dir GOLDEN
       python -m tests.regression.ants_sitk.harness diff    --golden-dir GOLDEN
