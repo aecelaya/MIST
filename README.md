@@ -35,6 +35,9 @@ pip install mist-medical
 pip install "mist-medical[dali]"
 ```
 
+Upgrading from an older MIST release? `pip install "mist-medical[train]"` still
+works too — it's kept as an alias for `[dali]`.
+
 **AMD ROCm GPU** (install a ROCm-enabled PyTorch build first — PyPI's default
 `torch` wheel has no ROCm support — matching your driver's ROCm version, then
 MIST on top with no extra needed; see
@@ -176,11 +179,12 @@ Full documentation, including configuration reference and advanced topics, is at
   DALI isn't the right fit for the detected hardware (or isn't installed).
   Communication backend (`nccl`/RCCL on ROCm, `gloo` on CPU) and data loader
   selection are both detected automatically and persisted to `config.json`.
-  The former `train` install extra is renamed to `dali` (no backward-compatible
-  alias) to reflect that it gates DALI's CUDA acceleration specifically, not
-  training capability in general — `pip install mist-medical` trains
-  everywhere on its own; `pip install "mist-medical[dali]"` is recommended
-  on top of that for NVIDIA GPU training. AMP (BF16) is also now correctly
+  The `train` install extra is now called `dali`, to reflect that it gates
+  DALI's CUDA acceleration specifically, not training capability in
+  general — `pip install mist-medical` trains everywhere on its own;
+  `pip install "mist-medical[dali]"` is recommended on top of that for
+  NVIDIA GPU training. `[train]` is kept working as an alias for `[dali]`
+  for anyone upgrading from an older release. AMP (BF16) is also now correctly
   scoped to hardware with real matrix acceleration — NVIDIA Ampere+ and AMD
   CDNA/RDNA3+ — rather than trusting `torch.cuda.is_bf16_supported()`, which
   reports available on older AMD RDNA1/2 GPUs despite having no BF16

@@ -58,7 +58,15 @@ dependencies = [
 # data loader; this extra only matters on CUDA hardware, where it's the
 # default, faster path. Recommended whenever training on an NVIDIA GPU. See
 # cpu_rocm_support_plan.md.
+#
+# `dali` is the current, documented name. `train` is kept as an identical
+# alias for backward compatibility -- it's the extra name from MIST
+# releases before this CPU/ROCm effort, so existing users' scripts, docs,
+# and notebooks already reference `pip install "mist-medical[train]"`;
+# breaking that silently isn't worth the naming cleanliness. New docs
+# should point people at `dali`, not this alias.
 dali = ["nvidia-dali-cuda120"]
+train = ["nvidia-dali-cuda120"]
 dev = ["pytest"]
 
 [project.urls]

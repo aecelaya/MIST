@@ -37,6 +37,9 @@ pip install mist-medical
 pip install "mist-medical[dali]"
 ```
 
+Upgrading from an older MIST release? `pip install "mist-medical[train]"` still
+works too — it's kept as an alias for `[dali]`.
+
 #### AMD ROCm GPU
 
 PyPI's default `torch` wheel has no ROCm support, so install a ROCm-enabled
