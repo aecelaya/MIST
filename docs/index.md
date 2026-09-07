@@ -109,7 +109,7 @@ for details and how to pick the right `rocmX.Y` version for your machine.
   preprocessing, postprocessing, evaluation, analysis, and inference now run
   entirely on SimpleITK; `antspyx` is no longer a dependency at all. A
   six-stage migration, each stage verified against real trained models
-  (pocket nnU-Net, FMGNet, SwinUNETR-small) across a full multi-GPU pipeline
+  (pocket nnU-Net, FMGNet, SwinUNETR-small) across a full 2-GPU H100 pipeline
   run before shipping.
 - July 2026 — **Probability-level ensembling** — `mist_predict --output-probs`
   writes each model's final softmax probability volume alongside its discrete
