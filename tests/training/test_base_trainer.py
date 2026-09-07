@@ -1168,6 +1168,75 @@ def test_load_checkpoint_returns_false_when_missing(tmp_pipeline, mist_args, mon
     assert state["best_val_loss"] == pytest.approx(1.23)
 
 
+def test_load_checkpoint_uses_map_location_cpu(tmp_pipeline, mist_args, monkeypatch):
+    """load_checkpoint passes map_location="cpu" to torch.load.
+
+    Regression guard: without this, torch.load tries to recreate tensors on
+    whatever device type they were saved from, which crashes outright if
+    that device type isn't available on the current machine -- e.g. resuming
+    a checkpoint saved during CUDA or ROCm training on a CPU-only machine.
+    Can't reproduce the actual crash without real CUDA/ROCm hardware to
+    produce a genuinely non-CPU checkpoint, so this instead confirms the
+    kwarg itself is always passed, which is what prevents it.
+    """
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+    trainer.save_checkpoint(fold=0, state=state)
+
+    calls = []
+    real_load = torch.load
+
+    def spy_load(*args, **kwargs):
+        calls.append(kwargs)
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", spy_load)
+    trainer.load_checkpoint(fold=0, state=trainer.build_components(rank=0, world_size=1))
+
+    assert len(calls) == 1
+    assert calls[0].get("map_location") == "cpu"
+
+
+def test_run_cross_validation_resume_skip_check_uses_map_location_cpu(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """The resume-skip check in run_cross_validation also uses map_location="cpu".
+
+    Same regression as test_load_checkpoint_uses_map_location_cpu, but for
+    the second, separate torch.load call site -- the one that only reads
+    checkpoint["epoch"] to decide whether to skip an already-complete fold,
+    but still has to fully deserialize the tensors to get there.
+    """
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    trainer = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=0.5)
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+    assert trainer._checkpoint_path(0).exists()
+
+    mist_args.resume = True
+    trainer2 = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=0.5)
+    trainer2.checkpoints_dir = trainer.checkpoints_dir
+
+    calls = []
+    real_load = torch.load
+
+    def spy_load(*args, **kwargs):
+        calls.append(kwargs)
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", spy_load)
+    trainer2.run_cross_validation(rank=0, world_size=1)
+
+    assert len(calls) >= 1
+    assert all(call.get("map_location") == "cpu" for call in calls)
+
+
 def test_train_fold_saves_checkpoint_each_epoch(tmp_pipeline, mist_args, monkeypatch):
     """train_fold should call save_checkpoint once per completed epoch."""
     monkeypatch.setattr(torch, "save", _real_torch_save)

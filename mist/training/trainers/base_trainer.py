@@ -686,7 +686,17 @@ class BaseTrainer(ABC):
         if not path.exists():
             return False
 
-        checkpoint = torch.load(path, weights_only=False)
+        # map_location="cpu": without it, torch.load tries to recreate
+        # tensors on whatever device type they were saved from, which
+        # crashes outright if that device type isn't available on this
+        # machine (e.g. resuming a checkpoint saved during CUDA or ROCm
+        # training on a CPU-only machine, or moving a job between a CUDA
+        # and a ROCm node). Loading to CPU first is always safe regardless
+        # of whether this run is actually on the same device type as the
+        # original save -- load_state_dict() below moves values onto each
+        # destination tensor's own (possibly CUDA/ROCm) device automatically,
+        # the same safe pattern mist/models/model_loader.py already uses.
+        checkpoint = torch.load(path, weights_only=False, map_location="cpu")
 
         # Restore model weights (unwrap DDP before loading).
         model = state["model"]
@@ -995,7 +1005,11 @@ class BaseTrainer(ABC):
             if getattr(self.mist_args, "resume", False):
                 path = self._checkpoint_path(fold)
                 if path.exists():
-                    checkpoint = torch.load(path, weights_only=False)
+                    # map_location="cpu": see load_checkpoint()'s comment --
+                    # this only reads checkpoint["epoch"] (an int) but still
+                    # has to fully deserialize the tensors to get there, so
+                    # it's exposed to the exact same cross-device crash.
+                    checkpoint = torch.load(path, weights_only=False, map_location="cpu")
                     if checkpoint["epoch"] >= self.config["training"]["epochs"] - 1:
                         if rank == 0:
                             print_info(f"Fold {fold} already complete, skipping.")

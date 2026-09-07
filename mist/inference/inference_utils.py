@@ -19,7 +19,12 @@ from mist.utils import sitk_io
 
 
 def get_default_device() -> str:
-    """Return the default inference device (CUDA if available, else CPU)."""
+    """Return the default inference device ("cuda" if available, else "cpu").
+
+    "cuda" here also covers AMD ROCm GPUs: PyTorch's ROCm build reuses the
+    same torch.cuda namespace and "cuda" device string as a compatibility
+    shim, so torch.cuda.is_available() is True there too.
+    """
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -30,12 +35,13 @@ def resolve_device(device_str: str) -> torch.device:
     mist_finalize) so device resolution/fallback behavior stays consistent.
 
     Args:
-        device_str: Device specification: "cpu", "cuda", or a CUDA index
-            (e.g. "0").
+        device_str: Device specification: "cpu", "cuda" (also targets AMD
+            ROCm GPUs -- see get_default_device()'s docstring), or a CUDA
+            index (e.g. "0").
 
     Returns:
-        The resolved device. Falls back to CPU with a warning if CUDA (or the
-        requested CUDA index) isn't actually available.
+        The resolved device. Falls back to CPU with a warning if CUDA/ROCm
+        (or the requested CUDA index) isn't actually available.
 
     Raises:
         ValueError: If device_str isn't "cpu", "cuda", or a valid integer.
@@ -43,7 +49,14 @@ def resolve_device(device_str: str) -> torch.device:
     if device_str == "cpu":
         return torch.device("cpu")
     if device_str == "cuda":
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        warnings.warn(
+            "No CUDA or ROCm device available; falling back to CPU. Pass "
+            "--device cpu explicitly to silence this.",
+            stacklevel=2,
+        )
+        return torch.device("cpu")
     # Numeric (CUDA index) case.
     try:
         idx = int(device_str)

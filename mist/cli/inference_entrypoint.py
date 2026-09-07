@@ -54,7 +54,10 @@ def _parse_inference_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--device",
         type=str,
         default="cuda",
-        help="Device to run inference on: 'cpu', 'cuda', or a CUDA index like '0'.",
+        help=(
+            "Device to run inference on: 'cpu', 'cuda' (also targets AMD "
+            "ROCm GPUs), or a CUDA index like '0'."
+        ),
     )
     p.arg(
         "--postprocess-strategy",

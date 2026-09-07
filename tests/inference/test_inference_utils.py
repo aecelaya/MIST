@@ -239,6 +239,23 @@ def test_resolve_device_cpu_cuda(monkeypatch, is_avail, dev_in, expected_type):
     assert dev.type == expected_type
 
 
+def test_resolve_device_cuda_unavailable_warns_and_cpu(monkeypatch):
+    """resolve_device("cuda") warns before falling back to CPU.
+
+    Regression guard: this branch used to fall back silently, unlike the
+    numeric-index branch right below (which already warned) and unlike
+    every resolve_* function in mist/utils/hardware.py (resolve_amp,
+    resolve_data_loader, resolve_communication_backend all warn on
+    downgrade) -- "cuda" is also the CLI default for mist_predict and
+    mist_finalize's --device flag, so this is the path most runs on
+    CPU-only hardware actually take.
+    """
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=True)
+    with pytest.warns(UserWarning, match="falling back to CPU"):
+        dev = iu.resolve_device("cuda")
+    assert dev.type == "cpu"
+
+
 def test_resolve_device_numeric_available(monkeypatch):
     """Test resolve_device with numeric CUDA index when available."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True, raising=True)

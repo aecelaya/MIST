@@ -66,7 +66,8 @@ def _parse_finalize_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="cuda",
         help=(
             "Device for held-out test-set inference (ignored if no test set "
-            "is configured): 'cpu', 'cuda', or a CUDA index like '0'."
+            "is configured): 'cpu', 'cuda' (also targets AMD ROCm GPUs), or "
+            "a CUDA index like '0'."
         ),
     )
     ns = parser.parse_args(argv)
