@@ -312,6 +312,42 @@ def test_multiprocessing_context_none_on_windows(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# _pin_memory
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("accelerator", "expected"),
+    [("cpu", False), ("cuda", True), ("rocm", True)],
+)
+def test_pin_memory_only_on_a_real_accelerator(monkeypatch, accelerator, expected):
+    """pin_memory is requested on CUDA/ROCm, never on CPU-only hardware.
+
+    Meaningless (and PyTorch warns about it) with no accelerator to pin
+    memory for -- gated the same way _target_device is.
+    """
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    assert gl._pin_memory() is expected
+
+
+# --------------------------------------------------------------------------- #
+# _prefetch_factor
+# --------------------------------------------------------------------------- #
+
+
+def test_prefetch_factor_none_when_no_workers():
+    """num_workers <= 0 means no worker processes to prefetch ahead of --
+    PyTorch raises a ValueError if prefetch_factor is set in that case."""
+    assert gl._prefetch_factor(0) is None
+    assert gl._prefetch_factor(-1) is None
+
+
+def test_prefetch_factor_set_when_workers_present():
+    """A positive prefetch_factor is requested whenever workers exist."""
+    assert gl._prefetch_factor(4) == 4
+
+
+# --------------------------------------------------------------------------- #
 # _flip_fn
 # --------------------------------------------------------------------------- #
 

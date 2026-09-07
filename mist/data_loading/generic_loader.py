@@ -121,6 +121,35 @@ def _multiprocessing_context(num_workers: int) -> str | None:
     return "fork"
 
 
+def _pin_memory() -> bool:
+    """Whether the DataLoader should allocate batches in page-locked memory.
+
+    GenericIterator.next() already does `.to(device, non_blocking=True)` --
+    but non_blocking only actually enables an asynchronous H2D copy when the
+    source tensor is in pinned memory; without pin_memory=True on the
+    DataLoader, that non_blocking=True was silently degrading to a regular
+    blocking copy, giving none of the overlap it was asking for. Meaningless
+    (and PyTorch warns about it) with no accelerator, so gated on hardware.
+    """
+    return hardware.get_accelerator_type() != "cpu"
+
+
+def _prefetch_factor(num_workers: int) -> int | None:
+    """Batches per worker to prefetch ahead, or None (num_workers == 0).
+
+    PyTorch's own default (2) is a reasonable floor; bumping it modestly
+    gives the consumer a bigger buffer to draw from before it catches up to
+    (and has to wait on) the producers -- directly aimed at the bursty
+    "fast for a few steps, then stalls" pattern a data-starved GPU sees.
+    This alone doesn't change the underlying producer throughput, so it's a
+    smoothing knob, not a fix for a genuinely slower-than-the-GPU pipeline.
+    Must be left at the DataLoader default (None) when num_workers == 0 --
+    PyTorch raises a ValueError otherwise, since there's no worker to
+    prefetch ahead of the main process in that case.
+    """
+    return 4 if num_workers > 0 else None
+
+
 def _target_device(rank: int) -> torch.device:
     """Resolve the device .next() should move a finished batch to.
 
@@ -720,6 +749,8 @@ def get_training_dataset(
         generator=shuffle_generator,
         drop_last=False,
         multiprocessing_context=_multiprocessing_context(num_workers),
+        pin_memory=_pin_memory(),
+        prefetch_factor=_prefetch_factor(num_workers),
         # Deliberately NOT persistent_workers=True: MIST builds a fresh
         # training DataLoader per fold, and worker pools from earlier folds
         # were never explicitly torn down before the next one existed --
@@ -768,6 +799,7 @@ def get_validation_dataset(
         shuffle=False,
         num_workers=num_workers,
         multiprocessing_context=_multiprocessing_context(num_workers),
+        pin_memory=_pin_memory(),
     )
     return GenericIterator(data_loader, device=_target_device(rank))
 
@@ -811,5 +843,6 @@ def get_test_dataset(
         shuffle=False,
         num_workers=num_workers,
         multiprocessing_context=_multiprocessing_context(num_workers),
+        pin_memory=_pin_memory(),
     )
     return GenericIterator(data_loader, device=_target_device(rank))
