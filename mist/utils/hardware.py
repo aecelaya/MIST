@@ -122,8 +122,8 @@ def resolve_data_loader(requested: str) -> str:
 
     On CUDA, "dali" is only returned if it's actually *installed* (i.e.
     registered in ``mist.data_loading.data_loader_registry``) — a CUDA
-    machine that skipped ``pip install "mist-medical[train-cuda]"`` still
-    detects as CUDA hardware, but has no working "dali" entry to resolve to.
+    machine that skipped ``pip install "mist-medical[dali]"`` still detects
+    as CUDA hardware, but has no working "dali" entry to resolve to.
     Rather than fail training outright over a plausible installation
     mistake, this warns and falls back to "generic" instead, the same way
     ``resolve_amp`` warns and downgrades rather than raising.
@@ -154,7 +154,7 @@ def resolve_data_loader(requested: str) -> str:
         "CUDA hardware was detected, but nvidia-dali-cuda120 is not "
         "installed, so the DALI-accelerated data loader is unavailable. "
         "Falling back to the generic data loader (slower, but fully "
-        'functional). Install it with: pip install "mist-medical[train-cuda]".',
+        'functional). Install it with: pip install "mist-medical[dali]".',
         stacklevel=2,
     )
     return "generic"

@@ -24,10 +24,10 @@ Works on Mac):
 pip install mist-medical
 ```
 
-**NVIDIA GPU** (adds DALI-accelerated data loading):
+**NVIDIA GPU** (recommended — adds DALI-accelerated data loading):
 
 ```console
-pip install "mist-medical[train-cuda]"
+pip install "mist-medical[dali]"
 ```
 
 **AMD ROCm GPU** (install a ROCm-enabled PyTorch build first — PyPI's default
@@ -79,10 +79,15 @@ for details and how to pick the right `rocmX.Y` version for your machine.
   DALI isn't the right fit for the detected hardware (or isn't installed).
   Communication backend (`nccl`/RCCL on ROCm, `gloo` on CPU) and data loader
   selection are both detected automatically and persisted to `config.json`.
-  The `train` install extra is renamed to `train-cuda` (no backward-compatible
-  alias) to reflect that it now gates DALI's CUDA acceleration specifically,
-  not training capability in general — `pip install mist-medical` trains
-  everywhere on its own.
+  The former `train` install extra is renamed to `dali` (no backward-compatible
+  alias) to reflect that it gates DALI's CUDA acceleration specifically, not
+  training capability in general — `pip install mist-medical` trains
+  everywhere on its own; `pip install "mist-medical[dali]"` is recommended
+  on top of that for NVIDIA GPU training. AMP (BF16) is also now correctly
+  scoped to hardware with real matrix acceleration — NVIDIA Ampere+ and AMD
+  CDNA/RDNA3+ — rather than trusting `torch.cuda.is_bf16_supported()`, which
+  reports available on older AMD RDNA1/2 GPUs despite having no BF16
+  acceleration at all.
 - July 2026 — **Probability-level ensembling** — `mist_predict --output-probs`
   writes each model's final softmax probability volume alongside its discrete
   prediction; `mist_ensemble --input-type probabilities` averages probability

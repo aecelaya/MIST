@@ -1221,7 +1221,8 @@ Two things get resolved this way:
   but requires no NVIDIA-specific dependencies. If your hardware is CUDA but
   DALI isn't installed, MIST warns and falls back to the generic loader
   rather than failing outright — install
-  `pip install "mist-medical[train-cuda]"` to get DALI's acceleration back.
+  `pip install "mist-medical[dali]"` to get DALI's acceleration back
+  (recommended whenever training on an NVIDIA GPU).
 - **`training.hardware.communication_backend`** — the `torch.distributed`
   backend used for multi-GPU coordination. Resolves to `"nccl"` on both
   NVIDIA CUDA and AMD ROCm (on ROCm, the `"nccl"` backend name transparently

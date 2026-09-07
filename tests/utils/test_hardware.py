@@ -88,7 +88,7 @@ def test_resolve_data_loader_cuda_without_dali_warns_and_falls_back(monkeypatch)
     """ "auto" on CUDA without DALI installed warns and falls back to "generic".
 
     Regression guard: a CUDA machine that skipped `pip install
-    "mist-medical[train-cuda]"` used to hit a ValueError deep inside
+    "mist-medical[dali]"` used to hit a ValueError deep inside
     build_dataloaders() ("Data loader 'dali' is not registered") instead of
     training on the generic loader with a clear warning.
     """
@@ -96,7 +96,7 @@ def test_resolve_data_loader_cuda_without_dali_warns_and_falls_back(monkeypatch)
 
     monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
     monkeypatch.setattr(data_loader_registry, "list_registered_data_loaders", lambda: ["generic"])
-    with pytest.warns(UserWarning, match="train-cuda"):
+    with pytest.warns(UserWarning, match=r"mist-medical\[dali\]"):
         assert hardware.resolve_data_loader("auto") == "generic"
 
 
