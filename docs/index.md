@@ -95,6 +95,22 @@ for details and how to pick the right `rocmX.Y` version for your machine.
   CDNA/RDNA3+ — rather than trusting `torch.cuda.is_bf16_supported()`, which
   reports available on older AMD RDNA1/2 GPUs despite having no BF16
   acceleration at all.
+- September 2026 — **`mist_finalize` for distributed per-fold training** —
+  `mist_train` now supports the one-fold-per-node HPC pattern: when an
+  invocation's `--folds`/`training.folds` doesn't cover every configured fold,
+  it writes out-of-fold predictions for the fold(s) it trained and prints a
+  reminder instead of guessing at final results from a partial run. Run
+  `mist_finalize --results <dir>` once, after every per-fold job sharing that
+  results directory has finished, to aggregate every fold's held-out
+  predictions into `results.csv` and run held-out test-set inference.
+  `mist_finalize` is safe to re-run any time — each run recomputes from
+  whatever's currently on disk.
+- September 2026 — **ANTs dependency removed** — MIST's image I/O,
+  preprocessing, postprocessing, evaluation, analysis, and inference now run
+  entirely on SimpleITK; `antspyx` is no longer a dependency at all. A
+  six-stage migration, each stage verified against real trained models
+  (pocket nnU-Net, FMGNet, SwinUNETR-small) across a full multi-GPU pipeline
+  run before shipping.
 - July 2026 — **Probability-level ensembling** — `mist_predict --output-probs`
   writes each model's final softmax probability volume alongside its discrete
   prediction; `mist_ensemble --input-type probabilities` averages probability
