@@ -35,8 +35,11 @@ pip install mist-medical
 pip install "mist-medical[dali]"
 ```
 
-Upgrading from an older MIST release? `pip install "mist-medical[train]"` still
-works too — it's kept as an alias for `[dali]`.
+<!-- prettier-ignore -->
+> [!NOTE]
+> Upgrading from an older MIST release? `pip install "mist-medical[train]"`
+> still works too — it's kept as an identical alias for `[dali]`, so nothing
+> in an existing script or notebook breaks.
 
 **AMD ROCm GPU** (install a ROCm-enabled PyTorch build first — PyPI's default
 `torch` wheel has no ROCm support — matching your driver's ROCm version, then
