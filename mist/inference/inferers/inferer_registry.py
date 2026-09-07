@@ -33,7 +33,6 @@ def get_inferer(name: str) -> type[AbstractInferer]:
     """Retrieve a registered inferer class by name."""
     if name not in INFERER_REGISTRY:
         raise KeyError(
-            f"Inferer '{name}' is not registered. "
-            f"Available: [{', '.join(list_inferers())}]"
+            f"Inferer '{name}' is not registered. Available: [{', '.join(list_inferers())}]"
         )
     return INFERER_REGISTRY[name]

@@ -300,9 +300,7 @@ def test_run_evaluation_after_postprocess_invokes_evaluator(tmp_path, monkeypatc
 
     monkeypatch.setattr(entry, "Evaluator", _EvalStub, raising=True)
 
-    entry._run_evaluation_after_postprocess(
-        ns, output_dir, predictions_dir, num_workers=3
-    )
+    entry._run_evaluation_after_postprocess(ns, output_dir, predictions_dir, num_workers=3)
 
     assert captured["ran"] is True
     assert captured["max_workers"] == 3
@@ -420,9 +418,7 @@ def test_run_postprocess_with_eval_runs_evaluation(tmp_path, monkeypatch):
         eval_called["num_workers"] = num_workers
 
     monkeypatch.setattr(entry, "Postprocessor", _PPStub, raising=True)
-    monkeypatch.setattr(
-        entry, "_run_evaluation_after_postprocess", _fake_eval, raising=True
-    )
+    monkeypatch.setattr(entry, "_run_evaluation_after_postprocess", _fake_eval, raising=True)
 
     entry.run_postprocess(ns)
 

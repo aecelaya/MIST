@@ -304,9 +304,7 @@ class TestBuildDataDump:
     def test_all_top_level_keys_present(self, dumper, monkeypatch):
         """Returned dict contains all five top-level keys."""
         # Stub heavy helpers to return minimal dicts.
-        monkeypatch.setattr(
-            ddu, "collect_per_patient_stats", lambda *_, **__: {}, raising=True
-        )
+        monkeypatch.setattr(ddu, "collect_per_patient_stats", lambda *_, **__: {}, raising=True)
         monkeypatch.setattr(
             ddu,
             "build_image_statistics",
@@ -332,9 +330,7 @@ class TestBuildDataDump:
 
     def test_mist_config_path_points_to_results_dir(self, dumper, monkeypatch):
         """mist_config_path is <results_dir>/config.json."""
-        monkeypatch.setattr(
-            ddu, "collect_per_patient_stats", lambda *_, **__: {}, raising=True
-        )
+        monkeypatch.setattr(ddu, "collect_per_patient_stats", lambda *_, **__: {}, raising=True)
         monkeypatch.setattr(ddu, "build_image_statistics", lambda *_: {}, raising=True)
         monkeypatch.setattr(ddu, "build_label_statistics", lambda *_: {}, raising=True)
         monkeypatch.setattr(ddu, "generate_observations", lambda *_: [], raising=True)
@@ -443,16 +439,12 @@ class TestDataDumperRun:
     def _stub_build(self, monkeypatch, tmp_path):
         """Replace build_data_dump with a fast stub for run() tests."""
         dump = _make_controlled_dump(str(tmp_path))
-        monkeypatch.setattr(
-            DataDumper, "build_data_dump", lambda self: dump, raising=True
-        )
+        monkeypatch.setattr(DataDumper, "build_data_dump", lambda self: dump, raising=True)
         # Stub io.write_json_file to write the file (fast, no numpy issues).
         monkeypatch.setattr(
             io_mod,
             "write_json_file",
-            lambda path, data: Path(path).write_text(
-                json.dumps(data), encoding="utf-8"
-            ),
+            lambda path, data: Path(path).write_text(json.dumps(data), encoding="utf-8"),
             raising=True,
         )
         return dump

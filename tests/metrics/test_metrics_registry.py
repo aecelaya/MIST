@@ -29,13 +29,13 @@ def synthetic_masks():
 def test_metric_subclass_missing_required_attr_raises():
     """Subclass missing name, best, or worst raises TypeError at definition."""
     with pytest.raises(TypeError, match="must define class attribute 'name'"):
-
-        class BadMetric(Metric):  # pylint: disable=unused-variable
-            best = 1.0
-            worst = 0.0
-
-            def __call__(self, truth, pred, spacing, **kwargs):
-                pass  # pragma: no cover
+        # Creating the class is the act under test; the TypeError fires during
+        # class construction, so the name would never bind anyway.
+        type(
+            "BadMetric",
+            (Metric,),
+            {"best": 1.0, "worst": 0.0},
+        )
 
 
 def test_registry_contains_all_metrics():
@@ -202,9 +202,7 @@ def test_lesion_wise_dice_min_volume_kwarg_forwarded(lesion_masks):
     metric = get_metric("lesion_wise_dice")
     # All GT lesions filtered AND prediction is empty → denominator=0 → best case.
     empty_pred = np.zeros_like(pred)
-    result = metric(
-        gt, empty_pred, spacing, min_lesion_volume=10000.0, dilation_iters=1
-    )
+    result = metric(gt, empty_pred, spacing, min_lesion_volume=10000.0, dilation_iters=1)
     assert result == metric.best
 
 
@@ -238,9 +236,7 @@ def test_lesion_wise_surf_dice_tolerance_kwarg_forwarded(lesion_masks):
     """tolerance kwarg is forwarded as surface_dice_tolerance_mm."""
     gt, pred, spacing = lesion_masks
     metric = get_metric("lesion_wise_surf_dice")
-    result_tight = metric(
-        gt, pred, spacing, min_lesion_volume=0.0, dilation_iters=1, tolerance=0.1
-    )
+    result_tight = metric(gt, pred, spacing, min_lesion_volume=0.0, dilation_iters=1, tolerance=0.1)
     result_loose = metric(
         gt, pred, spacing, min_lesion_volume=0.0, dilation_iters=1, tolerance=10.0
     )

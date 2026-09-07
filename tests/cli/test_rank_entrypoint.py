@@ -197,13 +197,9 @@ def _make_ns(
         results=[str(p) for p in results],
         names=names,
         output_csv=str(output_csv),
-        output_detailed_csv=(
-            None if output_detailed_csv is None else str(output_detailed_csv)
-        ),
+        output_detailed_csv=(None if output_detailed_csv is None else str(output_detailed_csv)),
         metric_direction_overrides=(
-            None
-            if metric_direction_overrides is None
-            else str(metric_direction_overrides)
+            None if metric_direction_overrides is None else str(metric_direction_overrides)
         ),
         significance_csv=(None if significance_csv is None else str(significance_csv)),
         id_column=id_column,
@@ -221,9 +217,7 @@ class TestRunRank:
         _write_results_csv(b, ids=["p1", "p2"], WT_dice=[0.5, 0.4])
 
         out = tmp_path / "out" / "ranked.csv"
-        entry.run_rank(
-            _make_ns(tmp_path, results=[a, b], output_csv=out, names=["a", "b"])
-        )
+        entry.run_rank(_make_ns(tmp_path, results=[a, b], output_csv=out, names=["a", "b"]))
 
         df = pd.read_csv(out)
         assert list(df.columns) == ["strategy", "average_rank"]
@@ -274,9 +268,7 @@ class TestRunRank:
 
         out = tmp_path / "ranked.csv"
         detailed = tmp_path / "detailed.csv"
-        entry.run_rank(
-            _make_ns(tmp_path, results=[a, b], output_csv=out, names=["a", "b"])
-        )
+        entry.run_rank(_make_ns(tmp_path, results=[a, b], output_csv=out, names=["a", "b"]))
         assert not detailed.exists()
 
     def test_overrides_loaded_from_json(self, tmp_path):
@@ -334,9 +326,7 @@ class TestRunRank:
         _write_results_csv(b, ids=["p1"], WT_dice=[0.5])
 
         out = tmp_path / "deep" / "nested" / "out.csv"
-        entry.run_rank(
-            _make_ns(tmp_path, results=[a, b], output_csv=out, names=["a", "b"])
-        )
+        entry.run_rank(_make_ns(tmp_path, results=[a, b], output_csv=out, names=["a", "b"]))
         assert out.parent.is_dir()
         assert out.exists()
 
@@ -403,9 +393,7 @@ class TestRunRank:
 
         out = tmp_path / "ranked.csv"
         sig = tmp_path / "significance.csv"
-        entry.run_rank(
-            _make_ns(tmp_path, results=[a, b], output_csv=out, names=["a", "b"])
-        )
+        entry.run_rank(_make_ns(tmp_path, results=[a, b], output_csv=out, names=["a", "b"]))
         assert not sig.exists()
 
     def test_significance_csv_creates_parent_directory(self, tmp_path):

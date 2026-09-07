@@ -48,21 +48,13 @@ class SlidingWindowInferer(AbstractInferer):
 
         # Validate input parameters.
         if len(patch_size) != 3:
-            raise ValueError(
-                f"patch_size must be a tuple of length 3, got: {patch_size}"
-            )
+            raise ValueError(f"patch_size must be a tuple of length 3, got: {patch_size}")
         if not all(isinstance(dim, int) and dim > 0 for dim in patch_size):
-            raise ValueError(
-                f"All patch dimensions must be positive integers, got: {patch_size}"
-            )
+            raise ValueError(f"All patch dimensions must be positive integers, got: {patch_size}")
         if not isinstance(sw_batch_size, int) or sw_batch_size < 1:
-            raise ValueError(
-                f"sw_batch_size must be a positive integer, got: {sw_batch_size}"
-            )
+            raise ValueError(f"sw_batch_size must be a positive integer, got: {sw_batch_size}")
         if not 0 <= patch_overlap < 1:
-            raise ValueError(
-                f"patch_overlap must be in the range [0, 1), got: {patch_overlap}"
-            )
+            raise ValueError(f"patch_overlap must be in the range [0, 1), got: {patch_overlap}")
         if patch_blend_mode not in ic.SLIDING_WINDOW_PATCH_BLEND_MODES:
             raise ValueError(
                 f"Unsupported blend mode: '{patch_blend_mode}'. Supported "
@@ -77,6 +69,26 @@ class SlidingWindowInferer(AbstractInferer):
 
         # Set the device for inference.
         self.device = device or get_default_device()
+
+    def __eq__(self, other: object) -> bool:
+        """Compare inferers including their sliding window configuration.
+
+        The base class compares by registry name only, which would make two
+        sliding window inferers with different patch sizes or overlap equal.
+        """
+        return (
+            super().__eq__(other)
+            and isinstance(other, SlidingWindowInferer)
+            and self.patch_size == other.patch_size
+            and self.sw_batch_size == other.sw_batch_size
+            and self.patch_overlap == other.patch_overlap
+            and self.patch_blend_mode == other.patch_blend_mode
+            and self.device == other.device
+        )
+
+    # Defining __eq__ would otherwise set __hash__ to None; keep the base
+    # class's name-based hash (equal objects still hash equal).
+    __hash__ = AbstractInferer.__hash__
 
     def infer(
         self,

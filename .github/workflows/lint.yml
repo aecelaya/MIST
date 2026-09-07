@@ -3,11 +3,14 @@
 #
 # Static checks for the codebase, run as a status check on pushes/PRs to main
 # and on demand from the Actions tab:
-#   - ruff:      style + correctness lint (config: [tool.ruff] in pyproject.toml)
-#   - codespell: spell-check           (config: [tool.codespell] in pyproject.toml)
+#   - ruff check:   style + correctness lint  (config: [tool.ruff] in pyproject.toml)
+#   - ruff format:  formatting                (check-only, --check)
+#   - codespell:    spell-check               (config: [tool.codespell] in pyproject.toml)
 #
-# Both are check-only here (no auto-fix). Contributors can run the same checks
-# locally via pre-commit (.pre-commit-config.yaml) so PRs arrive clean.
+# All are check-only here (no auto-fix). Contributors can run the same checks
+# locally via pre-commit (.pre-commit-config.yaml) so PRs arrive clean. ruff is
+# pinned to the same version as the pre-commit hook so local and CI formatting
+# agree exactly (formatter output can differ across ruff versions).
 # =============================================================================
 name: Lint
 
@@ -36,11 +39,16 @@ jobs:
       - name: Install linters
         run: |
           python -m pip install --upgrade pip
-          pip install ruff codespell
+          pip install "ruff==0.15.20" codespell
 
       # ruff reads [tool.ruff] from pyproject.toml.
-      - name: Run ruff
+      - name: Run ruff check
         run: ruff check .
+
+      # Formatting check (no changes written); mirrors the ruff-format
+      # pre-commit hook.
+      - name: Run ruff format --check
+        run: ruff format --check .
 
       # codespell reads [tool.codespell] from pyproject.toml.
       - name: Run codespell

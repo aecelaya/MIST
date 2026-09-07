@@ -196,8 +196,7 @@ def get_default_scheduler_config(name: str) -> dict[str, Any]:
     """
     if name not in ALPHA_SCHEDULER_REGISTRY:
         raise ValueError(
-            f"Unknown scheduler: '{name}'. "
-            f"Available: {list(ALPHA_SCHEDULER_REGISTRY.keys())}"
+            f"Unknown scheduler: '{name}'. Available: {list(ALPHA_SCHEDULER_REGISTRY.keys())}"
         )
     cls = ALPHA_SCHEDULER_REGISTRY[name]
     params = {
@@ -227,8 +226,7 @@ def get_alpha_scheduler(name: str, num_epochs: int, **params) -> AlphaScheduler:
     """
     if name not in ALPHA_SCHEDULER_REGISTRY:
         raise ValueError(
-            f"Unknown scheduler: '{name}'. "
-            f"Available: {list(ALPHA_SCHEDULER_REGISTRY.keys())}"
+            f"Unknown scheduler: '{name}'. Available: {list(ALPHA_SCHEDULER_REGISTRY.keys())}"
         )
     cls = ALPHA_SCHEDULER_REGISTRY[name]
     if "num_epochs" in inspect.signature(cls.__init__).parameters:

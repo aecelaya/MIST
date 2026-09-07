@@ -54,12 +54,15 @@ def test_training_summary_rows_world_size_zero_treated_as_one():
 
 def test_training_summary_rows_order_is_stable():
     """Row order is deterministic for consistent display."""
-    labels = [label for label, _ in tu.training_summary_rows(
-        _summary_config(), 1000, world_size=1
-    )]
+    labels = [label for label, _ in tu.training_summary_rows(_summary_config(), 1000, world_size=1)]
     assert labels == [
-        "Model", "Parameters", "AMP", "GPUs",
-        "Global batch size", "Patch size", "Epochs",
+        "Model",
+        "Parameters",
+        "AMP",
+        "GPUs",
+        "Global batch size",
+        "Patch size",
+        "Epochs",
     ]
 
 
@@ -375,9 +378,7 @@ def test_raises_on_val_image_label_count_mismatch(tmp_path):
     va_img = _make_paths(tmp_path, "images/val", val_img_ids)
     va_lbl = _make_paths(tmp_path, "labels/val", val_lbl_ids)
 
-    with pytest.raises(
-        ValueError, match=r"mismatch: val_images \(\d+\) != val_labels \(\d+\)"
-    ):
+    with pytest.raises(ValueError, match=r"mismatch: val_images \(\d+\) != val_labels \(\d+\)"):
         tu.sanity_check_fold_data(
             fold=0,
             train_images=tr_img,
@@ -487,9 +488,7 @@ def test_raises_on_validation_stem_mismatch(tmp_path):
     # (v1 matches, w2 != v2).
     va_lbl = _make_paths(tmp_path, "val/labels", ["v1", "w2"])
 
-    with pytest.raises(
-        ValueError, match=r"image/label stem mismatch in validation set"
-    ):
+    with pytest.raises(ValueError, match=r"image/label stem mismatch in validation set"):
         tu.sanity_check_fold_data(
             fold=0,
             train_images=tr_img,

@@ -58,9 +58,7 @@ class MedNeXtBlock(nn.Module):
         elif norm_type == "layer":
             self.norm = nn.GroupNorm(num_groups=1, num_channels=in_channels)
         else:
-            raise ValueError(
-                f"norm_type must be 'group' or 'layer', got '{norm_type}'."
-            )
+            raise ValueError(f"norm_type must be 'group' or 'layer', got '{norm_type}'.")
 
         self.conv2 = nn.Conv3d(
             in_channels=in_channels,
@@ -83,12 +81,8 @@ class MedNeXtBlock(nn.Module):
         self.global_resp_norm = global_resp_norm
         if self.global_resp_norm:
             grn_shape = (1, expansion_ratio * in_channels, 1, 1, 1)
-            self.global_resp_beta = nn.Parameter(
-                torch.zeros(grn_shape), requires_grad=True
-            )
-            self.global_resp_gamma = nn.Parameter(
-                torch.zeros(grn_shape), requires_grad=True
-            )
+            self.global_resp_beta = nn.Parameter(torch.zeros(grn_shape), requires_grad=True)
+            self.global_resp_gamma = nn.Parameter(torch.zeros(grn_shape), requires_grad=True)
 
     def forward(self, x):
         """Forward pass of the MedNeXtBlock.

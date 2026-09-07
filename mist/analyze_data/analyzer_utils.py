@@ -21,8 +21,8 @@ def compare_headers(header1: dict[str, Any], header2: dict[str, Any]) -> bool:
     We compare the dimensions, origin, spacing, and direction of the two images.
 
     Args:
-        header1: Image header information from ants.image_header_info
-        header2: Image header information from ants.image_header_info
+        header1: Image header information from sitk_io.read_image_header
+        header2: Image header information from sitk_io.read_image_header
 
     Returns:
         True if the dimensions, origin, spacing, and direction match.
@@ -47,7 +47,7 @@ def is_image_3d(header: dict[str, Any]) -> bool:
     """Check if image is 3D.
 
     Args:
-        header: Image header information from ants.image_header_info
+        header: Image header information from sitk_io.read_image_header
 
     Returns:
         True if the image is 3D.
@@ -125,15 +125,12 @@ def get_files_df(
     # the dataset JSON file so the JSON and its data can be co-located and
     # moved together without adjusting the working directory.
     base_dir = (
-        Path(path_to_dataset_json).resolve().parent
-        / dataset_info[f"{train_or_test}-data"]
+        Path(path_to_dataset_json).resolve().parent / dataset_info[f"{train_or_test}-data"]
     ).resolve()
 
     # Get sorted list of patient IDs, skipping hidden files.
     # Sorting ensures deterministic ordering across platforms and runs.
-    patient_ids = sorted(
-        p.name for p in base_dir.iterdir() if not p.name.startswith(".")
-    )
+    patient_ids = sorted(p.name for p in base_dir.iterdir() if not p.name.startswith("."))
 
     # Build one row dict per patient, then create the DataFrame in one call.
     rows = []
@@ -152,8 +149,7 @@ def get_files_df(
                 row_data[image_type] = matching_file
             else:
                 logging.warning(
-                    "Patient '%s': no file found for image type '%s' "
-                    "(identifying strings: %s).",
+                    "Patient '%s': no file found for image type '%s' (identifying strings: %s).",
                     patient_id,
                     image_type,
                     identifying_strings,
@@ -395,9 +391,7 @@ def get_best_patch_size(
         target_mm = (remaining_budget * float(np.prod(free_spacings))) ** (1.0 / n)
 
         new_fixed = [
-            i
-            for i in free_axes
-            if (target_mm / target_spacing[i]) >= median_resampled_size[i]
+            i for i in free_axes if (target_mm / target_spacing[i]) >= median_resampled_size[i]
         ]
         if not new_fixed:
             break
@@ -547,7 +541,22 @@ def build_base_config() -> dict[str, Any]:
                 "num_cpu_workers": 8,
                 "master_addr": "localhost",
                 "master_port": 12345,
-                "communication_backend": "nccl",
+                # Resolved against the current hardware at train time (mirrors
+                # "amp" above), not here at analyze time, since the machine
+                # that runs analyze may not be the machine that trains --
+                # see hardware.resolve_communication_backend(). A config.json
+                # from before this key existed already has a literal "nccl"
+                # here rather than "auto", so it will keep using NCCL even if
+                # training later moves to CPU-only hardware; edit it by hand
+                # (or re-run analyze) to pick up automatic resolution.
+                "communication_backend": "auto",
+                # Same resolve-and-persist story as communication_backend
+                # above: "auto" becomes "dali" on CUDA or "generic" elsewhere,
+                # resolved at train time via hardware.resolve_data_loader().
+                # No CLI flag -- a user who wants to force one edits this
+                # field directly, the same way patch_size or grad_clip_norm
+                # are hand-edited rather than exposed as flags.
+                "data_loader": "auto",
             },
         },
         "inference": {

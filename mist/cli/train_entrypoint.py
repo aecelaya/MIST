@@ -4,17 +4,13 @@ import argparse
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
 
-import pandas as pd
-import torch
-
 # MIST imports.
 from mist.cli import args as argmod
-from mist.evaluation import evaluation_utils
-from mist.evaluation.evaluator import Evaluator
-from mist.inference.inference_runners import infer_from_dataframe, test_on_fold
+from mist.cli.finalize_entrypoint import run_finalize
+from mist.inference.inference_runners import test_on_fold
 from mist.training.trainers.patch_3d_trainer import Patch3DTrainer
 from mist.utils import io
-from mist.utils.console import print_error, print_warning
+from mist.utils.console import print_info
 
 
 def _parse_train_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -114,49 +110,57 @@ def train_entry(argv: list[str] | None = None) -> None:
 
     _create_train_dirs(results_dir, has_test_paths)
 
+    # Determine which folds THIS invocation is responsible for before
+    # training starts, and before any other invocation sharing this
+    # --results directory (e.g. one-fold-per-node runs on an HPC cluster)
+    # can mutate config.json's own "folds" key: BaseTrainer persists a
+    # --folds override there, so reading it back *after* training would
+    # race against every other node doing the same to the same shared file.
+    # "nfolds" itself is never touched by mist_train, so it's safe to trust
+    # even after training.
+    initial_config = io.read_json_file(str(results_dir / "config.json"))
+    nfolds = initial_config["training"]["nfolds"]
+    own_folds = (
+        [int(fold) for fold in ns.folds]
+        if getattr(ns, "folds", None) is not None
+        else list(initial_config["training"]["folds"])
+    )
+    covers_all_folds = set(own_folds) == set(range(nfolds))
+
     # Train
     trainer = Patch3DTrainer(ns)
     trainer.fit()
 
-    # Post-training: generate predictions for each fold
-    config = io.read_json_file(str(results_dir / "config.json"))
-    for fold in config["training"]["folds"]:
+    # Post-training: generate out-of-fold predictions for the folds this
+    # invocation trained. Each fold's predictions land at disjoint filenames
+    # (train_paths.csv assigns each case to exactly one fold), so this is
+    # safe to run concurrently with other invocations sharing --results.
+    for fold in own_folds:
         test_on_fold(ns, fold)
 
-    # Evaluate CV predictions
-    filepaths_df, warnings = evaluation_utils.build_evaluation_dataframe(
-        train_paths_csv=str(results_dir / "train_paths.csv"),
-        prediction_folder=str(results_dir / "predictions" / "train" / "raw"),
-    )
-
-    if warnings:
-        print_warning(warnings)
-
-    if filepaths_df.empty:
-        print_error("No valid prediction-mask pairs. Skipping evaluation.")
-    else:
-        evaluation_csv = results_dir / "evaluation_paths.csv"
-        filepaths_df.to_csv(evaluation_csv, index=False)
-
-        evaluator = Evaluator(
-            filepaths_dataframe=filepaths_df,
-            evaluation_config=config["evaluation"],
-            output_csv_path=results_csv,
+    if not covers_all_folds:
+        # This invocation only trained a subset of the configured folds (the
+        # one-fold-per-node pattern). Evaluating results.csv/test-set
+        # inference now would mean reading whatever the *other* folds'
+        # predictions/models happen to look like at this exact moment --
+        # possibly still missing, mid-write, or not started at all. Defer to
+        # mist_finalize, run once after every per-fold job has finished.
+        print_info(
+            f"Trained fold(s) {own_folds} of {nfolds} total. Once every "
+            f"fold has finished, run `mist_finalize --results {results_dir}` "
+            "to produce the final results.csv"
+            + (" and test-set predictions." if has_test_paths else ".")
         )
-        evaluator.run(max_workers=ns.num_workers_evaluate)
+        return
 
-    # Optional test inference
-    if has_test_paths:
-        test_df = pd.read_csv(results_dir / "test_paths.csv")
-        with torch.no_grad():
-            infer_from_dataframe(
-                paths_dataframe=test_df,
-                output_directory=str(results_dir / "predictions" / "test"),
-                mist_configuration=config,
-                models_directory=str(results_dir / "models"),
-                postprocessing_strategy_filepath=None,
-                device=torch.device("cuda"),
-            )
+    # This invocation trained every configured fold itself: finalize now.
+    run_finalize(
+        argparse.Namespace(
+            results=str(results_dir),
+            num_workers_evaluate=ns.num_workers_evaluate,
+            device="cuda",
+        )
+    )
 
 
 if __name__ == "__main__":

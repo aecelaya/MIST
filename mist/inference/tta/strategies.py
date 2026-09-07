@@ -42,8 +42,7 @@ def get_strategy(name: str) -> TTAStrategy:
     """Retrieve a fresh instance of a registered TTA strategy by name."""
     if name not in TTA_STRATEGY_REGISTRY:
         raise KeyError(
-            f"TTA strategy '{name}' is not registered. "
-            f"Available: [{', '.join(list_strategies())}]."
+            f"TTA strategy '{name}' is not registered. Available: [{', '.join(list_strategies())}]."
         )
     return TTA_STRATEGY_REGISTRY[name]()
 

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+import torch
 
 # MIST imports.
 from mist.cli import inference_entrypoint as entry
@@ -40,6 +41,31 @@ def test_parse_inference_args_ok(tmp_path, monkeypatch):
     assert ns.output == str(out)
     assert ns.device == "cpu"
     assert ns.postprocess_strategy is None
+    assert ns.output_probs is False
+
+
+def test_parse_inference_args_output_probs_flag(tmp_path):
+    """Test _parse_inference_args sets output_probs when --output-probs is passed."""
+    models = tmp_path / "models"
+    cfg = tmp_path / "config.json"
+    paths = tmp_path / "paths.csv"
+    out = tmp_path / "out"
+
+    ns = entry._parse_inference_args(
+        [
+            "--models-dir",
+            str(models),
+            "--config",
+            str(cfg),
+            "--paths-csv",
+            str(paths),
+            "--output",
+            str(out),
+            "--output-probs",
+        ]
+    )
+
+    assert ns.output_probs is True
 
 
 def test_parse_inference_args_missing_required_raises(tmp_path):
@@ -58,46 +84,6 @@ def test_parse_inference_args_missing_required_raises(tmp_path):
         )
 
 
-@pytest.mark.parametrize(
-    "is_avail, dev_in, expected_type",
-    [
-        (False, "cpu", "cpu"),
-        (False, "cuda", "cpu"),  # fall back when unavailable
-        (True, "cuda", "cuda"),
-    ],
-)
-def test_resolve_device_cpu_cuda(monkeypatch, is_avail, dev_in, expected_type):
-    """Test _resolve_device for CPU and CUDA."""
-    monkeypatch.setattr(
-        entry.torch.cuda, "is_available", lambda: is_avail, raising=True
-    )
-    dev = entry._resolve_device(dev_in)
-    assert isinstance(dev, entry.torch.device)
-    assert dev.type == expected_type
-
-
-def test_resolve_device_numeric_available(monkeypatch):
-    """Test _resolve_device with numeric CUDA index when available."""
-    monkeypatch.setattr(entry.torch.cuda, "is_available", lambda: True, raising=True)
-    monkeypatch.setattr(entry.torch.cuda, "device_count", lambda: 2, raising=True)
-    dev = entry._resolve_device("1")
-    assert dev.type == "cuda" and dev.index == 1
-
-
-def test_resolve_device_numeric_unavailable_warns_and_cpu(monkeypatch):
-    """Test _resolve_device with numeric CUDA index when unavailable."""
-    monkeypatch.setattr(entry.torch.cuda, "is_available", lambda: False, raising=True)
-    with pytest.warns(UserWarning, match="falling back to CPU"):
-        dev = entry._resolve_device("0")
-    assert dev.type == "cpu"
-
-
-def test_resolve_device_invalid_string_raises():
-    """Test _resolve_device raises on invalid device string."""
-    with pytest.raises(ValueError, match="Invalid device specification"):
-        entry._resolve_device("cuda:0")  # Invalid per our CLI (expects "0").
-
-
 def _touch_json(p: Path, payload=None):
     """Create a JSON file with the given payload."""
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -108,9 +94,7 @@ def _touch_json(p: Path, payload=None):
 def _touch_csv(p: Path, rows=None):
     """Create a CSV file with the given rows."""
     p.parent.mkdir(parents=True, exist_ok=True)
-    df = pd.DataFrame(
-        rows if rows is not None else [{"id": "p1", "image": "/tmp/p1.nii.gz"}]
-    )
+    df = pd.DataFrame(rows if rows is not None else [{"id": "p1", "image": "/tmp/p1.nii.gz"}])
     df.to_csv(p, index=False)
 
 
@@ -166,9 +150,7 @@ def test_prepare_io_missing_raises(tmp_path, missing_field):
         config=str(cfg),
         paths_csv=str(paths),
         output=str(out),
-        postprocess_strategy=(
-            str(pps) if missing_field == "postprocess_strategy" else None
-        ),
+        postprocess_strategy=(str(pps) if missing_field == "postprocess_strategy" else None),
     )
 
     # Remove whichever path we want missing.
@@ -214,7 +196,7 @@ def test_run_inference_calls_infer_with_expected_args(tmp_path, monkeypatch):
     )
 
     # Ensure device resolution yields a stable device (CPU).
-    monkeypatch.setattr(entry.torch.cuda, "is_available", lambda: False, raising=True)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=True)
 
     ns = argparse.Namespace(
         models_dir=str(models),
@@ -223,6 +205,7 @@ def test_run_inference_calls_infer_with_expected_args(tmp_path, monkeypatch):
         output=str(out),
         device="cuda",  # Will fall back to CPU.
         postprocess_strategy=None,
+        output_probs=True,
     )
 
     entry.run_inference(ns)
@@ -236,8 +219,9 @@ def test_run_inference_calls_infer_with_expected_args(tmp_path, monkeypatch):
     assert captured["mist_configuration"] == {"foo": "bar"}
     assert captured["models_directory"] == str(models.resolve())
     assert captured["postprocessing_strategy_filepath"] is None
-    assert isinstance(captured["device"], entry.torch.device)
+    assert isinstance(captured["device"], torch.device)
     assert captured["device"].type in ("cpu", "cuda")  # Depending on env mock.
+    assert captured["output_probs"] is True
 
 
 def test_run_inference_with_postprocess_strategy(tmp_path, monkeypatch):
@@ -265,7 +249,7 @@ def test_run_inference_with_postprocess_strategy(tmp_path, monkeypatch):
         lambda **kwargs: got.update(kwargs),
         raising=True,
     )
-    monkeypatch.setattr(entry.torch.cuda, "is_available", lambda: False, raising=True)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=True)
 
     ns = argparse.Namespace(
         models_dir=str(models),
@@ -274,11 +258,13 @@ def test_run_inference_with_postprocess_strategy(tmp_path, monkeypatch):
         output=str(out),
         device="cpu",
         postprocess_strategy=str(pps),
+        output_probs=False,
     )
 
     entry.run_inference(ns)
 
     assert got["postprocessing_strategy_filepath"] == str(pps.resolve())
+    assert got["output_probs"] is False
 
 
 def test_inference_entry_integration(monkeypatch):
@@ -294,6 +280,7 @@ def test_inference_entry_integration(monkeypatch):
             output="/o",
             device="cpu",
             postprocess_strategy=None,
+            output_probs=False,
         )
 
     def _run(ns):

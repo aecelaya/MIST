@@ -5,9 +5,11 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-import ants
 import numpy as np
 import pandas as pd
+
+# MIST imports.
+from mist.utils import sitk_io
 
 
 def validate_mask(
@@ -20,11 +22,12 @@ def validate_mask(
     Checks that the mask can be read, is 3D, has an integer or boolean dtype,
     and only contains labels defined in the evaluation config.
 
-    Note: This function calls ants.image_read, which loads the full image into
-    memory. When called from build_evaluation_dataframe, this is a sequential
-    operation that runs before the parallel evaluation pipeline. For large
-    datasets with large images, consider disabling validation via the
-    validate=False flag in build_evaluation_dataframe if you trust your data.
+    Note: This function calls sitk_io.read_image, which loads the full image
+    into memory. When called from build_evaluation_dataframe, this is a
+    sequential operation that runs before the parallel evaluation pipeline.
+    For large datasets with large images, consider disabling validation via
+    the validate=False flag in build_evaluation_dataframe if you trust your
+    data.
 
     Args:
         mask_path: Path to the mask.
@@ -39,18 +42,17 @@ def validate_mask(
     try:
         # Check 3D first using only the header — cheap and avoids loading the
         # full image if it fails.
-        header = ants.image_header_info(str(mask_path))
+        header = sitk_io.read_image_header(str(mask_path))
         if len(header["dimensions"]) != 3:
             return f"{mask_type} is not a 3D image."
 
-        mask_np = ants.image_read(str(mask_path)).numpy()
+        mask_np = sitk_io.array_from_image(sitk_io.read_image(str(mask_path)))
 
         # Reject only if the mask contains fractional values, which indicates a
         # probability map rather than a label mask. Integer-valued floats
         # (e.g., float32 masks from BraTS or FSL) are accepted.
         if not (
-            np.issubdtype(mask_np.dtype, np.integer)
-            or np.issubdtype(mask_np.dtype, np.bool_)
+            np.issubdtype(mask_np.dtype, np.integer) or np.issubdtype(mask_np.dtype, np.bool_)
         ) and not np.all(mask_np == np.floor(mask_np)):
             return (
                 f"{mask_type} has dtype '{mask_np.dtype}' with non-integer "
@@ -68,6 +70,11 @@ def validate_mask(
             return f"{mask_type} contains unexpected labels: {unexpected}."
 
     except RuntimeError as e:
+        # sitk_io.read_image/read_image_header raise RuntimeError for a
+        # missing/unreadable file (verified against SimpleITK directly).
+        # ants.image_read/image_header_info raised ValueError/a plain
+        # Exception for the same failure instead, which this clause never
+        # actually caught -- this is a behavior fix, not just a swap.
         return f"Could not read {mask_type}: {e}"
 
     return None
@@ -141,18 +148,13 @@ def build_evaluation_dataframe(
 
         if missing:
             error_messages.append(
-                f"Skipping ID '{patient_id}' due to missing "
-                f"{', '.join(missing)} file(s)."
+                f"Skipping ID '{patient_id}' due to missing {', '.join(missing)} file(s)."
             )
             continue
 
         if validate:
-            gt_error = validate_mask(
-                mask_path, evaluation_config, mask_type="ground truth mask"
-            )
-            pred_error = validate_mask(
-                prediction_path, evaluation_config, mask_type="prediction"
-            )
+            gt_error = validate_mask(mask_path, evaluation_config, mask_type="ground truth mask")
+            pred_error = validate_mask(prediction_path, evaluation_config, mask_type="prediction")
 
             validation_errors = [e for e in (gt_error, pred_error) if e]
             if validation_errors:
@@ -245,9 +247,7 @@ def compute_results_stats(results_df: pd.DataFrame) -> pd.DataFrame:
     return results_df
 
 
-def crop_to_union(
-    mask: np.ndarray, prediction: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+def crop_to_union(mask: np.ndarray, prediction: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Crop both arrays to the bounding box of their non-zero union.
 
     This significantly speeds up surface distance metrics (Hausdorff) by
@@ -274,6 +274,8 @@ def crop_to_union(
     max_coords = coords.max(axis=0) + 1  # +1 because slicing is exclusive
 
     # 4. Generate slices dynamically for N-dimensions (works for 2D or 3D).
-    slices = tuple(slice(min_c, max_c) for min_c, max_c in zip(min_coords, max_coords, strict=False))
+    slices = tuple(
+        slice(min_c, max_c) for min_c, max_c in zip(min_coords, max_coords, strict=False)
+    )
 
     return mask[slices], prediction[slices]

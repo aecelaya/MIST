@@ -7,6 +7,7 @@ evaluated predictions, with sensible defaults that work well out of the box and
 a configuration file for when you need more control.
 
 !!! tip "Try MIST in your browser"
+
     The **[end-to-end Colab demo](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_heart_demo.ipynb)**
     runs the whole pipeline — analyze → preprocess → train → evaluate → predict →
     postprocess → rank → visualize — on a heart MRI dataset using a free Colab T4
@@ -16,82 +17,153 @@ a configuration file for when you need more control.
 
 ## Installation
 
-**Training** (NVIDIA GPU required):
-```console
-pip install "mist-medical[train]"
-```
+**CPU** (default — runs the full pipeline: train, predict, evaluate, everything.
+Works on Mac):
 
-**Inference only** (CPU-compatible, works on Mac):
 ```console
 pip install mist-medical
 ```
 
+**NVIDIA GPU** (recommended — adds DALI-accelerated data loading):
+
+```console
+pip install "mist-medical[dali]"
+```
+
+!!! note
+
+    Upgrading from an older MIST release? `pip install "mist-medical[train]"`
+    still works too — it's kept as an identical alias for `[dali]`, so
+    nothing in an existing script or notebook breaks.
+
+**AMD ROCm GPU** (install a ROCm-enabled PyTorch build first — PyPI's default
+`torch` wheel has no ROCm support — matching your driver's ROCm version, then
+MIST on top with no extra needed):
+
+```console
+pip install torch --index-url https://download.pytorch.org/whl/rocm6.4
+pip install mist-medical
+```
+
+See [Accelerator support](advanced_topics.md#accelerator-support-nvidia-amd-rocm-cpu)
+for details and how to pick the right `rocmX.Y` version for your machine.
+
 ## Key Features
 
 - **Automatic configuration** — analysis step determines target spacing, patch
-  size, normalization, and foreground cropping from your data and available GPU memory
+  size, normalization, and foreground cropping from your data and available GPU
+  memory
 - **Five-fold cross-validation** by default, with custom fold assignment support
-- **Multi-GPU training** via PyTorch DDP; uses all visible GPUs automatically
-- **GPU-accelerated data loading** via NVIDIA DALI during training
+- **Multi-GPU training** via PyTorch DDP on NVIDIA CUDA or AMD ROCm; uses all
+  visible GPUs automatically
+- **GPU-accelerated data loading** via NVIDIA DALI during training, with a
+  generic CPU-based data loader used automatically on AMD ROCm or CPU-only
+  hardware — no NVIDIA-specific dependencies required to train at all
 - **Sliding window inference** with configurable overlap and patch blending
 - **Test-time augmentation** and **multi-model ensembling** at inference
 - **Transfer learning** — initialize encoders from pretrained weights
 - **Resume training** — continue interrupted runs from the last checkpoint
-- **CPU inference** — `mist_predict` runs on any machine, including Macs
+- **CPU training and inference** — the full pipeline, `mist_train` included,
+  runs on any machine, including Macs and laptops without an NVIDIA GPU
 
 ## Supported Architectures
 
-| Model | Key |
-|---|---|
-| nnU-Net | `nnunet` |
-| nnU-Net Pocket | `nnunet-pocket` |
+| Model                                   | Key                                                                |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| nnU-Net                                 | `nnunet`                                                           |
+| nnU-Net Pocket                          | `nnunet-pocket`                                                    |
 | MedNeXt (small / base / medium / large) | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large` |
-| FMG-Net | `fmgnet` |
-| W-Net | `wnet` |
-| Swin UNETR (small / base / large) | `swinunetr-small`, `swinunetr-base`, `swinunetr-large` |
+| FMG-Net                                 | `fmgnet`                                                           |
+| W-Net                                   | `wnet`                                                             |
+| Swin UNETR (small / base / large)       | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`             |
 
 ## What's New
 
-* July 2026 — **Interactive Colab demo** — run the full MIST pipeline end-to-end
+- September 2026 — **CPU and AMD ROCm training support** — the full pipeline,
+  including `mist_train`, now runs on CPU-only machines and AMD ROCm GPUs via
+  a new generic, pure-PyTorch data loader, auto-selected whenever NVIDIA
+  DALI isn't the right fit for the detected hardware (or isn't installed).
+  Communication backend (`nccl`/RCCL on ROCm, `gloo` on CPU) and data loader
+  selection are both detected automatically and persisted to `config.json`.
+  The `train` install extra is now called `dali`, to reflect that it gates
+  DALI's CUDA acceleration specifically, not training capability in
+  general — `pip install mist-medical` trains everywhere on its own;
+  `pip install "mist-medical[dali]"` is recommended on top of that for
+  NVIDIA GPU training. `[train]` is kept working as an alias for `[dali]`
+  for anyone upgrading from an older release. AMP (BF16) is also now correctly
+  scoped to hardware with real matrix acceleration — NVIDIA Ampere+ and AMD
+  CDNA/RDNA3+ — rather than trusting `torch.cuda.is_bf16_supported()`, which
+  reports available on older AMD RDNA1/2 GPUs despite having no BF16
+  acceleration at all.
+- September 2026 — **`mist_finalize` for distributed per-fold training** —
+  `mist_train` now supports the one-fold-per-node HPC pattern: when an
+  invocation's `--folds`/`training.folds` doesn't cover every configured fold,
+  it writes out-of-fold predictions for the fold(s) it trained and prints a
+  reminder instead of guessing at final results from a partial run. Run
+  `mist_finalize --results <dir>` once, after every per-fold job sharing that
+  results directory has finished, to aggregate every fold's held-out
+  predictions into `results.csv` and run held-out test-set inference.
+  `mist_finalize` is safe to re-run any time — each run recomputes from
+  whatever's currently on disk.
+- September 2026 — **ANTs dependency removed** — MIST's image I/O,
+  preprocessing, postprocessing, evaluation, analysis, and inference now run
+  entirely on SimpleITK; `antspyx` is no longer a dependency at all. A
+  six-stage migration, each stage verified against real trained models
+  (pocket nnU-Net, FMGNet, SwinUNETR-small) across a full 2-GPU H100 pipeline
+  run before shipping.
+- July 2026 — **Probability-level ensembling** — `mist_predict --output-probs`
+  writes each model's final softmax probability volume alongside its discrete
+  prediction; `mist_ensemble --input-type probabilities` averages probability
+  volumes from separately trained models before a single argmax, preserving
+  confidence information that STAPLE/majority vote discard.
+- July 2026 — **Parallel ensembling** — `mist_ensemble` now accepts
+  `--num-workers-ensemble` to combine predictions across patients in parallel
+  worker processes.
+- July 2026 — **Interactive Colab demo** — run the full MIST pipeline end-to-end
   on a free Colab GPU with the
   [heart segmentation notebook](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_heart_demo.ipynb):
   analysis, training, evaluation, inference, postprocessing, and BraTS-style
   ranking, all in the browser with no local setup.
-* June 2026 — **Official Docker image** — `mistmedical/mist:latest` ships a
-  CUDA 12.8 build. Requires NVIDIA driver ≥ 525.x.
-* June 2026 — **2.0.1 release candidate** — BF16 automatic mixed precision
+- June 2026 — **Official Docker image** — `mistmedical/mist:latest` ships a CUDA
+  12.8 build. Requires NVIDIA driver ≥ 525.x.
+- June 2026 — **2.0.1 release candidate** — BF16 automatic mixed precision
   replaces FP16 throughout training and inference, reducing memory use and
   eliminating gradient loss scaling. Sliding-window inference gains a tunable
   `sw_batch_size` parameter. `mist_rank` adds pairwise Wilcoxon significance
-  testing via `--significance-csv`. Several targeted memory-reduction fixes
-  land across the inference stack.
-* June 2026 — **Multi-model ensembling** — `mist_ensemble` combines discrete
+  testing via `--significance-csv`. Several targeted memory-reduction fixes land
+  across the inference stack.
+- June 2026 — **Multi-model ensembling** — `mist_ensemble` combines discrete
   NIfTI predictions from two or more separately trained models into a single
   consensus segmentation via STAPLE (`--ensemble-backend staple`, default) or
   majority vote (`--ensemble-backend majority_vote`). Works for single-class and
   multi-class label maps.
-* May 2026 — **2.0.0 release candidate** — BraTS-style multi-strategy ranking
-  (`mist_rank`), a structured postprocessing transform registry with LLM-readable
-  metadata (`describe_transforms`), and full pathlib + PEP 585/604 modernization
-  across the codebase.
-* April 2026 — **CPU inference support** — `mist_predict` now runs on any
+- May 2026 — **2.0.0 release candidate** — BraTS-style multi-strategy ranking
+  (`mist_rank`), a structured postprocessing transform registry with
+  LLM-readable metadata (`describe_transforms`), and full pathlib + PEP 585/604
+  modernization across the codebase.
+- April 2026 — **CPU inference support** — `mist_predict` now runs on any
   machine, including Macs and laptops without an NVIDIA GPU. Install with
   `pip install mist-medical` (no GPU required).
-* March 2026 — **Resume training** — interrupted runs can be continued from the last
-  checkpoint with `--resume`, with atomic checkpointing to prevent corruption.
-* March 2026 — **GPU-aware automatic patch size** — the analysis step now derives the
-  patch size from available GPU memory, so the default configuration is
-  hardware-appropriate without manual tuning.
-* March 2026 — **Transfer learning** — initialize encoders from pretrained weights
-  with `--pretrained-weights`, and average model weights across folds with
-  `mist_average_weights`.
-* March 2026 — **Better training defaults** — AdamW optimizer and gradient clipping
-  are now the defaults, with the clipping threshold exposed via `grad_clip_norm`
-  in `config.json`.
-* September 2025 — **[BraTS 2025 adult glioma challenge @ MICCAI 2025](https://www.synapse.org/Synapse:syn64153130/wiki/633062)** — MIST takes 3rd place (repeat).
-* November 2024 — **MedNeXt models** — small, base, medium, and large variants
+- March 2026 — **Resume training** — interrupted runs can be continued from the
+  last checkpoint with `--resume`, with atomic checkpointing to prevent
+  corruption.
+- March 2026 — **GPU-aware automatic patch size** — the analysis step now
+  derives the patch size from available GPU memory, so the default configuration
+  is hardware-appropriate without manual tuning.
+- March 2026 — **Transfer learning** — initialize encoders from pretrained
+  weights with `--pretrained-weights`, and average model weights across folds
+  with `mist_average_weights`.
+- March 2026 — **Better training defaults** — AdamW optimizer and gradient
+  clipping are now the defaults, with the clipping threshold exposed via
+  `grad_clip_norm` in `config.json`.
+- September 2025 —
+  **[BraTS 2025 adult glioma challenge @ MICCAI 2025](https://www.synapse.org/Synapse:syn64153130/wiki/633062)**
+  — MIST takes 3rd place (repeat).
+- November 2024 — **MedNeXt models** — small, base, medium, and large variants
   added (`mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`).
-* October 2024 — **[BraTS 2024 adult glioma challenge @ MICCAI 2024](https://www.synapse.org/Synapse:syn53708249/wiki/630150)** — MIST takes 3rd place.
+- October 2024 —
+  **[BraTS 2024 adult glioma challenge @ MICCAI 2024](https://www.synapse.org/Synapse:syn53708249/wiki/630150)**
+  — MIST takes 3rd place.
 
 ## Citation
 

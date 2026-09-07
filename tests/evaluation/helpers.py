@@ -2,8 +2,10 @@
 
 import concurrent.futures
 
-import ants
 import numpy as np
+import SimpleITK as sitk
+
+from mist.utils import sitk_io
 
 
 class FakePB:
@@ -55,16 +57,14 @@ class FakeExecutor:
         return future
 
 
-def make_ants_image(
+def make_sitk_image(
     shape=(10, 10, 10),
     spacing=(1.0, 1.0, 1.0),
     fill=1.0,
-) -> ants.ANTsImage:
-    """Create an ANTs image filled with *fill* at the given shape and spacing."""
+) -> sitk.Image:
+    """Create an image filled with *fill* at the given shape and spacing."""
     arr = np.full(shape, fill, dtype=np.float32)
-    img = ants.from_numpy(arr)
-    img.set_spacing(spacing)
-    return img
+    return sitk_io.image_from_array(arr, spacing=spacing)
 
 
 def make_eval_config(classes=None) -> dict:
@@ -80,7 +80,4 @@ def make_eval_config(classes=None) -> dict:
     """
     if classes is None:
         classes = {"tumor": [1]}
-    return {
-        name: {"labels": labels, "metrics": {"dice": {}}}
-        for name, labels in classes.items()
-    }
+    return {name: {"labels": labels, "metrics": {"dice": {}}} for name, labels in classes.items()}

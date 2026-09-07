@@ -16,7 +16,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from importlib import metadata
 from pathlib import Path
 
-import ants
 import numpy as np
 import pandas as pd
 
@@ -26,7 +25,7 @@ from mist.analyze_data.data_dumper import DataDumper
 from mist.preprocessing import preprocessing_utils
 
 # MIST imports.
-from mist.utils import io, progress_bar
+from mist.utils import io, progress_bar, sitk_io
 from mist.utils.console import (
     print_error,
     print_section_header,
@@ -59,9 +58,7 @@ def _welford_merge(
             total_n, total_mean, total_M2 = n_i, float(mean_i), float(M2_i)
         else:
             delta = float(mean_i) - total_mean
-            total_M2 = (
-                total_M2 + float(M2_i) + delta**2 * total_n * n_i / (total_n + n_i)
-            )
+            total_M2 = total_M2 + float(M2_i) + delta**2 * total_n * n_i / (total_n + n_i)
             total_mean = (total_mean * total_n + float(mean_i) * n_i) / (total_n + n_i)
             total_n += n_i
     total_std = float(np.sqrt(total_M2 / total_n)) if total_n > 0 else 0.0
@@ -201,8 +198,7 @@ class Analyzer:
             # to adjust the working directory.
             if field == "train-data":
                 train_data_path = (
-                    Path(self.mist_arguments.data).resolve().parent
-                    / self.dataset_info[field]
+                    Path(self.mist_arguments.data).resolve().parent / self.dataset_info[field]
                 ).resolve()
                 if not train_data_path.exists():
                     raise FileNotFoundError(
@@ -335,20 +331,19 @@ class Analyzer:
         def _process(patient):
             try:
                 image_list = list(patient.values())[3:]
-                image = ants.image_read(image_list[0])
+                image = sitk_io.read_image(image_list[0])
                 fg_bbox = preprocessing_utils.get_fg_mask_bbox(image)
                 cropped_dims_i = [
                     fg_bbox["x_end"] - fg_bbox["x_start"] + 1,
                     fg_bbox["y_end"] - fg_bbox["y_start"] + 1,
                     fg_bbox["z_end"] - fg_bbox["z_start"] + 1,
                 ]
-                vol_reduction_i = 1.0 - (np.prod(cropped_dims_i) / np.prod(image.shape))
+                # GetSize() is (x, y, z), matching ants' .shape convention.
+                vol_reduction_i = 1.0 - (np.prod(cropped_dims_i) / np.prod(image.GetSize()))
                 fg_bbox["id"] = patient["id"]
                 return fg_bbox, cropped_dims_i, vol_reduction_i
             except Exception as e:
-                raise RuntimeError(
-                    f"Error processing patient '{patient['id']}': {e}"
-                ) from e
+                raise RuntimeError(f"Error processing patient '{patient['id']}': {e}") from e
 
         n_workers = self.n_workers
         patients = [self.paths_df.iloc[i].to_dict() for i in range(len(self.paths_df))]
@@ -362,14 +357,10 @@ class Analyzer:
             with progress as pb:
                 for future in pb.track(as_completed(futures), total=len(patients)):
                     i = futures[future]
-                    fg_bbox_records[i], cropped_dims[i, :], vol_reduction[i] = (
-                        future.result()
-                    )
+                    fg_bbox_records[i], cropped_dims[i, :], vol_reduction[i] = future.result()
 
         pd.DataFrame(fg_bbox_records).to_csv(self.fg_bboxes_csv, index=False)
-        crop_to_fg = (
-            np.mean(vol_reduction) >= constants.MIN_AVERAGE_VOLUME_REDUCTION_FRACTION
-        )
+        crop_to_fg = np.mean(vol_reduction) >= constants.MIN_AVERAGE_VOLUME_REDUCTION_FRACTION
         return crop_to_fg, cropped_dims
 
     def check_nz_ratio(self) -> bool:
@@ -386,12 +377,11 @@ class Analyzer:
         def _process(patient):
             try:
                 image_list = list(patient.values())[3:]
-                image = ants.image_read(image_list[0])
-                return float(np.sum(image.numpy() != 0) / np.prod(image.shape))
+                image = sitk_io.read_image(image_list[0])
+                image_arr = sitk_io.array_from_image(image)
+                return float(np.sum(image_arr != 0) / np.prod(image.GetSize()))
             except Exception as e:
-                raise RuntimeError(
-                    f"Error processing patient '{patient['id']}': {e}"
-                ) from e
+                raise RuntimeError(f"Error processing patient '{patient['id']}': {e}") from e
 
         n_workers = self.n_workers
         patients = [self.paths_df.iloc[i].to_dict() for i in range(len(self.paths_df))]
@@ -421,14 +411,20 @@ class Analyzer:
 
         def _process(patient):
             try:
-                mask = ants.image_read(patient["mask"])
-                mask = ants.reorient_image2(mask, "RAI")
-                mask.set_direction(constants.RAI_ANTS_DIRECTION)
-                return tuple(mask.spacing)
+                mask = sitk_io.read_image(patient["mask"])
+                # Reorient to RAI first so every patient's spacing tuple
+                # refers to the same physical axis before we take a
+                # cross-patient median below -- see get_target_spacing's
+                # docstring. (The historical mask.set_direction(np.eye(3))
+                # call after reorienting is not replicated here: verified
+                # empirically -- against real ants, across identity,
+                # anisotropic, oblique, and axis-aligned-non-RAI inputs --
+                # that it never affects the resulting spacing, so it was
+                # dead code even in the ants version.)
+                mask = sitk_io.reorient_image(mask, "RAI")
+                return tuple(mask.GetSpacing())
             except Exception as e:
-                raise RuntimeError(
-                    f"Error processing patient '{patient['id']}': {e}"
-                ) from e
+                raise RuntimeError(f"Error processing patient '{patient['id']}': {e}") from e
 
         n_workers = self.n_workers
         patients = [self.paths_df.iloc[i].to_dict() for i in range(len(self.paths_df))]
@@ -501,11 +497,9 @@ class Analyzer:
 
         def _process(patient, cropped_dims_i):
             try:
-                mask_header = ants.image_header_info(patient["mask"])
+                mask_header = sitk_io.read_image_header(patient["mask"])
                 image_list = list(patient.values())[3:]
-                current_dims = (
-                    cropped_dims_i if crop_to_fg else mask_header["dimensions"]
-                )
+                current_dims = cropped_dims_i if crop_to_fg else mask_header["dimensions"]
                 current_spacing = mask_header["spacing"]
                 new_dims = analyzer_utils.get_resampled_image_dimensions(
                     current_dims, current_spacing, tgt_spacing
@@ -523,9 +517,7 @@ class Analyzer:
                     )
                 return new_dims, msg
             except Exception as e:
-                raise RuntimeError(
-                    f"Error processing patient '{patient['id']}': {e}"
-                ) from e
+                raise RuntimeError(f"Error processing patient '{patient['id']}': {e}") from e
 
         n_workers = self.n_workers
         patients = [self.paths_df.iloc[i].to_dict() for i in range(len(self.paths_df))]
@@ -575,12 +567,15 @@ class Analyzer:
         def _process(patient):
             try:
                 image_list = list(patient.values())[3:]
-                image = ants.image_read(image_list[0])
-                mask = ants.image_read(patient["mask"])
+                image_arr = sitk_io.array_from_image(sitk_io.read_image(image_list[0]))
+                mask_arr = sitk_io.array_from_image(sitk_io.read_image(patient["mask"]))
+                # Verified empirically that ants' image[mask != 0] indexing
+                # produces identical values, in the same order, to plain
+                # numpy boolean indexing on the arrays read from the same
+                # files -- both are a flatten-then-boolean-select over the
+                # same underlying data.
                 arr = np.asarray(
-                    (image[mask != 0]).tolist()[  # type: ignore
-                        :: constants.CT_GATHER_EVERY_ITH_VOXEL_VALUE
-                    ],
+                    image_arr[mask_arr != 0][:: constants.CT_GATHER_EVERY_ITH_VOXEL_VALUE],
                     dtype=np.float64,
                 )
                 if len(arr) == 0:
@@ -596,16 +591,11 @@ class Analyzer:
                 M2 = float(np.sum((arr - mean) ** 2))
                 hist, _ = np.histogram(arr, bins=_hist_bin_edges)
                 n_out_of_range = int(
-                    np.sum(
-                        (arr < constants.CT_HU_HIST_MIN)
-                        | (arr > constants.CT_HU_HIST_MAX)
-                    )
+                    np.sum((arr < constants.CT_HU_HIST_MIN) | (arr > constants.CT_HU_HIST_MAX))
                 )
                 return n, mean, M2, hist.astype(np.int64), n_out_of_range
             except Exception as e:
-                raise RuntimeError(
-                    f"Error processing patient '{patient['id']}': {e}"
-                ) from e
+                raise RuntimeError(f"Error processing patient '{patient['id']}': {e}") from e
 
         n_workers = self.n_workers
         patients = [self.paths_df.iloc[i].to_dict() for i in range(len(self.paths_df))]
@@ -690,27 +680,19 @@ class Analyzer:
         # Check if the images are sparse, i.e., if 20% or less of the image is
         # non-zero.
         normalize_with_nz_mask = self.check_nz_ratio()
-        self.config["preprocessing"]["normalize_with_nonzero_mask"] = bool(
-            normalize_with_nz_mask
-        )
+        self.config["preprocessing"]["normalize_with_nonzero_mask"] = bool(normalize_with_nz_mask)
 
         # If we are using CT images, we need to get the normalization
         # parameters for CT images and update the configuration.
         if self.config["dataset_info"]["modality"] == "ct":
             # Get CT normalization parameters.
             ct_normalization_parameters = self.get_ct_normalization_parameters()
-            self.config["preprocessing"]["ct_normalization"].update(
-                ct_normalization_parameters
-            )
+            self.config["preprocessing"]["ct_normalization"].update(ct_normalization_parameters)
 
         # Update the number of channels and classes in the model section of the
         # configuration.
-        self.config["model"]["params"]["in_channels"] = len(
-            self.config["dataset_info"]["images"]
-        )
-        self.config["model"]["params"]["out_channels"] = len(
-            self.config["dataset_info"]["labels"]
-        )
+        self.config["model"]["params"]["in_channels"] = len(self.config["dataset_info"]["images"])
+        self.config["model"]["params"]["out_channels"] = len(self.config["dataset_info"]["labels"])
 
         # Set a default patch size based on the median resampled image size.
         # The patch size can be overridden by the user in the config file or in
@@ -746,9 +728,9 @@ class Analyzer:
             try:
                 # Patient values are ["id", "mask", "image_1", "image_2", ...].
                 image_list = list(patient.values())[2:]
-                mask = ants.image_read(patient["mask"])
-                mask_labels = set(mask.unique().astype(int))
-                mask_header = ants.image_header_info(patient["mask"])
+                mask = sitk_io.read_image(patient["mask"])
+                mask_labels = set(np.unique(sitk_io.array_from_image(mask)).astype(int))
+                mask_header = sitk_io.read_image_header(patient["mask"])
 
                 if not mask_labels.issubset(dataset_labels_set):
                     return True, (
@@ -757,12 +739,10 @@ class Analyzer:
                     )
 
                 if not analyzer_utils.is_image_3d(mask_header):
-                    return True, (
-                        f"In {patient['id']}: Got 4D mask, make sure all images are 3D"
-                    )
+                    return True, (f"In {patient['id']}: Got 4D mask, make sure all images are 3D")
 
                 for image_path in image_list:
-                    image_header = ants.image_header_info(image_path)
+                    image_header = sitk_io.read_image_header(image_path)
                     if not analyzer_utils.compare_headers(mask_header, image_header):
                         return True, (
                             f"In {patient['id']}: Mismatch between image and "
@@ -770,20 +750,16 @@ class Analyzer:
                         )
                     if not analyzer_utils.is_image_3d(image_header):
                         return True, (
-                            f"In {patient['id']}: Got 4D image, make sure all "
-                            "images are 3D"
+                            f"In {patient['id']}: Got 4D image, make sure all images are 3D"
                         )
 
                 if len(image_list) > 1:
-                    anchor_header = ants.image_header_info(image_list[0])
+                    anchor_header = sitk_io.read_image_header(image_list[0])
                     for image_path in image_list[1:]:
-                        image_header = ants.image_header_info(image_path)
-                        if not analyzer_utils.compare_headers(
-                            anchor_header, image_header
-                        ):
+                        image_header = sitk_io.read_image_header(image_path)
+                        if not analyzer_utils.compare_headers(anchor_header, image_header):
                             return True, (
-                                f"In {patient['id']}: Mismatch between images' "
-                                "header information"
+                                f"In {patient['id']}: Mismatch between images' header information"
                             )
 
                 return False, None
@@ -815,9 +791,7 @@ class Analyzer:
 
         # If all of the data is bad, then raise an error.
         if len(bad_data) >= len(self.paths_df):
-            raise RuntimeError(
-                "All examples were excluded from training. Please check your data."
-            )
+            raise RuntimeError("All examples were excluded from training. Please check your data.")
 
         # Drop bad data from paths dataframe and reset index.
         rows_to_drop = self.paths_df.index[list(bad_data)]
@@ -844,9 +818,7 @@ class Analyzer:
         # By default, we assume that we are running all folds for training.
         # This can be overridden by the user in the config file or in the
         # command line arguments for the training pipeline.
-        self.config["training"]["folds"] = list(
-            range(self.config["training"]["nfolds"])
-        )
+        self.config["training"]["folds"] = list(range(self.config["training"]["nfolds"]))
 
         # Step 3: Analyze the dataset to prepare the configuration file.
         self.analyze_dataset()
@@ -872,18 +844,13 @@ class Analyzer:
         # create a test paths dataframe and save it as CSV.
         if self.dataset_info.get("test-data"):
             test_data_dir = (
-                Path(self.mist_arguments.data).resolve().parent
-                / self.dataset_info["test-data"]
+                Path(self.mist_arguments.data).resolve().parent / self.dataset_info["test-data"]
             ).resolve()
             if not test_data_dir.exists():
-                raise FileNotFoundError(
-                    f"Test data directory does not exist: {test_data_dir}"
-                )
+                raise FileNotFoundError(f"Test data directory does not exist: {test_data_dir}")
 
             # Create a test paths dataframe from the test data directory.
-            test_paths_df = analyzer_utils.get_files_df(
-                self.mist_arguments.data, "test"
-            )
+            test_paths_df = analyzer_utils.get_files_df(self.mist_arguments.data, "test")
 
             test_paths_csv = self.results_dir / "test_paths.csv"
             test_paths_df.to_csv(test_paths_csv, index=False)

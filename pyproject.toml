@@ -1,6 +1,6 @@
 [project]
 name = "mist-medical"
-version = "2.0.2-rc"
+version = "2.3.0-rc"
 requires-python = ">= 3.10"
 description = "MIST is a simple and scalable end-to-end framework for medical imaging segmentation."
 readme = "README.md"
@@ -34,7 +34,6 @@ keywords = [
 dependencies = [
     "torch",
     "monai",
-    "antspyx",
     "simpleitk",
     "numpy",
     "pandas",
@@ -43,12 +42,32 @@ dependencies = [
     "scikit-learn",
     "scikit-image",
     "tensorboard",
+    # monai.networks.nets.swin_unetr (MIST's swinunetr-* architectures) lazily
+    # imports einops at forward-pass time via monai's own optional_import --
+    # never a direct `import einops` anywhere in mist/ itself, which is why an
+    # earlier dependency audit (41e7c19) concluded it was unused and dropped
+    # it. That check only looked for direct imports in mist/'s own code and
+    # missed this transitive runtime requirement; a real `pip install
+    # mist-medical` + swinunetr forward pass fails without it.
     "einops",
-    "pytest",
 ]
 
 [project.optional-dependencies]
+# NVIDIA DALI, for GPU-accelerated data loading. Not required to train at all
+# -- the base install trains on CPU (and AMD ROCm) via a generic, DALI-free
+# data loader; this extra only matters on CUDA hardware, where it's the
+# default, faster path. Recommended whenever training on an NVIDIA GPU. See
+# cpu_rocm_support_plan.md.
+#
+# `dali` is the current, documented name. `train` is kept as an identical
+# alias for backward compatibility -- it's the extra name from MIST
+# releases before this CPU/ROCm effort, so existing users' scripts, docs,
+# and notebooks already reference `pip install "mist-medical[train]"`;
+# breaking that silently isn't worth the naming cleanliness. New docs
+# should point people at `dali`, not this alias.
+dali = ["nvidia-dali-cuda120"]
 train = ["nvidia-dali-cuda120"]
+dev = ["pytest"]
 
 [project.urls]
 homepage = "https://github.com/mist-medical/MIST"
@@ -60,6 +79,7 @@ mist_run_all = "mist.cli.run_all_entrypoint:run_all_entry"
 mist_analyze = "mist.cli.analyze_entrypoint:analyze_entry"
 mist_preprocess = "mist.cli.preprocess_entrypoint:preprocess_entry"
 mist_train = "mist.cli.train_entrypoint:train_entry"
+mist_finalize = "mist.cli.finalize_entrypoint:finalize_entry"
 mist_predict = "mist.cli.inference_entrypoint:inference_entry"
 mist_evaluate = "mist.cli.evaluation_entrypoint:evaluation_entry"
 mist_postprocess = "mist.cli.postprocess_entrypoint:postprocess_entry"

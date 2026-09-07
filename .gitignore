@@ -1,3 +1,10 @@
+# Node / Prettier tooling
+node_modules/
+package.json
+package-lock.json
+.prettierrc.json
+.prettierignore
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

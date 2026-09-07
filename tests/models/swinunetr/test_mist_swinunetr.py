@@ -169,9 +169,7 @@ class TestCreateSwinUNETR:
 class TestRegisteredModels:
     """Tests that all three variants are registered in the model registry."""
 
-    @pytest.mark.parametrize(
-        "name", ["swinunetr-small", "swinunetr-base", "swinunetr-large"]
-    )
+    @pytest.mark.parametrize("name", ["swinunetr-small", "swinunetr-base", "swinunetr-large"])
     def test_variant_is_registered(self, base_kwargs, name):
         model = get_model_from_registry(name, **base_kwargs)
         assert isinstance(model, MistSwinUNETR)

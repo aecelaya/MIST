@@ -67,9 +67,7 @@ def get_lr_scheduler(
     """
     name = name.lower()
     if name not in LR_SCHEDULER_REGISTRY:
-        raise ValueError(
-            f"Unknown scheduler '{name}'. Available: {list_lr_schedulers()}"
-        )
+        raise ValueError(f"Unknown scheduler '{name}'. Available: {list_lr_schedulers()}")
 
     if warmup_epochs < 0:
         raise ValueError(f"warmup_epochs must be >= 0, got {warmup_epochs}.")
@@ -78,9 +76,7 @@ def get_lr_scheduler(
         return LR_SCHEDULER_REGISTRY[name](optimizer, epochs)
 
     if warmup_epochs >= epochs:
-        raise ValueError(
-            f"warmup_epochs ({warmup_epochs}) must be less than epochs ({epochs})."
-        )
+        raise ValueError(f"warmup_epochs ({warmup_epochs}) must be less than epochs ({epochs}).")
 
     warmup = torch.optim.lr_scheduler.LinearLR(
         optimizer,

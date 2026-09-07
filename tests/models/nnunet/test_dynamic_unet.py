@@ -42,9 +42,7 @@ def test_forward_train_and_eval():
     returns a dictionary in training mode (with deep supervision outputs)
     and a tensor in evaluation mode.
     """
-    params = create_valid_params(
-        use_deep_supervision=True, num_deep_supervision_heads=1
-    )
+    params = create_valid_params(use_deep_supervision=True, num_deep_supervision_heads=1)
     model = DynamicUNet(**params)
 
     # Create a dummy input tensor for 3D volumes:
@@ -87,14 +85,10 @@ def test_invalid_deep_supervision_heads():
     not less than the number of upsampling layers.
     Note: with strides length=3, there are 2 upsampling layers.
     """
-    params = create_valid_params(
-        use_deep_supervision=True, num_deep_supervision_heads=2
-    )
+    params = create_valid_params(use_deep_supervision=True, num_deep_supervision_heads=2)
     with pytest.raises(ValueError) as excinfo:
         DynamicUNet(**params)
-    assert "num_deep_supervision_heads should be less than the number of" in str(
-        excinfo.value
-    )
+    assert "num_deep_supervision_heads should be less than the number of" in str(excinfo.value)
 
 
 def test_negative_deep_supervision_heads():
@@ -103,9 +97,7 @@ def test_negative_deep_supervision_heads():
     Test that a ValueError is raised if the number of deep supervision heads is
     not less than the number of upsampling layers.
     """
-    params = create_valid_params(
-        use_deep_supervision=True, num_deep_supervision_heads=-1
-    )
+    params = create_valid_params(use_deep_supervision=True, num_deep_supervision_heads=-1)
     with pytest.raises(ValueError) as excinfo:
         DynamicUNet(**params)
     assert "num_deep_supervision_heads should be larger than 0." in str(excinfo.value)

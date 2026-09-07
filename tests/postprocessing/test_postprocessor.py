@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import ants
 import numpy as np
 import pytest
 
@@ -13,6 +12,7 @@ import pytest
 from mist.postprocessing import postprocessor as pp_mod
 from mist.postprocessing.postprocessor import Postprocessor
 from mist.utils import console as console_mod
+from mist.utils import sitk_io
 
 # ---------------------------------------------------------------------------
 # Strategy fixtures
@@ -211,23 +211,21 @@ def test_print_strategy(mock_table_class, mock_read_json):
 
 
 @pytest.fixture
-def dummy_ants_image():
-    """Create a dummy ANTsImage for testing."""
+def dummy_sitk_image():
+    """Create a dummy SimpleITK image for testing."""
     arr = np.zeros((10, 10), dtype=np.uint8)
     arr[1:3, 1:3] = 1
-    return ants.from_numpy(arr)
+    return sitk_io.image_from_array(arr.astype(np.float32))
 
 
 @pytest.mark.parametrize("simulate_error", [False, True])
 @patch("mist.postprocessing.postprocessor.get_transform")
 @patch("mist.utils.io.read_json_file")
 def test_apply_strategy_to_single_example(
-    mock_read_json, mock_get_transform, simulate_error, dummy_ants_image
+    mock_read_json, mock_get_transform, simulate_error, dummy_sitk_image
 ):
     """Test both successful and failing transform scenarios."""
-    transform_name = (
-        "remove_small_objects" if not simulate_error else "fill_holes_with_label"
-    )
+    transform_name = "remove_small_objects" if not simulate_error else "fill_holes_with_label"
     mock_read_json.return_value = [
         {
             "transform": transform_name,
@@ -250,7 +248,7 @@ def test_apply_strategy_to_single_example(
 
     post = Postprocessor(strategy_path="fake_strategy.json")
     result_image, messages = post.apply_strategy_to_single_example(
-        patient_id="test123", mask=dummy_ants_image
+        patient_id="test123", mask=dummy_sitk_image
     )
 
     if simulate_error:
@@ -258,7 +256,8 @@ def test_apply_strategy_to_single_example(
         assert "Error applying fill_holes_with_label to test123" in messages[0]
     else:
         np.testing.assert_array_equal(
-            result_image.numpy(), dummy_ants_image.numpy() + 1
+            sitk_io.array_from_image(result_image),
+            sitk_io.array_from_image(dummy_sitk_image) + 1,
         )
         assert messages == []
 
@@ -272,11 +271,11 @@ def test_postprocess_single_file_happy_path(tmp_path, monkeypatch):
     """Worker copies file, applies transform, writes result, returns []."""
     arr = np.zeros((10, 10), dtype=np.uint8)
     arr[2:4, 2:4] = 1
-    img = ants.from_numpy(arr.astype(np.float32))
+    img = sitk_io.image_from_array(arr.astype(np.float32))
     input_path = tmp_path / "p1.nii.gz"
     output_path = tmp_path / "out" / "p1.nii.gz"
     output_path.parent.mkdir()
-    ants.image_write(img, str(input_path))
+    sitk_io.write_image(img, str(input_path))
 
     def _identity(arr, **kwargs):
         return arr
@@ -299,11 +298,11 @@ def test_postprocess_single_file_happy_path(tmp_path, monkeypatch):
 def test_postprocess_single_file_transform_error_returns_message(tmp_path, monkeypatch):
     """Worker returns an error message when a transform raises ValueError."""
     arr = np.zeros((4, 4), dtype=np.uint8)
-    img = ants.from_numpy(arr.astype(np.float32))
+    img = sitk_io.image_from_array(arr.astype(np.float32))
     input_path = tmp_path / "p1.nii.gz"
     output_path = tmp_path / "out" / "p1.nii.gz"
     output_path.parent.mkdir()
-    ants.image_write(img, str(input_path))
+    sitk_io.write_image(img, str(input_path))
 
     def _failing(arr, **kwargs):
         raise ValueError("boom")
@@ -336,11 +335,11 @@ def test_postprocess_single_file_per_label_and_labels_not_swapped(tmp_path):
     arr = np.zeros((10, 10, 10), dtype=np.uint8)
     arr[2:5, 2:5, 2:5] = 1
     arr[6:8, 6:8, 6:8] = 2
-    img = ants.from_numpy(arr.astype(np.float32))
+    img = sitk_io.image_from_array(arr.astype(np.float32))
     input_path = tmp_path / "p1.nii.gz"
     output_path = tmp_path / "out" / "p1.nii.gz"
     output_path.parent.mkdir()
-    ants.image_write(img, str(input_path))
+    sitk_io.write_image(img, str(input_path))
 
     # Two-step strategy: grouped (per_label=False) then per-label (per_label=True).
     # If the zip order in _postprocess_single_file is wrong, the first step will
@@ -386,8 +385,8 @@ def temp_dirs_with_nii():
     output_dir = tempfile.mkdtemp()
     arr = np.zeros((10, 10), dtype=np.uint8)
     arr[2:4, 2:4] = 1
-    ants.image_write(
-        ants.from_numpy(arr.astype(np.float32)),
+    sitk_io.write_image(
+        sitk_io.image_from_array(arr.astype(np.float32)),
         str(Path(base_dir) / "example1.nii.gz"),
     )
     return Path(base_dir), Path(output_dir)
@@ -455,22 +454,19 @@ def test_run_postprocessor(
     if expect_error:
         assert any("Error applying" in msg for msg in printed)
         assert any(
-            "Postprocessing completed with the following messages:" in msg
-            for msg in printed
+            "Postprocessing completed with the following messages:" in msg for msg in printed
         )
     else:
         output_file = output_dir / "example1.nii.gz"
         assert output_file.exists()
-        result = ants.image_read(str(output_file)).numpy()
+        result = sitk_io.array_from_image(sitk_io.read_image(str(output_file)))
         assert np.all(result[2:4, 2:4] == 2)
         assert np.all(result[:2, :2] == 0)
         assert any("Postprocessing completed successfully" in msg for msg in printed)
 
 
 @patch("mist.utils.io.read_json_file")
-def test_run_empty_base_dir_warns_and_returns(
-    mock_read_json_file, dummy_strategy, tmp_path
-):
+def test_run_empty_base_dir_warns_and_returns(mock_read_json_file, dummy_strategy, tmp_path):
     """run() prints a warning and returns early when no .nii.gz files exist."""
     mock_read_json_file.return_value = dummy_strategy
     output_dir = tmp_path / "out"
@@ -530,10 +526,7 @@ def test_run_unexpected_worker_exception_is_caught(
             postprocessor.run(base_dir, output_dir)
 
     assert any("Unexpected error" in msg for msg in printed)
-    assert any(
-        "Postprocessing completed with the following messages:" in msg
-        for msg in printed
-    )
+    assert any("Postprocessing completed with the following messages:" in msg for msg in printed)
 
 
 @patch("mist.utils.io.read_json_file")
@@ -562,7 +555,7 @@ def test_run_patient_id_preserves_dots(
     input_path = tmp_path / "patient.001.nii.gz"
     output_dir = tmp_path / "out"
     output_dir.mkdir()
-    ants.image_write(ants.from_numpy(arr.astype(np.float32)), str(input_path))
+    sitk_io.write_image(sitk_io.image_from_array(arr.astype(np.float32)), str(input_path))
 
     mock_get_progress_bar.return_value = _DummyPB()
     mock_read_json_file.return_value = dummy_strategy
@@ -586,7 +579,5 @@ def test_run_patient_id_preserves_dots(
     # patient_id should be "patient.001", not "patient".
     assert any("patient.001" in msg for msg in printed)
     assert not any(
-        msg
-        for msg in printed
-        if "patient" in msg and "001" not in msg and "Error" in msg
+        msg for msg in printed if "patient" in msg and "001" not in msg and "Error" in msg
     )

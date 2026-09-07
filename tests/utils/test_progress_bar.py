@@ -45,9 +45,7 @@ class SpyProgress:
         task_id = self._next_task_id
         self._next_task_id += 1
         self.tasks.append(task_id)
-        self.add_task_calls.append(
-            {"description": description, "total": total, "fields": fields}
-        )
+        self.add_task_calls.append({"description": description, "total": total, "fields": fields})
         return task_id
 
     def update(self, task_id: int, **kwargs: Any) -> None:

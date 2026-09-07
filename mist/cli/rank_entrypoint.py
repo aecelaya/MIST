@@ -107,8 +107,7 @@ def run_rank(ns: argparse.Namespace) -> None:
         names = list(ns.names)
         if len(names) != len(results_paths):
             raise ValueError(
-                f"--names has {len(names)} entries but --results has "
-                f"{len(results_paths)}."
+                f"--names has {len(names)} entries but --results has {len(results_paths)}."
             )
     else:
         names = [p.stem for p in results_paths]

@@ -86,9 +86,7 @@ class SurfaceDilationLogic(nn.Module):
         self.eps = float(eps)
 
         if len(spacing_xyz) != 3:
-            raise ValueError(
-                f"sddl_spacing_xyz must be a 3-tuple (sx, sy, sz), got {spacing_xyz}"
-            )
+            raise ValueError(f"sddl_spacing_xyz must be a 3-tuple (sx, sy, sz), got {spacing_xyz}")
         self.spacing_xyz = tuple(float(s) for s in spacing_xyz)
 
         # --- Auto Tolerance Logic ---
@@ -143,9 +141,7 @@ class SurfaceDilationLogic(nn.Module):
 
         padding = self.boundary_ksize // 2
         # Erode(p) = -MaxPool3d(-p)
-        eroded = -F.max_pool3d(
-            -p, kernel_size=self.boundary_ksize, stride=1, padding=padding
-        )
+        eroded = -F.max_pool3d(-p, kernel_size=self.boundary_ksize, stride=1, padding=padding)
         return p - eroded
 
     def _soft_dilation_xyz(self, x: torch.Tensor) -> torch.Tensor:
@@ -259,9 +255,7 @@ class VolumetricSDDL(DiceCELoss):
             eps=eps,
         )
 
-    def forward(
-        self, y_true: torch.Tensor, y_pred: torch.Tensor, **kwargs
-    ) -> torch.Tensor:
+    def forward(self, y_true: torch.Tensor, y_pred: torch.Tensor, **kwargs) -> torch.Tensor:
         """Compute the combined loss.
 
         Args:
@@ -340,9 +334,7 @@ class VesselSDDL(CLDice):
             eps=eps,
         )
 
-    def forward(
-        self, y_true: torch.Tensor, y_pred: torch.Tensor, **kwargs
-    ) -> torch.Tensor:
+    def forward(self, y_true: torch.Tensor, y_pred: torch.Tensor, **kwargs) -> torch.Tensor:
         """Compute the combined loss.
 
         Args:

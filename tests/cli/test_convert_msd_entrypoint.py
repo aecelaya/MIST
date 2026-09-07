@@ -105,9 +105,7 @@ class TestRunConvertMsd:
         monkeypatch.setattr(
             entry,
             "convert_msd",
-            lambda source, output, max_workers=None: captured.update(
-                max_workers=max_workers
-            ),
+            lambda source, output, max_workers=None: captured.update(max_workers=max_workers),
             raising=True,
         )
 

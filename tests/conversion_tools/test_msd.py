@@ -63,13 +63,11 @@ def temp_msd_dir(tmp_path):
 @pytest.fixture(autouse=True)
 def patch_utils(monkeypatch):
     """Patch utility functions to avoid actual file operations."""
-    monkeypatch.setattr(
-        progress_bar, "get_progress_bar", lambda msg: DummyProgressBar()
-    )
+    monkeypatch.setattr(progress_bar, "get_progress_bar", lambda msg: DummyProgressBar())
     monkeypatch.setattr(
         conversion_utils,
         "copy_image_from_source_to_dest",
-        lambda src, dst: shutil.copy(src, dst),
+        shutil.copy,
     )
 
     def fake_write_json_file(path, data):

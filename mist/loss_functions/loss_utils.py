@@ -101,20 +101,17 @@ def check_loss_inputs(y_true: torch.Tensor, y_pred: torch.Tensor) -> None:
 
     if y_pred.shape[1] < 2:
         raise ValueError(
-            f"The number of classes in the prediction must be at least 2. "
-            f"Got {y_pred.shape[1]}."
+            f"The number of classes in the prediction must be at least 2. Got {y_pred.shape[1]}."
         )
 
     if y_true.shape[1] != 1:
         raise ValueError(
-            f"The number of channels in the ground truth mask must be 1. "
-            f"Got {y_true.shape[1]}."
+            f"The number of channels in the ground truth mask must be 1. Got {y_true.shape[1]}."
         )
 
     if y_true.shape[0] != y_pred.shape[0]:
         raise ValueError(
-            f"The batch sizes must match. "
-            f"Got batch sizes {y_true.shape[0]} and {y_pred.shape[0]}."
+            f"The batch sizes must match. Got batch sizes {y_true.shape[0]} and {y_pred.shape[0]}."
         )
 
     if y_true.shape[2:] != y_pred.shape[2:]:

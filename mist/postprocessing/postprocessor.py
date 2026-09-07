@@ -5,8 +5,8 @@ import shutil
 from pathlib import Path
 from typing import cast
 
-import ants
 import numpy as np
+import SimpleITK as sitk
 from rich.table import Table
 
 from mist.postprocessing.postprocessing_utils import StrategyStep
@@ -16,7 +16,7 @@ from mist.postprocessing.transform_registry import (
 )
 
 # MIST imports.
-from mist.utils import io, progress_bar
+from mist.utils import io, progress_bar, sitk_io
 from mist.utils.console import (
     console,
     print_info,
@@ -54,7 +54,7 @@ def _postprocess_single_file(
     shutil.copy(input_path, output_path)
 
     patient_id = input_path.name.removesuffix(".nii.gz")
-    mask = ants.image_read(str(input_path))
+    mask = sitk_io.read_image(str(input_path))
     messages = []
 
     for transform_name, per_label_flag, label_group, kwargs in zip(
@@ -63,18 +63,16 @@ def _postprocess_single_file(
         try:
             transform_fn = get_transform(transform_name)
             updated_npy = transform_fn(
-                mask.numpy().astype(np.uint8),
+                sitk_io.array_from_image(mask).astype(np.uint8),
                 labels_list=label_group,
                 per_label=per_label_flag,
                 **kwargs,
             ).astype(np.uint8)
-            mask = mask.new_image_like(updated_npy)  # type: ignore
+            mask = sitk_io.new_image_like(mask, updated_npy)
         except ValueError as e:
-            messages.append(
-                f"[red]Error applying {transform_name} to {patient_id}: {e}[/red]"
-            )
+            messages.append(f"[red]Error applying {transform_name} to {patient_id}: {e}[/red]")
 
-    ants.image_write(mask, str(output_path))
+    sitk_io.write_image(mask, str(output_path))
     return messages
 
 
@@ -144,9 +142,7 @@ class Postprocessor:
             if not isinstance(step["apply_to_labels"], list) or not all(
                 isinstance(lbl, int) for lbl in step["apply_to_labels"]
             ):
-                raise ValueError(
-                    f"'apply_to_labels' in step {i} must be a list of integers."
-                )
+                raise ValueError(f"'apply_to_labels' in step {i} must be a list of integers.")
             if not isinstance(step["per_label"], bool):
                 raise ValueError(f"'per_label' in step {i} must be a boolean.")
             if step["transform"] not in POSTPROCESSING_TRANSFORMS:
@@ -155,13 +151,9 @@ class Postprocessor:
                     f"Available transforms: "
                     f"{sorted(POSTPROCESSING_TRANSFORMS.keys())}."
                 )
-            if (
-                step["transform"] == "replace_small_objects_with_label"
-                and not step["per_label"]
-            ):
+            if step["transform"] == "replace_small_objects_with_label" and not step["per_label"]:
                 raise ValueError(
-                    f"'replace_small_objects_with_label' in step {i} requires "
-                    "'per_label': true."
+                    f"'replace_small_objects_with_label' in step {i} requires 'per_label': true."
                 )
         return strategy
 
@@ -214,36 +206,38 @@ class Postprocessor:
         console.print(table)
 
     def apply_strategy_to_single_example(
-        self, patient_id: str, mask: ants.core.ants_image.ANTsImage
-    ) -> tuple[ants.core.ants_image.ANTsImage, list[str]]:
-        """Apply all transforms in the strategy to a single ANTsImage mask.
+        self, patient_id: str, mask: sitk.Image
+    ) -> tuple[sitk.Image, list[str]]:
+        """Apply all transforms in the strategy to a single mask image.
 
         Args:
             patient_id: Unique identifier for the patient or example.
-            mask: ANTsImage object to which transforms will be applied.
+            mask: SimpleITK image to which transforms will be applied.
 
         Returns:
-            A tuple of the transformed ANTsImage and a list of messages.
+            A tuple of the transformed image and a list of messages.
         """
         messages: list[str] = []
 
         for transform_name, per_label_flag, label_group, kwargs in zip(
-            self.transforms, self.per_label, self.apply_to_labels, self.transform_kwargs, strict=False
+            self.transforms,
+            self.per_label,
+            self.apply_to_labels,
+            self.transform_kwargs,
+            strict=False,
         ):
             try:
                 transform_fn = get_transform(transform_name)
                 updated_npy = transform_fn(
-                    mask.numpy().astype(np.uint8),
+                    sitk_io.array_from_image(mask).astype(np.uint8),
                     labels_list=label_group,
                     per_label=per_label_flag,
                     **kwargs,
                 ).astype(np.uint8)
             except ValueError as e:
-                messages.append(
-                    f"[red]Error applying {transform_name} to {patient_id}: {e}[/red]"
-                )
+                messages.append(f"[red]Error applying {transform_name} to {patient_id}: {e}[/red]")
             else:
-                mask = mask.new_image_like(updated_npy)  # type: ignore
+                mask = sitk_io.new_image_like(mask, updated_npy)
         return mask, messages
 
     def run(
@@ -265,16 +259,12 @@ class Postprocessor:
 
         base_filepaths = self._gather_base_filepaths(base_dir)
         if not base_filepaths:
-            print_warning(
-                "No .nii.gz files found in base directory. Nothing to postprocess."
-            )
+            print_warning("No .nii.gz files found in base directory. Nothing to postprocess.")
             return
         self._print_strategy()
 
         messages = []
-        with concurrent.futures.ProcessPoolExecutor(
-            max_workers=num_workers
-        ) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
             future_to_path = {
                 executor.submit(
                     _postprocess_single_file,
@@ -296,14 +286,10 @@ class Postprocessor:
                         messages.extend(future.result())
                     except Exception as e:  # pylint: disable=broad-except
                         fp = future_to_path[future]
-                        messages.append(
-                            f"[red]Unexpected error processing {fp.name}: {e}[/red]"
-                        )
+                        messages.append(f"[red]Unexpected error processing {fp.name}: {e}[/red]")
 
         if messages:
-            print_section_header(
-                "Postprocessing completed with the following messages:"
-            )
+            print_section_header("Postprocessing completed with the following messages:")
             for message in messages:
                 print_info(message)
         else:

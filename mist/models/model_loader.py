@@ -32,17 +32,13 @@ def average_fold_weights(
         ValueError: If checkpoints have mismatched keys, indicating
             incompatible architectures.
     """
-    state_dicts = [
-        torch.load(p, weights_only=True, map_location="cpu") for p in weights_paths
-    ]
+    state_dicts = [torch.load(p, weights_only=True, map_location="cpu") for p in weights_paths]
 
     # Strip DDP module. prefix if present.
     cleaned = []
     for sd in state_dicts:
         if any(k.startswith("module.") for k in sd):
-            sd = OrderedDict(
-                {(k[7:] if k.startswith("module.") else k): v for k, v in sd.items()}
-            )
+            sd = OrderedDict({(k[7:] if k.startswith("module.") else k): v for k, v in sd.items()})
         cleaned.append(sd)
 
     # Validate all checkpoints have identical keys.
@@ -117,9 +113,7 @@ def validate_encoder_compatibility(
                 "patch_size."
             )
 
-        if list(source_spatial["target_spacing"]) != list(
-            target_spatial["target_spacing"]
-        ):
+        if list(source_spatial["target_spacing"]) != list(target_spatial["target_spacing"]):
             _fail(
                 "target_spacing mismatch: source "
                 f"{source_spatial['target_spacing']} vs target "
@@ -165,8 +159,7 @@ def load_pretrained_encoder(
     valid_strategies = ("average", "first", "skip")
     if in_channel_strategy not in valid_strategies:
         raise ValueError(
-            f"in_channel_strategy must be one of {valid_strategies}, "
-            f"got '{in_channel_strategy}'."
+            f"in_channel_strategy must be one of {valid_strategies}, got '{in_channel_strategy}'."
         )
 
     if not hasattr(model, "get_encoder_state_dict"):

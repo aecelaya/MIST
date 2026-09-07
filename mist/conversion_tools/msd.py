@@ -61,9 +61,7 @@ def _copy_single_patient_msd(
         image_sitk = sitk.ReadImage(str(image_path))
         image_npy = sitk.GetArrayFromImage(image_sitk)
 
-        direction = (
-            np.array(image_sitk.GetDirection()).reshape((4, 4))[0:3, 0:3].ravel()
-        )
+        direction = np.array(image_sitk.GetDirection()).reshape((4, 4))[0:3, 0:3].ravel()
         spacing = image_sitk.GetSpacing()[:-1]
         origin = image_sitk.GetOrigin()[:-1]
 
@@ -145,8 +143,7 @@ def copy_msd_data(
     if error_messages:
         print_warning("\n".join(error_messages))
         print_warning(
-            f"{len(error_messages)} of {len(patients)} patient(s) had errors "
-            "and were skipped."
+            f"{len(error_messages)} of {len(patients)} patient(s) had errors and were skipped."
         )
 
 
@@ -220,11 +217,7 @@ def convert_msd(
     dataset_json = {
         "task": msd_json["name"],
         "modality": (
-            "ct"
-            if "ct" in modalities_lower
-            else "mr"
-            if "mri" in modalities_lower
-            else "other"
+            "ct" if "ct" in modalities_lower else "mr" if "mri" in modalities_lower else "other"
         ),
         "train-data": "raw/train",
         "test-data": "raw/test" if test_data_exists else None,

@@ -3,15 +3,10 @@
 import dataclasses
 from pathlib import Path
 
-import numpy as np
-
 
 @dataclasses.dataclass(frozen=True)
 class AnalyzeConstants:
     """Dataclass for constants used in the analyze_data module."""
-
-    # RAI orientation direction for ANTs.
-    RAI_ANTS_DIRECTION = np.eye(3)
 
     # Maximum recommended memory in bytes for each example. We want to keep
     # the memory usage below this value to improve computational efficiency.

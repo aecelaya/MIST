@@ -51,13 +51,11 @@ def temp_csv_data(tmp_path):
 @pytest.fixture(autouse=True)
 def patch_utils(monkeypatch):
     """Patch utility functions to avoid actual file operations."""
-    monkeypatch.setattr(
-        progress_bar, "get_progress_bar", lambda msg: DummyProgressBar()
-    )
+    monkeypatch.setattr(progress_bar, "get_progress_bar", lambda msg: DummyProgressBar())
     monkeypatch.setattr(
         conversion_utils,
         "copy_image_from_source_to_dest",
-        lambda src, dst: shutil.copy(src, dst),
+        shutil.copy,
     )
 
     def fake_write_json_file(path, data):
@@ -194,9 +192,9 @@ class TestValidateCsvColumns:
     def test_convert_csv_raises_on_bad_column_order(self, tmp_path):
         """convert_csv raises ValueError if training CSV columns are wrong."""
         bad_csv = tmp_path / "bad.csv"
-        pd.DataFrame(
-            {"id": [0], "ct": ["/img.nii.gz"], "mask": ["/mask.nii.gz"]}
-        ).to_csv(bad_csv, index=False)
+        pd.DataFrame({"id": [0], "ct": ["/img.nii.gz"], "mask": ["/mask.nii.gz"]}).to_csv(
+            bad_csv, index=False
+        )
         with pytest.raises(ValueError, match="second column must be 'mask'"):
             convert_csv(bad_csv, tmp_path / "out")
 

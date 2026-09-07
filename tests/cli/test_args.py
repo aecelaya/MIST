@@ -72,9 +72,7 @@ def test_non_negative_int_rejects_non_int_string(val):
         args_mod.non_negative_int(val)
 
 
-@pytest.mark.parametrize(
-    "val,expected", [(0, 0.0), ("0", 0.0), (0.5, 0.5), ("1", 1.0), (1.0, 1.0)]
-)
+@pytest.mark.parametrize("val,expected", [(0, 0.0), ("0", 0.0), (0.5, 0.5), ("1", 1.0), (1.0, 1.0)])
 def test_float_0_1_success(val, expected):
     """Valid floats in [0.0, 1.0] accepted as-is or converted from strings."""
     assert args_mod.float_0_1(val) == expected
@@ -290,12 +288,8 @@ def patched_registries(monkeypatch):
         lambda: ["linear", "cosine"],
         raising=True,
     )
-    monkeypatch.setattr(
-        args_mod, "list_lr_schedulers", lambda: ["cos", "none"], raising=True
-    )
-    monkeypatch.setattr(
-        args_mod, "list_optimizers", lambda: ["adam", "sgd"], raising=True
-    )
+    monkeypatch.setattr(args_mod, "list_lr_schedulers", lambda: ["cos", "none"], raising=True)
+    monkeypatch.setattr(args_mod, "list_optimizers", lambda: ["adam", "sgd"], raising=True)
 
 
 def test_add_train_args_defaults_and_basic_parse(patched_registries):

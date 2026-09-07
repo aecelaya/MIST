@@ -9,31 +9,24 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-import ants
 import numpy as np
 import pandas as pd
+import SimpleITK as sitk
 import torch
 
+from mist.data_loading import data_loader_registry
 from mist.inference import inference_utils
-from mist.inference.inference_constants import InferenceConstants as ic
-from mist.inference.predictor import Predictor
-from mist.models import model_loader
-from mist.utils import io, progress_bar
-from mist.utils.console import print_error, print_section_header, print_success
-
-# DALI is a training-only dependency (nvidia-dali-cuda120). Guard the import
-# so that inference_runners can be imported on CPU-only machines where only
-# mist_predict is needed.
-try:
-    from mist.data_loading import dali_loader
-except ImportError:
-    dali_loader = None  # type: ignore[assignment]
 from mist.inference.ensemblers.ensembler_registry import get_ensembler
+from mist.inference.inference_constants import InferenceConstants as ic
 from mist.inference.inferers.inferer_registry import get_inferer
+from mist.inference.predictor import Predictor
 from mist.inference.tta.strategies import get_strategy
+from mist.models import model_loader
 from mist.postprocessing.postprocessor import Postprocessor
 from mist.preprocessing import preprocess, preprocessing_utils
 from mist.training import training_utils
+from mist.utils import hardware, io, progress_bar, sitk_io
+from mist.utils.console import print_error, print_section_header, print_success
 
 
 def _build_predictor(
@@ -82,22 +75,29 @@ def _build_predictor(
 
 def predict_single_example(
     preprocessed_image: torch.Tensor,
-    original_ants_image: ants.core.ants_image.ANTsImage,
+    original_image: sitk.Image,
     mist_configuration: dict[str, Any],
     predictor: Predictor,
     foreground_bounding_box: dict[str, int] | None = None,
-) -> ants.core.ants_image.ANTsImage:
+    output_probs: bool = False,
+) -> tuple[sitk.Image, sitk.Image | None]:
     """Predict on a single example using a Predictor instance.
 
     Args:
         preprocessed_image: Input image as a PyTorch tensor (1, C, D, H, W).
-        original_ants_image: Original ANTs image for spatial restoration.
+        original_image: Original SimpleITK image for spatial restoration.
         mist_configuration: Configuration dictionary with MIST parameters.
         predictor: A callable Predictor instance.
         foreground_bounding_box: Optional crop bounding box.
+        output_probs: If True, also restore the pre-argmax probability
+            volume to original image space and return it alongside the
+            discrete prediction.
 
     Returns:
-        ANTs image of the final prediction, in original spatial space.
+        A tuple of (discrete prediction, probability prediction), both
+        SimpleITK images in original spatial space. The probability
+        prediction is a multi-component image with one component per class,
+        or None if output_probs is False.
     """
     # Training vs original labels.
     n_classes = mist_configuration["model"]["params"]["out_channels"]
@@ -106,6 +106,14 @@ def predict_single_example(
 
     # Run prediction via Predictor (handles TTA + ensembling internally).
     prediction = predictor(preprocessed_image)
+
+    # Capture the pre-argmax probability volume before the channel dimension
+    # is collapsed, if requested.
+    probability_volume = (
+        prediction.squeeze(dim=ic.BATCH_AXIS).to(torch.float32).cpu().numpy()
+        if output_probs
+        else None
+    )
 
     # Convert to discrete labels, remove batch dimension, and move to CPU.
     prediction = torch.argmax(prediction, dim=ic.ARGMAX_AXIS)
@@ -116,39 +124,52 @@ def predict_single_example(
         # skip=True: images were read as-is with no spatial transforms applied.
         # The prediction is already in the original image's voxel space, so
         # just copy the original header directly — no reorient or resample.
-        prediction = original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # noqa: E501
+        prediction = sitk_io.new_image_like(original_image, prediction)
+        if probability_volume is not None:
+            probability_prediction = sitk_io.merge_channels(
+                [
+                    sitk_io.new_image_like(original_image, probability_volume[c])
+                    for c in range(probability_volume.shape[0])
+                ]
+            )
+        else:
+            probability_prediction = None
     else:
         # Ensure bounding box is defined if cropping was used.
         if (
             mist_configuration["preprocessing"]["crop_to_foreground"]
             and foreground_bounding_box is None
         ):
-            foreground_bounding_box = preprocessing_utils.get_fg_mask_bbox(
-                original_ants_image
-            )
+            foreground_bounding_box = preprocessing_utils.get_fg_mask_bbox(original_image)
 
-        prediction_spacing = tuple(
-            mist_configuration["spatial_config"]["target_spacing"]
-        )
+        prediction_spacing = tuple(mist_configuration["spatial_config"]["target_spacing"])
 
         # Restore original spacing, orientation, and header.
         prediction = inference_utils.back_to_original_space(
             raw_prediction=prediction,
-            original_ants_image=original_ants_image,
+            original_image=original_image,
             target_spacing=prediction_spacing,
             training_labels=training_labels,
             foreground_bounding_box=foreground_bounding_box,
         )
 
+        if probability_volume is not None:
+            probability_prediction = inference_utils.probabilities_back_to_original_space(
+                raw_probabilities=probability_volume,
+                original_image=original_image,
+                target_spacing=prediction_spacing,
+                foreground_bounding_box=foreground_bounding_box,
+            )
+        else:
+            probability_prediction = None
+
     # Remap labels to match original dataset.
     if training_labels != original_labels:
         prediction = inference_utils.remap_mask_labels(
-            prediction.numpy(), original_labels
+            sitk_io.array_from_image(prediction), original_labels
         )
-        prediction = (
-            original_ants_image.new_image_like(data=prediction)  # type: ignore[no-any-return]  # noqa: E501
-        )
-    return prediction.astype("uint8")
+        prediction = sitk_io.new_image_like(original_image, prediction)
+    return sitk.Cast(prediction, sitk.sitkUInt8), probability_prediction
 
 
 def test_on_fold(
@@ -197,16 +218,22 @@ def test_on_fold(
     # Get bounding box data.
     foreground_bounding_boxes = pd.read_csv(results_dir / "fg_bboxes.csv")
 
-    # Get DALI loader for streaming preprocessed numpy files.
-    if dali_loader is None:
-        raise RuntimeError(
-            "NVIDIA DALI is required for test_on_fold. "
-            "Install with: pip install 'mist-medical[train]'"
-        )
-    test_loader = dali_loader.get_test_dataset(
+    # Get the data loader backend for streaming preprocessed numpy files.
+    # train_entry() calls test_on_fold() right after training, in the same
+    # process and on the same machine, so training.hardware.data_loader is
+    # already resolved by BaseTrainer._overwrite_config_from_args() -- this
+    # re-resolves anyway (a cheap no-op against an already-explicit value)
+    # so a hypothetical direct call against an unresolved config.json still
+    # picks the right backend instead of raising a confusing "'auto' is not
+    # registered" error.
+    hw = config["training"]["hardware"]
+    loader = data_loader_registry.get_data_loader_from_registry(
+        hardware.resolve_data_loader(hw.get("data_loader", "auto"))
+    )
+    test_loader = loader.get_test_dataset(
         image_paths=test_image_paths,
         seed=config["training"]["seed"],
-        num_workers=config["training"]["hardware"]["num_cpu_workers"],
+        num_workers=hw["num_cpu_workers"],
     )
 
     # Load model.
@@ -236,18 +263,17 @@ def test_on_fold(
             filename = str(output_directory / f"{patient_id}.nii.gz")
             try:
                 # Get image paths from patient dictionary. Load the original
-                # image using ANTs. If this is a multi-modality image, we need
-                # load the first image in the list. MIST already checks that
-                # the images are the same size and spacing.
+                # image. If this is a multi-modality image, we need load the
+                # first image in the list. MIST already checks that the
+                # images are the same size and spacing.
                 image_paths = [
-                    v
-                    for k, v in patient.items()
-                    if k not in ic.PATIENT_DF_IGNORED_COLUMNS
+                    v for k, v in patient.items() if k not in ic.PATIENT_DF_IGNORED_COLUMNS
                 ]
-                original_ants_image = ants.image_read(image_paths[0])
+                original_image = sitk_io.read_image(image_paths[0])
 
-                # DALI loader is assumed to yield batches in the same order as
-                # test_df. This is enforced upstream and is not checked here.
+                # The data loader (whichever backend is active) is assumed to
+                # yield batches in the same order as test_df. This is
+                # enforced upstream and is not checked here.
                 data = test_loader.next()[0]
                 preprocessed_image = data["image"]
 
@@ -264,19 +290,18 @@ def test_on_fold(
                     foreground_bounding_box = None
 
                 # Perform prediction and restoration to original space.
-                prediction = predict_single_example(
+                prediction, _ = predict_single_example(
                     preprocessed_image=preprocessed_image,
-                    original_ants_image=original_ants_image,
+                    original_image=original_image,
                     mist_configuration=config,
                     predictor=predictor,
                     foreground_bounding_box=foreground_bounding_box,
                 )
             except (FileNotFoundError, RuntimeError, ValueError) as e:
-                error_messages.append(
-                    f"Prediction failed for {patient_id}: {str(e)}")
+                error_messages.append(f"Prediction failed for {patient_id}: {str(e)}")
             else:
                 # Write prediction as .nii.gz file.
-                ants.image_write(prediction, filename)
+                sitk_io.write_image(prediction, filename)
             finally:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -294,6 +319,7 @@ def infer_from_dataframe(
     models_directory: str,
     postprocessing_strategy_filepath: str | None = None,
     device: str | torch.device | None = None,
+    output_probs: bool = False,
 ) -> None:
     """Run test-time inference on a set of input images.
 
@@ -318,6 +344,17 @@ def infer_from_dataframe(
             containing postprocessing strategies. If provided, the strategies
             will be applied to the predictions.
         device: The device to use for inference. Default is "cuda".
+        output_probs: If True, also write each patient's final (post fold/TTA
+            ensemble, pre-argmax) probability volume, restored to original
+            image space, to "<output_directory>/probabilities/<id>.nii.gz".
+            When enabled, the discrete prediction is written to
+            "<output_directory>/discrete/<id>.nii.gz" instead of directly
+            under output_directory, so both outputs sit in parallel,
+            symmetric subdirectories. When output_probs is False (the
+            default), the discrete prediction is written directly to
+            "<output_directory>/<id>.nii.gz" as before. Used to later
+            combine probabilities across models with mist_ensemble's
+            "probabilities" input type.
 
     Returns:
         None. Saves all predictions to the specified output directory.
@@ -339,8 +376,7 @@ def infer_from_dataframe(
     )
 
     # Set up the predictor for inference.
-    predictor = _build_predictor(
-        mist_configuration, models=models_list, device=device)
+    predictor = _build_predictor(mist_configuration, models=models_list, device=device)
 
     # If a postprocess strategy file is provided, check if it exists and
     # initialize the postprocessor.
@@ -348,8 +384,7 @@ def infer_from_dataframe(
     if postprocessing_strategy_filepath is not None:
         if not Path(postprocessing_strategy_filepath).exists():
             raise FileNotFoundError(
-                "Postprocess strategy file not found: "
-                f"{postprocessing_strategy_filepath}"
+                f"Postprocess strategy file not found: {postprocessing_strategy_filepath}"
             )
         postprocessor = Postprocessor(
             strategy_path=postprocessing_strategy_filepath,
@@ -357,6 +392,19 @@ def infer_from_dataframe(
 
     # Create destination directory if it does not exist.
     Path(output_directory).mkdir(parents=True, exist_ok=True)
+
+    # If probability outputs are requested, write the discrete prediction and
+    # the probability volume to parallel "discrete/" and "probabilities/"
+    # subdirectories instead of directly under output_directory. Otherwise,
+    # keep writing the discrete prediction directly under output_directory,
+    # as before.
+    if output_probs:
+        discrete_output_directory = Path(output_directory) / "discrete"
+        probabilities_output_directory = Path(output_directory) / "probabilities"
+        discrete_output_directory.mkdir(parents=True, exist_ok=True)
+        probabilities_output_directory.mkdir(parents=True, exist_ok=True)
+    else:
+        discrete_output_directory = Path(output_directory)
 
     # Set up rich progress bar.
     error_messages = []
@@ -369,13 +417,10 @@ def infer_from_dataframe(
         for patient_index in pb.track(range(len(paths_dataframe))):
             patient = paths_dataframe.iloc[patient_index].to_dict()
             patient_id = patient["id"]
-            prediction_filename = str(
-                Path(output_directory) / f"{patient_id}.nii.gz")
+            prediction_filename = str(discrete_output_directory / f"{patient_id}.nii.gz")
             try:
                 # Validate the input patient data.
-                anchor_image, image_paths = inference_utils.validate_inference_images(
-                    patient
-                )
+                anchor_image, image_paths = inference_utils.validate_inference_images(patient)
 
                 # Preprocess the input images using the MIST preprocessing
                 # pipeline. This will handle normalization, cropping, and
@@ -404,9 +449,9 @@ def infer_from_dataframe(
                 )
 
                 # Perform prediction and restoration to original space.
-                prediction = predict_single_example(
+                prediction, probability_prediction = predict_single_example(
                     preprocessed_image=preprocessed_image,
-                    original_ants_image=anchor_image,
+                    original_image=anchor_image,
                     mist_configuration=mist_configuration,
                     predictor=predictor,
                     # preprocess_example returns Dict[str, Any]; value type is
@@ -414,6 +459,7 @@ def infer_from_dataframe(
                     foreground_bounding_box=(
                         preprocessed_example["fg_bbox"]  # type: ignore[index]
                     ),
+                    output_probs=output_probs,
                 )
 
                 # Apply postprocessing if a strategy is provided.
@@ -430,12 +476,16 @@ def infer_from_dataframe(
                     if postprocessing_error_messages:
                         error_messages.extend(postprocessing_error_messages)
             except (FileNotFoundError, RuntimeError, ValueError) as e:
-                error_messages.append(
-                    f"Prediction failed for {patient_id}: {str(e)}")
+                error_messages.append(f"Prediction failed for {patient_id}: {str(e)}")
                 continue
             else:
                 # Write prediction as .nii.gz file.
-                ants.image_write(prediction, prediction_filename)
+                sitk_io.write_image(prediction, prediction_filename)
+                if probability_prediction is not None:
+                    sitk_io.write_image(
+                        probability_prediction,
+                        str(probabilities_output_directory / f"{patient_id}.nii.gz"),
+                    )
             finally:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -443,8 +493,7 @@ def infer_from_dataframe(
     # Print a summary of the inference results. If there are any error or
     # warning messages, print them. Otherwise, print a success message.
     if error_messages:
-        print_section_header(
-            "Inference completed with the following messages:")
+        print_section_header("Inference completed with the following messages:")
         for message in error_messages:
             print_error(message)
     else:

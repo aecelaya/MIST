@@ -31,13 +31,10 @@ def _validate_csv_columns(df: pd.DataFrame, mode: str) -> None:
     if mode == "training":
         if len(columns) < 3:
             raise ValueError(
-                "Training CSV must have at least 3 columns: id, mask, "
-                f"image1. Got: {columns}."
+                f"Training CSV must have at least 3 columns: id, mask, image1. Got: {columns}."
             )
         if columns[0] != "id":
-            raise ValueError(
-                f"Training CSV first column must be 'id', got '{columns[0]}'."
-            )
+            raise ValueError(f"Training CSV first column must be 'id', got '{columns[0]}'.")
         if columns[1] != "mask":
             raise ValueError(
                 f"Training CSV second column must be 'mask', got '{columns[1]}'. "
@@ -45,9 +42,7 @@ def _validate_csv_columns(df: pd.DataFrame, mode: str) -> None:
             )
     else:
         if len(columns) < 2:
-            raise ValueError(
-                f"Test CSV must have at least 2 columns: id, image1. Got: {columns}."
-            )
+            raise ValueError(f"Test CSV must have at least 2 columns: id, image1. Got: {columns}.")
         if columns[0] != "id":
             raise ValueError(f"Test CSV first column must be 'id', got '{columns[0]}'.")
 
@@ -77,9 +72,7 @@ def _copy_single_patient_csv(
         mask_source = Path(patient_dict["mask"]).resolve()
         if not mask_source.exists():
             return f"Mask {mask_source} does not exist!"
-        conversion_utils.copy_image_from_source_to_dest(
-            mask_source, patient_dest / "mask.nii.gz"
-        )
+        conversion_utils.copy_image_from_source_to_dest(mask_source, patient_dest / "mask.nii.gz")
 
     image_keys = list(patient_dict.keys())[image_start_idx:]
     image_list = list(patient_dict.values())[image_start_idx:]
@@ -121,8 +114,7 @@ def copy_csv_data(
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_patient = {
-            executor.submit(_copy_single_patient_csv, p, dest, mode): p
-            for p in patients
+            executor.submit(_copy_single_patient_csv, p, dest, mode): p for p in patients
         }
         with progress_bar.get_progress_bar(progress_bar_message) as pb:
             for future in pb.track(
@@ -136,8 +128,7 @@ def copy_csv_data(
     if error_messages:
         print_warning("\n".join(error_messages))
         print_warning(
-            f"{len(error_messages)} of {len(patients)} patient(s) had errors "
-            "and were skipped."
+            f"{len(error_messages)} of {len(patients)} patient(s) had errors and were skipped."
         )
 
 
@@ -216,9 +207,7 @@ def convert_csv(
         "train-data": "raw/train",
         "test-data": "raw/test" if test_df is not None else None,
         "mask": ["mask.nii.gz"],
-        "images": {
-            modality: [f"{modality}.nii.gz"] for modality in list(train_df.columns)[2:]
-        },
+        "images": {modality: [f"{modality}.nii.gz"] for modality in list(train_df.columns)[2:]},
         "labels": None,
         "final_classes": None,
     }

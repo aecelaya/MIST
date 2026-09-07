@@ -48,9 +48,7 @@ def get_loss(name: str) -> Callable[..., SegmentationLoss]:
     normalized_name = name.lower()
 
     if normalized_name not in LOSS_REGISTRY:
-        raise ValueError(
-            f"Loss '{name}' is not registered. Available: {list_registered_losses()}"
-        )
+        raise ValueError(f"Loss '{name}' is not registered. Available: {list_registered_losses()}")
     return LOSS_REGISTRY[normalized_name]
 
 

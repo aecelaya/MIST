@@ -1,12 +1,10 @@
 """Command line tool MIST inference on a given dataset."""
 
 import argparse
-import warnings
 from argparse import ArgumentDefaultsHelpFormatter
 from pathlib import Path
 
 import pandas as pd
-import torch
 
 # MIST imports
 from mist.cli.args import ArgParser
@@ -56,7 +54,10 @@ def _parse_inference_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--device",
         type=str,
         default="cuda",
-        help="Device to run inference on: 'cpu', 'cuda', or a CUDA index like '0'.",
+        help=(
+            "Device to run inference on: 'cpu', 'cuda' (also targets AMD "
+            "ROCm GPUs), or a CUDA index like '0'."
+        ),
     )
     p.arg(
         "--postprocess-strategy",
@@ -64,26 +65,18 @@ def _parse_inference_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Path to postprocessing strategy JSON file.",
     )
+    p.flag(
+        "--output-probs",
+        help=(
+            "Also write each prediction's final (post fold/TTA-ensemble, "
+            "pre-argmax) probability volume to '<output>/probabilities/'. "
+            "When set, the discrete prediction is written to "
+            "'<output>/discrete/' instead of directly under '<output>/'. "
+            "Use this to later combine probabilities across multiple models "
+            "with 'mist_ensemble --input-type probabilities'."
+        ),
+    )
     return p.parse_args(argv)
-
-
-def _resolve_device(device_str: str) -> torch.device:
-    """Resolve a device string (e.g. 'cpu', 'cuda', '0') to a torch.device."""
-    if device_str == "cpu":
-        return torch.device("cpu")
-    if device_str == "cuda":
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # Numeric (CUDA index) case.
-    try:
-        idx = int(device_str)
-    except ValueError as e:
-        raise ValueError(f"Invalid device specification: {device_str}") from e
-
-    if torch.cuda.is_available() and idx < torch.cuda.device_count():
-        return torch.device(f"cuda:{idx}")
-
-    warnings.warn(f"CUDA device {idx} not available; falling back to CPU.", stacklevel=2)
-    return torch.device("cpu")
 
 
 def _prepare_io(ns: argparse.Namespace) -> tuple[Path, Path, Path, Path]:
@@ -115,7 +108,7 @@ def _prepare_io(ns: argparse.Namespace) -> tuple[Path, Path, Path, Path]:
 
 def run_inference(ns: argparse.Namespace) -> None:
     """Main runner for MIST inference."""
-    device = _resolve_device(ns.device)
+    device = inference_utils.resolve_device(ns.device)
     models_dir, config_path, paths_csv, output_dir = _prepare_io(ns)
 
     # Load & validate inputs
@@ -135,6 +128,7 @@ def run_inference(ns: argparse.Namespace) -> None:
             else None
         ),
         device=device,
+        output_probs=ns.output_probs,
     )
 
 

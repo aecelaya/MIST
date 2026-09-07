@@ -35,8 +35,7 @@ def analyze_entry(argv: list[str] | None = None) -> None:
     config_path = results_dir / "config.json"
     if config_path.exists() and not getattr(cli, "overwrite", False):
         raise FileExistsError(
-            f"Found existing configuration at {config_path}. "
-            "Use --overwrite to replace it."
+            f"Found existing configuration at {config_path}. Use --overwrite to replace it."
         )
 
     # Run analysis (Analyzer expects the full Namespace).

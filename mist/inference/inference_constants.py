@@ -27,6 +27,4 @@ class InferenceConstants:
     NUMPY_TO_TORCH_EXPAND_DIMS_AXES: int = 0
 
     # Valid patch blend modes for sliding window inference.
-    SLIDING_WINDOW_PATCH_BLEND_MODES: frozenset[str] = frozenset(
-        {"gaussian", "constant"}
-    )
+    SLIDING_WINDOW_PATCH_BLEND_MODES: frozenset[str] = frozenset({"gaussian", "constant"})

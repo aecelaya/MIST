@@ -1,9 +1,7 @@
 """Tests for mist.inference.inference_runners."""
 
 import copy
-import importlib
 import os
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -11,12 +9,14 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 import pytest
+import SimpleITK as sitk
 import torch
 
 from mist.inference import inference_runners as ir
 
 # MIST imports.
 from mist.training import training_utils
+from mist.utils import sitk_io
 
 # =========================
 # Shared fixtures & helpers
@@ -94,32 +94,33 @@ def noop_cuda_tensor_to(monkeypatch):
     monkeypatch.setattr(torch.Tensor, "to", _safe_to, raising=True)
 
 
-class _DummyANTsImage:
-    """Minimal stand-in for ANTsImage."""
+def _make_sitk_image(
+    arr_xyz: np.ndarray,
+    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    direction: np.ndarray | None = None,
+) -> sitk.Image:
+    """Create a real SimpleITK image from an (x, y, z)-ordered array."""
+    return sitk_io.image_from_array(
+        arr_xyz.astype(np.float32),
+        spacing=spacing,
+        origin=origin,
+        direction=direction if direction is not None else np.eye(3),
+    )
+
+
+class _DummyImage:
+    """Opaque placeholder "prediction" for tests that mock predict_single_example
+    entirely (test_on_fold / infer_from_dataframe fixtures below) -- it is never
+    passed through real sitk_io calls in those tests, just threaded through as
+    an opaque value to the (also mocked) write_image call."""
 
     def __init__(self, array: np.ndarray | None = None):
-        self._array = (
-            np.array(0, dtype=np.uint8) if array is None else np.asarray(array)
-        )
-        self.astype_arg = None
-        self.new_like_last_data = None
-        self.shape = self._array.shape
+        self._array = np.array(0, dtype=np.uint8) if array is None else np.asarray(array)
 
     def numpy(self):
         """Return the underlying numpy array."""
         return np.asarray(self._array)
-
-    def astype(self, dtype: str):
-        """Simulate ANTsImage astype method."""
-        self.astype_arg = dtype
-        if dtype == "uint8":
-            self._array = self._array.astype(np.uint8)
-        return self
-
-    def new_image_like(self, data):
-        """Simulate ANTsImage new_image_like method."""
-        self.new_like_last_data = np.asarray(data)
-        return _DummyANTsImage(self.new_like_last_data)
 
 
 def _predictor_logits_two_class(_: torch.Tensor) -> torch.Tensor:
@@ -181,9 +182,7 @@ def _make_train_df(fold: int, image_key: str = "image"):
 
 def _make_bbox_df():
     """Create a minimal DataFrame with foreground bounding box for a patient."""
-    return pd.DataFrame(
-        [{"id": "p1", "x0": 0, "x1": 1, "y0": 0, "y1": 1, "z0": 0, "z1": 1}]
-    )
+    return pd.DataFrame([{"id": "p1", "x0": 0, "x1": 1, "y0": 0, "y1": 1, "z0": 0, "z1": 1}])
 
 
 def _prep_dirs(tmp_path: Path):
@@ -191,8 +190,7 @@ def _prep_dirs(tmp_path: Path):
     results_dir = tmp_path / "results"
     numpy_dir = tmp_path / "numpy"
     (results_dir / "models").mkdir(parents=True, exist_ok=True)
-    (results_dir / "predictions" / "train" /
-     "raw").mkdir(parents=True, exist_ok=True)
+    (results_dir / "predictions" / "train" / "raw").mkdir(parents=True, exist_ok=True)
     (numpy_dir / "images").mkdir(parents=True, exist_ok=True)
     return results_dir, numpy_dir
 
@@ -214,38 +212,29 @@ def fold_runner(mock_mist_config, monkeypatch, tmp_path):
 
     Returns a SimpleNamespace with:
       .run(fold, cfg, device, train_df, bbox_df) — calls ir.test_on_fold
-      .image_write — MagicMock for ants.image_write
+      .image_write — MagicMock for sitk_io.write_image
       .predict_single — MagicMock for predict_single_example
       .printed — list of strings passed to console.print
     """
     results_dir, numpy_dir = _prep_dirs(tmp_path)
 
     image_write = MagicMock()
-    predict_single = MagicMock(return_value=_DummyANTsImage())
+    predict_single = MagicMock(return_value=(_DummyImage(), None))
     printed = []
     mock_read_json = MagicMock()
     mock_get_test_dataset = MagicMock(return_value=_DummyLoader(n=1))
 
-    monkeypatch.setattr(
-        ir.ants, "image_read", MagicMock(return_value=_DummyANTsImage())
-    )
-    monkeypatch.setattr(ir.ants, "image_write", image_write)
-    monkeypatch.setattr(
-        ir.progress_bar, "get_progress_bar", MagicMock(return_value=_PB())
-    )
-    monkeypatch.setattr(
-        "mist.utils.console.console.print", lambda msg: printed.append(
-            str(msg))
-    )
+    monkeypatch.setattr(ir.sitk_io, "read_image", MagicMock(return_value=_DummyImage()))
+    monkeypatch.setattr(ir.sitk_io, "write_image", image_write)
+    monkeypatch.setattr(ir.progress_bar, "get_progress_bar", MagicMock(return_value=_PB()))
+    monkeypatch.setattr("mist.utils.console.console.print", lambda msg: printed.append(str(msg)))
     monkeypatch.setattr(ir, "predict_single_example", predict_single)
     monkeypatch.setattr(ir, "Predictor", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(
-        ir, "get_strategy", MagicMock(
-            return_value=lambda: SimpleNamespace(name="tta"))
+        ir, "get_strategy", MagicMock(return_value=lambda: SimpleNamespace(name="tta"))
     )
     monkeypatch.setattr(
-        ir, "get_ensembler", MagicMock(
-            return_value=SimpleNamespace(name="ensembler"))
+        ir, "get_ensembler", MagicMock(return_value=SimpleNamespace(name="ensembler"))
     )
     monkeypatch.setattr(
         ir,
@@ -253,16 +242,18 @@ def fold_runner(mock_mist_config, monkeypatch, tmp_path):
         MagicMock(return_value=lambda **_: SimpleNamespace(name="inferer")),
     )
     monkeypatch.setattr(
-        ir.model_loader, "load_model_from_config", MagicMock(
-            return_value=_DummyModel())
+        ir.model_loader, "load_model_from_config", MagicMock(return_value=_DummyModel())
     )
     mock_dali_module = MagicMock()
     mock_dali_module.get_test_dataset = mock_get_test_dataset
-    monkeypatch.setattr(ir, "dali_loader", mock_dali_module)
-    monkeypatch.setattr(ir.io, "read_json_file", mock_read_json)
+    loader_calls = {}
     monkeypatch.setattr(
-        ir, "ic", SimpleNamespace(PATIENT_DF_IGNORED_COLUMNS={"id", "fold"})
+        ir.data_loader_registry,
+        "get_data_loader_from_registry",
+        lambda name: (loader_calls.__setitem__("name", name), mock_dali_module)[1],
     )
+    monkeypatch.setattr(ir.io, "read_json_file", mock_read_json)
+    monkeypatch.setattr(ir, "ic", SimpleNamespace(PATIENT_DF_IGNORED_COLUMNS={"id", "fold"}))
     monkeypatch.setattr(
         training_utils,
         "get_npy_paths",
@@ -282,11 +273,9 @@ def fold_runner(mock_mist_config, monkeypatch, tmp_path):
         bb.to_csv(results_dir / "fg_bboxes.csv", index=False)
         (results_dir / "models" / f"fold_{fold}.pt").write_bytes(b"\x00")
         (results_dir / "config.json").write_text("{}", encoding="utf-8")
-        mock_get_test_dataset.return_value = _DummyLoader(
-            n=len(df[df["fold"] == fold]))
+        mock_get_test_dataset.return_value = _DummyLoader(n=len(df[df["fold"] == fold]))
 
-        mist_args = SimpleNamespace(results=str(
-            results_dir), numpy=str(numpy_dir))
+        mist_args = SimpleNamespace(results=str(results_dir), numpy=str(numpy_dir))
         ir.test_on_fold(mist_args=mist_args, fold_number=fold, device=device)
 
     return SimpleNamespace(
@@ -295,6 +284,7 @@ def fold_runner(mock_mist_config, monkeypatch, tmp_path):
         image_write=image_write,
         predict_single=predict_single,
         printed=printed,
+        loader_calls=loader_calls,
     )
 
 
@@ -304,7 +294,7 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
 
     Returns a SimpleNamespace with:
       .run(df, cfg, device, postprocessing_strategy_filepath) — calls ir.infer_from_dataframe
-      .image_write — MagicMock for ants.image_write
+      .image_write — MagicMock for sitk_io.write_image
       .predict_single — MagicMock for predict_single_example
       .validate — MagicMock for inference_utils.validate_inference_images
       .preprocess — MagicMock for preprocess.preprocess_example
@@ -315,8 +305,8 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
     models_dir = str(_ensure_dir(tmp_path / "models"))
 
     image_write = MagicMock()
-    predict_single = MagicMock(return_value=_DummyANTsImage())
-    mock_validate = MagicMock(return_value=(_DummyANTsImage(), ["x"]))
+    predict_single = MagicMock(return_value=(_DummyImage(), None))
+    mock_validate = MagicMock(return_value=(_DummyImage(), ["x"]))
     mock_preprocess = MagicMock(
         return_value={
             "image": np.zeros((2, 2, 2), dtype=np.float32),
@@ -325,23 +315,16 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
     )
     printed = []
 
-    monkeypatch.setattr(ir.ants, "image_write", image_write)
-    monkeypatch.setattr(
-        ir.progress_bar, "get_progress_bar", MagicMock(return_value=_PB())
-    )
-    monkeypatch.setattr(
-        "mist.utils.console.console.print", lambda msg: printed.append(
-            str(msg))
-    )
+    monkeypatch.setattr(ir.sitk_io, "write_image", image_write)
+    monkeypatch.setattr(ir.progress_bar, "get_progress_bar", MagicMock(return_value=_PB()))
+    monkeypatch.setattr("mist.utils.console.console.print", lambda msg: printed.append(str(msg)))
     monkeypatch.setattr(ir, "predict_single_example", predict_single)
     monkeypatch.setattr(ir, "Predictor", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(
-        ir, "get_strategy", MagicMock(
-            return_value=lambda: SimpleNamespace(name="tta"))
+        ir, "get_strategy", MagicMock(return_value=lambda: SimpleNamespace(name="tta"))
     )
     monkeypatch.setattr(
-        ir, "get_ensembler", MagicMock(
-            return_value=SimpleNamespace(name="ensembler"))
+        ir, "get_ensembler", MagicMock(return_value=SimpleNamespace(name="ensembler"))
     )
     monkeypatch.setattr(
         ir,
@@ -353,8 +336,7 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
         "load_test_time_models",
         MagicMock(return_value=[MagicMock(name="model0")]),
     )
-    monkeypatch.setattr(ir.inference_utils,
-                        "validate_inference_images", mock_validate)
+    monkeypatch.setattr(ir.inference_utils, "validate_inference_images", mock_validate)
     monkeypatch.setattr(ir.preprocess, "preprocess_example", mock_preprocess)
     monkeypatch.setattr(
         ir,
@@ -366,7 +348,13 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
     )
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
 
-    def run(df=None, cfg=None, device="cpu", postprocessing_strategy_filepath=None):
+    def run(
+        df=None,
+        cfg=None,
+        device="cpu",
+        postprocessing_strategy_filepath=None,
+        output_probs=False,
+    ):
         df = df if df is not None else _df_single_case(tmp_path)
         cfg = cfg or copy.deepcopy(mock_mist_config)
         ir.infer_from_dataframe(
@@ -376,6 +364,7 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
             models_directory=models_dir,
             postprocessing_strategy_filepath=postprocessing_strategy_filepath,
             device=device,
+            output_probs=output_probs,
         )
 
     return SimpleNamespace(
@@ -401,39 +390,37 @@ def test_predict_single_example_no_remap_no_crop(
     mock_mist_config,
     monkeypatch,
 ):
-    """No remap when labels match and no crop; returns uint8 ANTs-like image."""
+    """No remap when labels match and no crop; returns a uint8 sitk image."""
     cfg = copy.deepcopy(mock_mist_config)
     cfg["model"]["params"]["out_channels"] = 2
     cfg["preprocessing"]["crop_to_foreground"] = False
     cfg["dataset_info"]["labels"] = [0, 1]
 
-    monkeypatch.setattr(
-        ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False
-    )
+    monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
 
-    mocked_ants_img = _DummyANTsImage(np.ones((2, 2, 2), dtype=np.int64))
-    mock_back_to_original_space.return_value = mocked_ants_img
+    mocked_img = _make_sitk_image(np.ones((2, 2, 2), dtype=np.int64))
+    mock_back_to_original_space.return_value = mocked_img
 
     pre_img = torch.randn(1, 1, 2, 2, 2)
-    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+    orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64))
 
-    out = ir.predict_single_example(
+    out, probs = ir.predict_single_example(
         preprocessed_image=pre_img,
-        original_ants_image=orig_ants,
+        original_image=orig_image,
         mist_configuration=cfg,
         predictor=_predictor_logits_two_class,
         foreground_bounding_box=None,
     )
 
     call_kwargs = mock_back_to_original_space.call_args.kwargs
-    assert call_kwargs["original_ants_image"] is orig_ants
-    np.testing.assert_array_equal(
-        call_kwargs["raw_prediction"], np.ones((2, 2, 2)))
+    assert call_kwargs["original_image"] is orig_image
+    np.testing.assert_array_equal(call_kwargs["raw_prediction"], np.ones((2, 2, 2)))
     assert call_kwargs["training_labels"] == [0, 1]
     assert call_kwargs["foreground_bounding_box"] is None
-    assert isinstance(out, _DummyANTsImage)
-    assert out.astype_arg == "uint8"
-    assert out.numpy().dtype == np.uint8
+    assert isinstance(out, sitk.Image)
+    assert out.GetPixelID() == sitk.sitkUInt8
+    assert sitk_io.array_from_image(out).dtype == np.uint8
+    assert probs is None
 
 
 @patch("mist.inference.inference_utils.remap_mask_labels")
@@ -452,43 +439,41 @@ def test_predict_single_example_with_crop_and_remap(
     cfg["preprocessing"]["crop_to_foreground"] = True
     cfg["dataset_info"]["labels"] = [0, 2]
 
-    monkeypatch.setattr(
-        ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False
-    )
+    monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
 
     bbox = {"x0": 0, "x1": 1, "y0": 0, "y1": 1, "z0": 0, "z1": 1}
     mock_get_fg_bbox.return_value = bbox
 
-    ants_after_restore = _DummyANTsImage(np.full((2, 2, 2), 1, dtype=np.int64))
-    mock_back_to_original_space.return_value = ants_after_restore
+    restored_image = _make_sitk_image(np.full((2, 2, 2), 1, dtype=np.int64))
+    mock_back_to_original_space.return_value = restored_image
 
     remapped = np.full((2, 2, 2), 2, dtype=np.int64)
     mock_remap_labels.return_value = remapped
 
     pre_img = torch.randn(1, 1, 2, 2, 2)
-    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+    orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64))
 
-    out = ir.predict_single_example(
+    out, probs = ir.predict_single_example(
         preprocessed_image=pre_img,
-        original_ants_image=orig_ants,
+        original_image=orig_image,
         mist_configuration=cfg,
         predictor=_predictor_logits_two_class,
         foreground_bounding_box=None,
     )
 
-    mock_get_fg_bbox.assert_called_once_with(orig_ants)
+    mock_get_fg_bbox.assert_called_once_with(orig_image)
     call_kwargs = mock_back_to_original_space.call_args.kwargs
     assert call_kwargs["foreground_bounding_box"] == bbox
     assert call_kwargs["training_labels"] == [0, 1]
     mock_remap_labels.assert_called_once()
     np.testing.assert_array_equal(
-        mock_remap_labels.call_args.args[0], ants_after_restore.numpy()
+        mock_remap_labels.call_args.args[0], sitk_io.array_from_image(restored_image)
     )
     assert mock_remap_labels.call_args.args[1] == [0, 2]
-    assert isinstance(out, _DummyANTsImage)
-    assert orig_ants.new_like_last_data is not None
-    np.testing.assert_array_equal(orig_ants.new_like_last_data, remapped)
-    assert out.astype_arg == "uint8"
+    assert isinstance(out, sitk.Image)
+    np.testing.assert_array_equal(sitk_io.array_from_image(out), remapped)
+    assert out.GetPixelID() == sitk.sitkUInt8
+    assert probs is None
 
 
 @patch("mist.inference.inference_utils.back_to_original_space")
@@ -510,16 +495,15 @@ def test_predict_single_example_skip_true_bypasses_spatial_restore(
     cfg["preprocessing"]["crop_to_foreground"] = False
     cfg["dataset_info"]["labels"] = [0, 1]
 
-    monkeypatch.setattr(
-        ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False
-    )
+    monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
 
     pre_img = torch.randn(1, 1, 2, 2, 2)
-    orig_ants = _DummyANTsImage(np.zeros((2, 2, 2), dtype=np.int64))
+    origin = (5.0, 6.0, 7.0)
+    orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64), origin=origin)
 
-    out = ir.predict_single_example(
+    out, probs = ir.predict_single_example(
         preprocessed_image=pre_img,
-        original_ants_image=orig_ants,
+        original_image=orig_image,
         mist_configuration=cfg,
         predictor=_predictor_logits_two_class,
         foreground_bounding_box=None,
@@ -528,9 +512,111 @@ def test_predict_single_example_skip_true_bypasses_spatial_restore(
     # back_to_original_space must NOT be called when skip=True.
     mock_back_to_original_space.assert_not_called()
 
-    # new_image_like must have been called to copy the original header.
-    assert orig_ants.new_like_last_data is not None
-    assert out.astype_arg == "uint8"
+    # new_image_like must have been called to copy the original header
+    # (origin) directly onto the raw argmax result.
+    assert out.GetOrigin() == pytest.approx(origin)
+    assert out.GetPixelID() == sitk.sitkUInt8
+    assert probs is None
+
+
+@patch("mist.inference.inference_utils.probabilities_back_to_original_space")
+@patch("mist.inference.inference_utils.back_to_original_space")
+def test_predict_single_example_output_probs_no_crop_no_skip(
+    mock_back_to_original_space,
+    mock_probs_back_to_original_space,
+    mock_mist_config,
+    monkeypatch,
+):
+    """output_probs=True also restores the pre-argmax probability volume."""
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["model"]["params"]["out_channels"] = 2
+    cfg["preprocessing"]["crop_to_foreground"] = False
+    cfg["dataset_info"]["labels"] = [0, 1]
+
+    monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
+
+    mock_back_to_original_space.return_value = _make_sitk_image(np.ones((2, 2, 2), dtype=np.int64))
+    probs_sentinel = object()
+    mock_probs_back_to_original_space.return_value = probs_sentinel
+
+    pre_img = torch.randn(1, 1, 2, 2, 2)
+    orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64))
+
+    out, probs = ir.predict_single_example(
+        preprocessed_image=pre_img,
+        original_image=orig_image,
+        mist_configuration=cfg,
+        predictor=_predictor_logits_two_class,
+        foreground_bounding_box=None,
+        output_probs=True,
+    )
+
+    assert isinstance(out, sitk.Image)
+    assert probs is probs_sentinel
+    call_kwargs = mock_probs_back_to_original_space.call_args.kwargs
+    assert call_kwargs["raw_probabilities"].shape == (2, 2, 2, 2)
+    assert call_kwargs["original_image"] is orig_image
+    assert call_kwargs["foreground_bounding_box"] is None
+
+
+def test_predict_single_example_output_probs_false_returns_none(mock_mist_config, monkeypatch):
+    """output_probs=False (the default) always returns None for probs."""
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["model"]["params"]["out_channels"] = 2
+    cfg["preprocessing"]["crop_to_foreground"] = False
+    cfg["dataset_info"]["labels"] = [0, 1]
+
+    monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
+    monkeypatch.setattr(
+        ir.inference_utils,
+        "back_to_original_space",
+        MagicMock(return_value=_make_sitk_image(np.ones((2, 2, 2), dtype=np.int64))),
+    )
+
+    pre_img = torch.randn(1, 1, 2, 2, 2)
+    orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64))
+
+    _, probs = ir.predict_single_example(
+        preprocessed_image=pre_img,
+        original_image=orig_image,
+        mist_configuration=cfg,
+        predictor=_predictor_logits_two_class,
+        foreground_bounding_box=None,
+    )
+
+    assert probs is None
+
+
+def test_predict_single_example_skip_true_output_probs(mock_mist_config, monkeypatch):
+    """output_probs=True + skip=True merges per-channel headers directly."""
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["model"]["params"]["out_channels"] = 2
+    cfg["preprocessing"]["skip"] = True
+    cfg["preprocessing"]["crop_to_foreground"] = False
+    cfg["dataset_info"]["labels"] = [0, 1]
+
+    monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
+
+    merge_channels_mock = MagicMock(return_value="merged_sentinel")
+    monkeypatch.setattr(ir.sitk_io, "merge_channels", merge_channels_mock)
+
+    pre_img = torch.randn(1, 1, 2, 2, 2)
+    orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64))
+
+    _, probs = ir.predict_single_example(
+        preprocessed_image=pre_img,
+        original_image=orig_image,
+        mist_configuration=cfg,
+        predictor=_predictor_logits_two_class,
+        foreground_bounding_box=None,
+        output_probs=True,
+    )
+
+    assert probs == "merged_sentinel"
+    merge_channels_mock.assert_called_once()
+    channel_images = merge_channels_mock.call_args.args[0]
+    assert len(channel_images) == 2
+    assert all(isinstance(img, sitk.Image) for img in channel_images)
 
 
 # ==================
@@ -538,19 +624,45 @@ def test_predict_single_example_skip_true_bypasses_spatial_restore(
 # ==================
 
 
-def test_test_on_fold_raises_if_dali_not_available(
+def test_test_on_fold_resolves_auto_data_loader_via_registry(fold_runner, mock_mist_config):
+    """ "auto" resolves against the current hardware (CPU in this fixture --
+    see fold_runner's torch.cuda.is_available() -> False patch) before being
+    looked up in the registry."""
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["training"]["hardware"]["data_loader"] = "auto"
+    fold_runner.run(fold=0, cfg=cfg)
+    assert fold_runner.loader_calls["name"] == "generic"
+
+
+def test_test_on_fold_respects_explicit_data_loader_override(fold_runner, mock_mist_config):
+    """An explicit config.json value passes through to the registry unchanged."""
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["training"]["hardware"]["data_loader"] = "dali"
+    fold_runner.run(fold=0, cfg=cfg)
+    assert fold_runner.loader_calls["name"] == "dali"
+
+
+def test_test_on_fold_raises_if_resolved_loader_is_not_registered(
     monkeypatch, tmp_path, mock_mist_config
 ):
-    """test_on_fold raises RuntimeError when dali_loader is None (DALI not installed)."""
+    """An unregistered data_loader name surfaces the registry's own error.
+
+    There's no more DALI-specific special case here -- a resolved-but-
+    unavailable backend (e.g. "dali" resolved on a machine that trained with
+    CUDA, but DALI isn't importable in this process) is just an ordinary
+    registry lookup failure, already covered generically by
+    tests/data_loading/test_data_loader_registry.py. This only confirms
+    test_on_fold doesn't swallow or rewrap that error.
+    """
     results_dir, numpy_dir = _prep_dirs(tmp_path)
     _make_train_df(0).to_csv(results_dir / "train_paths.csv", index=False)
     _make_bbox_df().to_csv(results_dir / "fg_bboxes.csv", index=False)
     (results_dir / "config.json").write_text("{}", encoding="utf-8")
 
-    monkeypatch.setattr(ir, "dali_loader", None)
-    monkeypatch.setattr(
-        ir.io, "read_json_file", lambda _: copy.deepcopy(mock_mist_config)
-    )
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["training"]["hardware"]["data_loader"] = "not_a_real_loader"
+
+    monkeypatch.setattr(ir.io, "read_json_file", lambda _: cfg)
     monkeypatch.setattr(
         training_utils,
         "get_npy_paths",
@@ -560,36 +672,8 @@ def test_test_on_fold_raises_if_dali_not_available(
     )
 
     mist_args = SimpleNamespace(results=str(results_dir), numpy=str(numpy_dir))
-    with pytest.raises(RuntimeError, match="NVIDIA DALI is required"):
-        ir.test_on_fold(mist_args=mist_args, fold_number=0,
-                        device=torch.device("cpu"))
-
-
-def test_dali_import_error_sets_dali_loader_none():
-    """inference_runners.dali_loader is None when the DALI import fails."""
-    import mist.data_loading
-    import mist.inference.inference_runners as runners_mod
-
-    original_sys = sys.modules.get("mist.data_loading.dali_loader")
-    original_attr = getattr(mist.data_loading, "dali_loader", None)
-
-    try:
-        # Setting sys.modules entry to None causes ImportError on import.
-        # type: ignore[assignment]
-        sys.modules["mist.data_loading.dali_loader"] = None
-        if hasattr(mist.data_loading, "dali_loader"):
-            delattr(mist.data_loading, "dali_loader")
-        importlib.reload(runners_mod)
-        assert runners_mod.dali_loader is None
-    finally:
-        # Restore sys.modules and the package attribute.
-        if original_sys is None:
-            sys.modules.pop("mist.data_loading.dali_loader", None)
-        else:
-            sys.modules["mist.data_loading.dali_loader"] = original_sys
-        if original_attr is not None:
-            mist.data_loading.dali_loader = original_attr
-        importlib.reload(runners_mod)
+    with pytest.raises(ValueError, match="'not_a_real_loader' is not registered"):
+        ir.test_on_fold(mist_args=mist_args, fold_number=0, device=torch.device("cpu"))
 
 
 def test_test_on_fold_success_no_crop_tta_enabled(fold_runner, mock_mist_config):
@@ -603,8 +687,7 @@ def test_test_on_fold_success_no_crop_tta_enabled(fold_runner, mock_mist_config)
     fold_runner.predict_single.assert_called_once()
     fold_runner.image_write.assert_called_once()
     out_path = fold_runner.image_write.call_args.args[1]
-    assert out_path.endswith(os.path.join(
-        "predictions", "train", "raw", "p1.nii.gz"))
+    assert out_path.endswith(os.path.join("predictions", "train", "raw", "p1.nii.gz"))
 
 
 def test_test_on_fold_crop_to_foreground_bbox_passed(fold_runner, mock_mist_config):
@@ -622,14 +705,11 @@ def test_test_on_fold_crop_to_foreground_bbox_passed(fold_runner, mock_mist_conf
     assert call_kwargs["foreground_bounding_box"] == bbox_df.iloc[0].to_dict()
 
 
-def test_test_on_fold_error_message_collected_and_printed_single(
-    fold_runner, mock_mist_config
-):
+def test_test_on_fold_error_message_collected_and_printed_single(fold_runner, mock_mist_config):
     """If prediction fails for a case, the formatted error is printed."""
     fold_runner.predict_single.side_effect = RuntimeError("boom")
 
-    train_df = pd.DataFrame(
-        [{"id": "pX", "fold": 0, "image": "/tmp/pX.nii.gz"}])
+    train_df = pd.DataFrame([{"id": "pX", "fold": 0, "image": "/tmp/pX.nii.gz"}])
     fold_runner.run(fold=0, train_df=train_df)
 
     fold_runner.image_write.assert_not_called()
@@ -652,11 +732,8 @@ def test_test_on_fold_error_messages_multiple_printed(fold_runner, mock_mist_con
     fold_runner.run(fold=1, train_df=train_df)
 
     fold_runner.image_write.assert_not_called()
-    assert any(
-        "Prediction failed for pA: missing.nii.gz" in m for m in fold_runner.printed
-    )
-    assert any(
-        "Prediction failed for pB: bad shape" in m for m in fold_runner.printed)
+    assert any("Prediction failed for pA: missing.nii.gz" in m for m in fold_runner.printed)
+    assert any("Prediction failed for pB: bad shape" in m for m in fold_runner.printed)
 
 
 # ===========================
@@ -664,9 +741,7 @@ def test_test_on_fold_error_messages_multiple_printed(fold_runner, mock_mist_con
 # ===========================
 
 
-def test_infer_from_dataframe_success_preprocess_path_tta_enabled(
-    infer_runner, mock_mist_config
-):
+def test_infer_from_dataframe_success_preprocess_path_tta_enabled(infer_runner, mock_mist_config):
     """Preprocessing branch (skip=False), TTA enabled — output written."""
     infer_runner.run(cfg=copy.deepcopy(mock_mist_config))
 
@@ -686,6 +761,36 @@ def test_infer_from_dataframe_success_tta_disabled(infer_runner, mock_mist_confi
     infer_runner.image_write.assert_called_once()
 
 
+def test_infer_from_dataframe_output_probs_writes_probability_volume(
+    infer_runner, mock_mist_config
+):
+    """output_probs=True writes discrete/ and probabilities/ subdirectories."""
+    prob_image = _DummyImage()
+    infer_runner.predict_single.return_value = (_DummyImage(), prob_image)
+
+    infer_runner.run(cfg=copy.deepcopy(mock_mist_config), output_probs=True)
+
+    call_kwargs = infer_runner.predict_single.call_args.kwargs
+    assert call_kwargs["output_probs"] is True
+
+    assert infer_runner.image_write.call_count == 2
+    written_paths = [c.args[1] for c in infer_runner.image_write.call_args_list]
+    assert any(p.endswith(os.path.join("out", "discrete", "p1.nii.gz")) for p in written_paths)
+    assert any(p.endswith(os.path.join("out", "probabilities", "p1.nii.gz")) for p in written_paths)
+    assert not any(p.endswith(os.path.join("out", "p1.nii.gz")) for p in written_paths)
+
+
+def test_infer_from_dataframe_output_probs_false_skips_second_write(infer_runner, mock_mist_config):
+    """output_probs=False (default) writes the discrete prediction directly."""
+    infer_runner.run(cfg=copy.deepcopy(mock_mist_config))
+
+    call_kwargs = infer_runner.predict_single.call_args.kwargs
+    assert call_kwargs["output_probs"] is False
+    assert infer_runner.image_write.call_count == 1
+    out_path = infer_runner.image_write.call_args.args[1]
+    assert out_path.endswith(os.path.join("out", "p1.nii.gz"))
+
+
 def test_infer_from_dataframe_postprocess_applied_and_messages_printed(
     infer_runner, mock_mist_config, tmp_path
 ):
@@ -696,7 +801,7 @@ def test_infer_from_dataframe_postprocess_applied_and_messages_printed(
     with patch("mist.inference.inference_runners.Postprocessor") as MockPP:
         pp = MagicMock()
         pp.apply_strategy_to_single_example.return_value = (
-            _DummyANTsImage(),
+            _DummyImage(),
             ["warn: something"],
         )
         MockPP.return_value = pp
@@ -706,8 +811,7 @@ def test_infer_from_dataframe_postprocess_applied_and_messages_printed(
         MockPP.assert_called_once()
         pp.apply_strategy_to_single_example.assert_called_once()
         assert any(
-            "Inference completed with the following messages:" in m
-            for m in infer_runner.printed
+            "Inference completed with the following messages:" in m for m in infer_runner.printed
         )
         assert any("warn: something" in m for m in infer_runner.printed)
         infer_runner.image_write.assert_called_once()
@@ -716,8 +820,7 @@ def test_infer_from_dataframe_postprocess_applied_and_messages_printed(
 def test_infer_from_dataframe_postprocess_file_missing_raises(infer_runner, tmp_path):
     """If postprocess strategy file path is provided but missing, raise."""
     with pytest.raises(FileNotFoundError):
-        infer_runner.run(postprocessing_strategy_filepath=str(
-            tmp_path / "nope.json"))
+        infer_runner.run(postprocessing_strategy_filepath=str(tmp_path / "nope.json"))
 
 
 def test_infer_from_dataframe_logs_errors_and_continues_then_summarizes(
@@ -730,15 +833,13 @@ def test_infer_from_dataframe_logs_errors_and_continues_then_summarizes(
             {"id": "pB", "image": str(tmp_path / "images" / "pB.nii.gz")},
         ]
     )
-    infer_runner.predict_single.side_effect = [
-        RuntimeError("boom"), _DummyANTsImage()]
+    infer_runner.predict_single.side_effect = [RuntimeError("boom"), (_DummyImage(), None)]
 
     infer_runner.run(df=df)
 
     assert any("Prediction failed for pA" in m for m in infer_runner.printed)
     assert any(
-        "Inference completed with the following messages:" in m
-        for m in infer_runner.printed
+        "Inference completed with the following messages:" in m for m in infer_runner.printed
     )
     assert infer_runner.image_write.call_count == 1
     out_path = infer_runner.image_write.call_args.args[1]
@@ -774,8 +875,7 @@ def test_infer_from_dataframe_device_resolution(
 
     monkeypatch.setattr(ir, "Predictor", _Pred)
 
-    infer_runner.run(cfg=copy.deepcopy(
-        mock_mist_config), device=explicit_device)
+    infer_runner.run(cfg=copy.deepcopy(mock_mist_config), device=explicit_device)
 
     assert observed["device"] == expected
 
@@ -786,9 +886,7 @@ def test_infer_from_dataframe_device_resolution(
 
 
 @pytest.mark.parametrize("amp_flag", [True, False])
-def test_build_predictor_passes_use_amp_from_config(
-    mock_mist_config, monkeypatch, amp_flag
-):
+def test_build_predictor_passes_use_amp_from_config(mock_mist_config, monkeypatch, amp_flag):
     """_build_predictor reads training.amp and passes use_amp to Predictor."""
     cfg = copy.deepcopy(mock_mist_config)
     cfg["training"]["amp"] = amp_flag
@@ -800,11 +898,8 @@ def test_build_predictor_passes_use_amp_from_config(
             observed.update(kwargs)
 
     monkeypatch.setattr(ir, "Predictor", _CapturePred)
-    monkeypatch.setattr(
-        ir, "get_inferer", MagicMock(return_value=lambda **_: MagicMock())
-    )
-    monkeypatch.setattr(ir, "get_ensembler",
-                        MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(ir, "get_inferer", MagicMock(return_value=lambda **_: MagicMock()))
+    monkeypatch.setattr(ir, "get_ensembler", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(ir, "get_strategy", MagicMock(return_value=lambda: []))
 
     ir._build_predictor(cfg, models=[], device="cpu")
@@ -824,11 +919,8 @@ def test_build_predictor_use_amp_false_when_amp_missing(mock_mist_config, monkey
             observed.update(kwargs)
 
     monkeypatch.setattr(ir, "Predictor", _CapturePred)
-    monkeypatch.setattr(
-        ir, "get_inferer", MagicMock(return_value=lambda **_: MagicMock())
-    )
-    monkeypatch.setattr(ir, "get_ensembler",
-                        MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(ir, "get_inferer", MagicMock(return_value=lambda **_: MagicMock()))
+    monkeypatch.setattr(ir, "get_ensembler", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(ir, "get_strategy", MagicMock(return_value=lambda: []))
 
     ir._build_predictor(cfg, models=[], device="cpu")
@@ -836,9 +928,7 @@ def test_build_predictor_use_amp_false_when_amp_missing(mock_mist_config, monkey
     assert observed.get("use_amp") is False
 
 
-def test_build_predictor_sw_batch_size_is_2x_batch_size_per_gpu(
-    mock_mist_config, monkeypatch
-):
+def test_build_predictor_sw_batch_size_is_2x_batch_size_per_gpu(mock_mist_config, monkeypatch):
     """_build_predictor passes sw_batch_size = 2 * batch_size_per_gpu."""
     cfg = copy.deepcopy(mock_mist_config)
     cfg["training"]["batch_size_per_gpu"] = 3
@@ -850,10 +940,8 @@ def test_build_predictor_sw_batch_size_is_2x_batch_size_per_gpu(
         return MagicMock()
 
     monkeypatch.setattr(ir, "Predictor", MagicMock(return_value=MagicMock()))
-    monkeypatch.setattr(ir, "get_inferer", MagicMock(
-        return_value=_capture_inferer))
-    monkeypatch.setattr(ir, "get_ensembler",
-                        MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(ir, "get_inferer", MagicMock(return_value=_capture_inferer))
+    monkeypatch.setattr(ir, "get_ensembler", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(ir, "get_strategy", MagicMock(return_value=lambda: []))
 
     ir._build_predictor(cfg, models=[], device="cpu")
@@ -861,9 +949,7 @@ def test_build_predictor_sw_batch_size_is_2x_batch_size_per_gpu(
     assert captured_inferer_kwargs.get("sw_batch_size") == 6
 
 
-def test_build_predictor_respects_user_sw_batch_size(
-    mock_mist_config, monkeypatch
-):
+def test_build_predictor_respects_user_sw_batch_size(mock_mist_config, monkeypatch):
     """User-set sw_batch_size in config is not overwritten by the computed default."""
     cfg = copy.deepcopy(mock_mist_config)
     cfg["training"]["batch_size_per_gpu"] = 3
@@ -876,10 +962,8 @@ def test_build_predictor_respects_user_sw_batch_size(
         return MagicMock()
 
     monkeypatch.setattr(ir, "Predictor", MagicMock(return_value=MagicMock()))
-    monkeypatch.setattr(ir, "get_inferer", MagicMock(
-        return_value=_capture_inferer))
-    monkeypatch.setattr(ir, "get_ensembler",
-                        MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(ir, "get_inferer", MagicMock(return_value=_capture_inferer))
+    monkeypatch.setattr(ir, "get_ensembler", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(ir, "get_strategy", MagicMock(return_value=lambda: []))
 
     ir._build_predictor(cfg, models=[], device="cpu")

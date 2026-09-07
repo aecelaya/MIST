@@ -148,6 +148,8 @@ class BaseTrainer(ABC):
             if dist.is_initialized():
                 rank = dist.get_rank()
         except (AttributeError, RuntimeError, ValueError, TypeError):
+            # torch.distributed may be unavailable or not yet initialized;
+            # keep the rank read from the RANK environment variable above.
             pass
 
         final_seed = int(seed) + int(rank)
@@ -193,9 +195,7 @@ class BaseTrainer(ABC):
                     "subset of [0, 1, ..., nfolds-1]. Found folds: "
                     f"{self.mist_args.folds}."
                 )
-            self.config["training"]["folds"] = [
-                int(fold) for fold in self.mist_args.folds
-            ]
+            self.config["training"]["folds"] = [int(fold) for fold in self.mist_args.folds]
 
         # If the user specifies a number of epochs, then update the
         # configuration with the number of epochs.
@@ -205,9 +205,7 @@ class BaseTrainer(ABC):
         # If the user specifies a different batch size to use on each GPU,
         # then update the configuration with the new batch size.
         if self.mist_args.batch_size_per_gpu is not None:
-            self.config["training"]["batch_size_per_gpu"] = int(
-                self.mist_args.batch_size_per_gpu
-            )
+            self.config["training"]["batch_size_per_gpu"] = int(self.mist_args.batch_size_per_gpu)
 
         # Overwrite the loss function and its parameters if specified in
         # command line arguments.
@@ -233,9 +231,7 @@ class BaseTrainer(ABC):
         # Overwrite the learning rate scheduler and its parameters if specified
         # in command line arguments.
         if self.mist_args.learning_rate is not None:
-            self.config["training"]["learning_rate"] = float(
-                self.mist_args.learning_rate
-            )
+            self.config["training"]["learning_rate"] = float(self.mist_args.learning_rate)
 
         if self.mist_args.lr_scheduler is not None:
             self.config["training"]["lr_scheduler"] = self.mist_args.lr_scheduler
@@ -252,9 +248,25 @@ class BaseTrainer(ABC):
         # pre-Ampere/CPU. Resolving here (once, in the parent process) persists
         # the effective value to config.json so every training step and all
         # downstream inference read a hardware-appropriate setting.
-        self.config["training"]["amp"] = hardware.resolve_amp(
-            self.config["training"]["amp"]
+        self.config["training"]["amp"] = hardware.resolve_amp(self.config["training"]["amp"])
+
+        # Resolve the communication backend against the current hardware, the
+        # same way: "auto" becomes "nccl" on CUDA/ROCm (ROCm routes "nccl"
+        # transparently to RCCL) or "gloo" on CPU-only hardware, while an
+        # explicit value from config.json is left untouched. Resolved here
+        # for the same reason as AMP -- the analyze-time machine that wrote
+        # the original config may differ from the train-time machine.
+        hw = self.config["training"]["hardware"]
+        hw["communication_backend"] = hardware.resolve_communication_backend(
+            hw["communication_backend"]
         )
+
+        # Resolve the data loader backend the same way: "auto" becomes
+        # "dali" on CUDA or "generic" on ROCm/CPU, while an explicit value is
+        # left untouched. `.get(..., "auto")` tolerates a config.json written
+        # before this key existed at all, not just one that already says
+        # "auto" -- both are treated as "not yet resolved".
+        hw["data_loader"] = hardware.resolve_data_loader(hw.get("data_loader", "auto"))
 
         # Write the updated configuration to the config.json file.
         io.write_json_file(self.config_json, self.config)
@@ -281,16 +293,14 @@ class BaseTrainer(ABC):
         new_arch = new["model"]["architecture"]
         if old_arch != new_arch:
             incompatible.append(
-                f"  --model: '{old_arch}' → '{new_arch}' "
-                f"(checkpoint weights are incompatible)"
+                f"  --model: '{old_arch}' → '{new_arch}' (checkpoint weights are incompatible)"
             )
 
         old_patch = old["spatial_config"]["patch_size"]
         new_patch = new["spatial_config"]["patch_size"]
         if old_patch != new_patch:
             incompatible.append(
-                f"  --patch-size: {old_patch} → {new_patch} "
-                f"(checkpoint weights are incompatible)"
+                f"  --patch-size: {old_patch} → {new_patch} (checkpoint weights are incompatible)"
             )
 
         if incompatible:
@@ -307,9 +317,7 @@ class BaseTrainer(ABC):
         tr_new = new["training"]
 
         if tr_old["loss"]["name"] != tr_new["loss"]["name"]:
-            warnings.append(
-                f"  --loss: '{tr_old['loss']['name']}' → '{tr_new['loss']['name']}'"
-            )
+            warnings.append(f"  --loss: '{tr_old['loss']['name']}' → '{tr_new['loss']['name']}'")
 
         old_clw = tr_old["loss"]["composite_loss_weighting"]
         new_clw = tr_new["loss"]["composite_loss_weighting"]
@@ -317,20 +325,16 @@ class BaseTrainer(ABC):
             warnings.append(f"  --composite-loss-weighting: {old_clw} → {new_clw}")
 
         if tr_old["optimizer"] != tr_new["optimizer"]:
-            warnings.append(
-                f"  --optimizer: '{tr_old['optimizer']}' → '{tr_new['optimizer']}'"
-            )
+            warnings.append(f"  --optimizer: '{tr_old['optimizer']}' → '{tr_new['optimizer']}'")
 
         if tr_old["learning_rate"] != tr_new["learning_rate"]:
             warnings.append(
-                f"  --learning-rate: {tr_old['learning_rate']} → "
-                f"{tr_new['learning_rate']}"
+                f"  --learning-rate: {tr_old['learning_rate']} → {tr_new['learning_rate']}"
             )
 
         if tr_old["lr_scheduler"] != tr_new["lr_scheduler"]:
             warnings.append(
-                f"  --lr-scheduler: '{tr_old['lr_scheduler']}' → "
-                f"'{tr_new['lr_scheduler']}'"
+                f"  --lr-scheduler: '{tr_old['lr_scheduler']}' → '{tr_new['lr_scheduler']}'"
             )
 
         old_warmup = tr_old.get("warmup_epochs", 0)
@@ -339,9 +343,7 @@ class BaseTrainer(ABC):
             warnings.append(f"  --warmup-epochs: {old_warmup} → {new_warmup}")
 
         if tr_old["l2_penalty"] != tr_new["l2_penalty"]:
-            warnings.append(
-                f"  --l2-penalty: {tr_old['l2_penalty']} → {tr_new['l2_penalty']}"
-            )
+            warnings.append(f"  --l2-penalty: {tr_old['l2_penalty']} → {tr_new['l2_penalty']}")
 
         if warnings:
             print_warning(
@@ -354,16 +356,28 @@ class BaseTrainer(ABC):
             print_info("")
 
     def _update_num_gpus_in_config(self) -> None:
-        """Get the number of GPUs and add it to the configuration."""
-        # Fast, explicit CUDA checks.
-        if not torch.cuda.is_available():
-            raise ValueError(
-                "CUDA is not available. Ensure the CUDA toolkit/driver matches "
-                "your PyTorch build, and that you're running on a GPU host."
-            )
+        """Get the number of GPUs (CUDA/ROCm) and add it to the configuration.
 
-        # If CUDA is available, check the number of GPUs. If the number of GPUs
-        # is zero, raise an error.
+        CPU-only hardware has no GPU count to report: num_gpus is set to 0
+        there, rather than raising. Downstream batch-size math
+        (`max(1, num_gpus)`, just below) and `fit()`'s own CPU world_size
+        fallback already treat 0 the same as a single process -- see
+        `cpu_rocm_support_plan.md` Stage 4, which is where this CPU-hostile
+        unconditional raise was found and fixed (a real end-to-end CPU
+        training run hit it immediately -- Stage 0's coupling-site audit
+        missed this one).
+        """
+        if hardware.get_accelerator_type() == "cpu":
+            self.config["training"]["hardware"]["num_gpus"] = 0
+            io.write_json_file(self.config_json, self.config)
+            return
+
+        # CUDA/ROCm: torch.cuda.is_available() is already known True here --
+        # that's exactly what makes get_accelerator_type() return something
+        # other than "cpu" -- so device_count() is meaningful. A count of 0
+        # despite is_available() being True would mean torch itself is
+        # reporting an inconsistent state (e.g. a driver/container
+        # misconfiguration), which is still worth a clear error.
         num_gpus = torch.cuda.device_count()
         if num_gpus <= 0:
             raise ValueError(
@@ -371,8 +385,6 @@ class BaseTrainer(ABC):
                 "Check CUDA_VISIBLE_DEVICES or container runtime GPU flags"
             )
 
-        # If there are GPUs available, update the configuration with the number
-        # of GPUs.
         self.config["training"]["hardware"]["num_gpus"] = num_gpus
         io.write_json_file(self.config_json, self.config)
 
@@ -391,7 +403,8 @@ class BaseTrainer(ABC):
         if not pretrained_config_path:
             warnings.warn(
                 "--pretrained-weights is set but --pretrained-config was not "
-                "provided. Skipping encoder compatibility validation.", stacklevel=2
+                "provided. Skipping encoder compatibility validation.",
+                stacklevel=2,
             )
             return
 
@@ -400,9 +413,7 @@ class BaseTrainer(ABC):
 
     def _use_dtms(self) -> bool:
         """Return True when the selected loss requires distance transform maps."""
-        return (
-            self.config["training"]["loss"]["name"] in TrainerConstants.DTM_AWARE_LOSSES
-        )
+        return self.config["training"]["loss"]["name"] in TrainerConstants.DTM_AWARE_LOSSES
 
     def _setup_folds(self) -> None:
         """Setup data paths and parameters for a specific fold.
@@ -469,9 +480,7 @@ class BaseTrainer(ABC):
                 )
 
                 # Unpack while handling optional DTMs.
-                (train_images, val_images, train_labels, val_labels, *maybe_dtms) = (
-                    splits
-                )
+                (train_images, val_images, train_labels, val_labels, *maybe_dtms) = splits
                 if self._use_dtms():
                     train_dtms, _ = maybe_dtms
 
@@ -506,17 +515,13 @@ class BaseTrainer(ABC):
             **self.config["model"]["params"],
             **self.config["spatial_config"],
         }
-        return get_model_from_registry(
-            self.config["model"]["architecture"], **model_kwargs
-        )
+        return get_model_from_registry(self.config["model"]["architecture"], **model_kwargs)
 
     def _print_training_summary(self, world_size: int) -> None:
         """Print a one-time summary of the training configuration (rank 0)."""
         model = self._build_model()
         num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        rows = training_utils.training_summary_rows(
-            self.config, num_params, world_size
-        )
+        rows = training_utils.training_summary_rows(self.config, num_params, world_size)
         table = Table(title="Training configuration", show_header=False)
         table.add_column(style="bold")
         table.add_column()
@@ -536,21 +541,16 @@ class BaseTrainer(ABC):
         pretrained_weights = getattr(self.mist_args, "pretrained_weights", None)
         if pretrained_weights:
             strategy = getattr(self.mist_args, "input_channel_strategy", "average")
-            model, transfer_summary = load_pretrained_encoder(
-                model, pretrained_weights, strategy
-            )
+            model, transfer_summary = load_pretrained_encoder(model, pretrained_weights, strategy)
             if rank == 0:
                 n_loaded = len(transfer_summary["loaded"])
                 n_applied = len(transfer_summary["channel_strategy_applied"])
                 n_skipped = len(transfer_summary["skipped"])
                 transferred_keys = set(
-                    transfer_summary["loaded"]
-                    + transfer_summary["channel_strategy_applied"]
+                    transfer_summary["loaded"] + transfer_summary["channel_strategy_applied"]
                 )
                 model_sd = model.state_dict()
-                loaded_scalars = sum(
-                    model_sd[k].numel() for k in transferred_keys if k in model_sd
-                )
+                loaded_scalars = sum(model_sd[k].numel() for k in transferred_keys if k in model_sd)
                 print_info(
                     f"Pretrained encoder loaded from {pretrained_weights}\n"
                     f"  Loaded:                   {n_loaded} tensors "
@@ -569,10 +569,17 @@ class BaseTrainer(ABC):
         if use_ddp:
             model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
-        # Send model to device.
-        model.to(torch.device(f"cuda:{rank}"))
+        # Send model to device. Found unconditionally hardcoded to "cuda:
+        # <rank>" during Stage 4 of cpu_rocm_support_plan.md, when a real
+        # end-to-end CPU training run hit it immediately -- Stage 0's
+        # coupling-site audit missed this one.
+        model.to(hardware.get_device_for_rank(rank))
 
-        # Set up model for distributed data parallel training.
+        # Set up model for distributed data parallel training. device_ids
+        # only makes sense for a CUDA/ROCm rank; this is unreachable on
+        # CPU-only hardware today since fit() forces world_size (and so
+        # use_ddp) to False there -- multi-process CPU training is out of
+        # scope for now (cpu_rocm_support_plan.md Stage 1).
         if use_ddp:
             model = DDP(model, device_ids=[rank])
 
@@ -583,9 +590,7 @@ class BaseTrainer(ABC):
         loss_cls = get_loss(loss_name)
         loss_params = {}
         if loss_name in TrainerConstants.SPACING_AWARE_LOSSES:
-            loss_params["sddl_spacing_xyz"] = self.config["spatial_config"][
-                "target_spacing"
-            ]
+            loss_params["sddl_spacing_xyz"] = self.config["spatial_config"]["target_spacing"]
         loss_function = loss_cls(**loss_params)
         loss_function = DeepSupervisionLoss(loss_function)
 
@@ -681,7 +686,17 @@ class BaseTrainer(ABC):
         if not path.exists():
             return False
 
-        checkpoint = torch.load(path, weights_only=False)
+        # map_location="cpu": without it, torch.load tries to recreate
+        # tensors on whatever device type they were saved from, which
+        # crashes outright if that device type isn't available on this
+        # machine (e.g. resuming a checkpoint saved during CUDA or ROCm
+        # training on a CPU-only machine, or moving a job between a CUDA
+        # and a ROCm node). Loading to CPU first is always safe regardless
+        # of whether this run is actually on the same device type as the
+        # original save -- load_state_dict() below moves values onto each
+        # destination tensor's own (possibly CUDA/ROCm) device automatically,
+        # the same safe pattern mist/models/model_loader.py already uses.
+        checkpoint = torch.load(path, weights_only=False, map_location="cpu")
 
         # Restore model weights (unwrap DDP before loading).
         model = state["model"]
@@ -709,8 +724,23 @@ class BaseTrainer(ABC):
         hw = self.config["training"]["hardware"]
         os.environ["MASTER_ADDR"] = hw["master_addr"]
         os.environ["MASTER_PORT"] = str(hw["master_port"])
+
+        init_kwargs = {}
+        if hardware.get_accelerator_type() != "cpu":
+            # device_id tells NCCL/RCCL which GPU this rank's collective ops
+            # (e.g. barrier()) run on explicitly, instead of relying on the
+            # ambient "current CUDA device" set by train_fold's
+            # torch.cuda.set_device(rank) call just before this -- silences a
+            # UserWarning on newer torch versions and is what that warning
+            # itself recommends. Gloo (CPU, no GPU devices) has no
+            # equivalent concept.
+            init_kwargs["device_id"] = torch.device("cuda", rank)
+
         dist.init_process_group(
-            hw["communication_backend"], rank=rank, world_size=world_size
+            hw["communication_backend"],
+            rank=rank,
+            world_size=world_size,
+            **init_kwargs,
         )
 
     # Clean up processes after distributed training
@@ -723,7 +753,8 @@ class BaseTrainer(ABC):
         """Generic training loop for a single fold."""
         # Set up for distributed training.
         use_ddp = world_size > 1
-        torch.cuda.set_device(rank)
+        if hardware.get_accelerator_type() != "cpu":
+            torch.cuda.set_device(rank)
         self.setup(rank, world_size)
 
         # Set random seed for reproducibility.
@@ -749,9 +780,7 @@ class BaseTrainer(ABC):
                 if loaded:
                     print_info(f"Resuming fold {fold} from epoch {state['epoch']}")
                 else:
-                    print_warning(
-                        f"No checkpoint found for fold {fold}, starting from scratch."
-                    )
+                    print_warning(f"No checkpoint found for fold {fold}, starting from scratch.")
 
         # Build data loaders for the fold.
         train_loader, val_loader = self.build_dataloaders(
@@ -772,8 +801,12 @@ class BaseTrainer(ABC):
             # Path and name for best model for this fold.
             model_name = str(self.models_dir / f"fold_{fold}.pt")
 
-        # Stop training flag if we encounter nan or inf losses.
-        stop_training = torch.tensor([0], dtype=torch.int, device=f"cuda:{rank}")
+        # Stop training flag if we encounter nan or inf losses. Same
+        # accelerator-aware device as build_components()'s model.to() above
+        # -- also hardcoded to "cuda:<rank>" until Stage 4 found it.
+        stop_training = torch.tensor(
+            [0], dtype=torch.int, device=hardware.get_device_for_rank(rank)
+        )
 
         # Start training for the specified number of epochs.
         for epoch in range(state["epoch"], self.config["training"]["epochs"]):
@@ -822,9 +855,7 @@ class BaseTrainer(ABC):
                     # Check for NaN/Inf and flag for early exit.
                     if not np.isfinite(mean_loss):
                         if rank == 0:
-                            print_error(
-                                "Stopping training: Detected NaN or inf loss value!"
-                            )
+                            print_error("Stopping training: Detected NaN or inf loss value!")
                         stop_training[0] = 1
 
                     # Update running average and progress bar (rank 0 only).
@@ -841,7 +872,15 @@ class BaseTrainer(ABC):
             if stop_training.item() == 1:
                 if rank == 0:
                     logs_writer.close()
-                self.cleanup()
+                # Note: the process group is NOT torn down here. It is shared
+                # across every fold run_cross_validation loops over in this
+                # process, and is only destroyed once, after that loop exits
+                # (see run_cross_validation). Destroying and re-creating it
+                # per fold raced ranks against each other (one rank could
+                # start re-initializing for the next fold while another was
+                # still tearing down the previous group) and produced
+                # intermittent NCCL "connection refused" crashes between
+                # folds on multi-GPU runs.
                 return  # Exit training early.
 
             # Update learning rate scheduler.
@@ -946,8 +985,13 @@ class BaseTrainer(ABC):
         if rank == 0:
             logs_writer.close()
 
-        # Clean up distributed processes.
-        self.cleanup()
+        # Note: the process group is intentionally left up here. It is shared
+        # across every fold run_cross_validation loops over in this process,
+        # and is only destroyed once that loop exits (see run_cross_validation
+        # and its call to self.cleanup()). Tearing it down and re-initializing
+        # it fresh for each fold raced ranks against each other and produced
+        # intermittent NCCL "connection refused" crashes between folds on
+        # multi-GPU runs.
 
     def run_cross_validation(self, rank: int, world_size: int) -> None:
         """Run cross-validation for selected folds."""
@@ -961,7 +1005,11 @@ class BaseTrainer(ABC):
             if getattr(self.mist_args, "resume", False):
                 path = self._checkpoint_path(fold)
                 if path.exists():
-                    checkpoint = torch.load(path, weights_only=False)
+                    # map_location="cpu": see load_checkpoint()'s comment --
+                    # this only reads checkpoint["epoch"] (an int) but still
+                    # has to fully deserialize the tensors to get there, so
+                    # it's exposed to the exact same cross-device crash.
+                    checkpoint = torch.load(path, weights_only=False, map_location="cpu")
                     if checkpoint["epoch"] >= self.config["training"]["epochs"] - 1:
                         if rank == 0:
                             print_info(f"Fold {fold} already complete, skipping.")
@@ -970,6 +1018,11 @@ class BaseTrainer(ABC):
             # Train the model for the current fold.
             self.train_fold(fold=fold, rank=rank, world_size=world_size)
 
+        # Clean up the process group once, after all folds this process is
+        # responsible for have finished (or aborted). See the comments in
+        # train_fold for why this must not happen per-fold.
+        self.cleanup()
+
     def fit(self):
         """Fit the model using multiprocessing.
 
@@ -977,18 +1030,29 @@ class BaseTrainer(ABC):
         It uses the `torch.multiprocessing.spawn` function to create multiple
         instances of the training function, each on a separate GPU.
         """
-        # Enable some performance optimizations.
-        torch.set_float32_matmul_precision("high")
-        # torch.backends.cudnn.conv.fp32_precision was added in PyTorch 2.5;
-        # fall back to allow_tf32 which achieves the same effect on older builds.
-        if hasattr(torch.backends.cudnn, "conv"):
-            torch.backends.cudnn.conv.fp32_precision = "tf32"
-        else:
-            torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
+        accelerator = hardware.get_accelerator_type()
 
-        # Train model.
-        world_size = torch.cuda.device_count()
+        # Enable some performance optimizations. These tune cuDNN (CUDA) /
+        # its MIOpen equivalent (ROCm, via the same torch.backends.cudnn
+        # compatibility shim) and are meaningless on CPU-only hardware --
+        # empirically confirmed harmless no-ops there today, but skipped
+        # explicitly rather than relying on that continuing to hold.
+        if accelerator != "cpu":
+            torch.set_float32_matmul_precision("high")
+            # torch.backends.cudnn.conv.fp32_precision was added in PyTorch
+            # 2.5; fall back to allow_tf32 which achieves the same effect on
+            # older builds.
+            if hasattr(torch.backends.cudnn, "conv"):
+                torch.backends.cudnn.conv.fp32_precision = "tf32"
+            else:
+                torch.backends.cudnn.allow_tf32 = True
+            torch.backends.cudnn.benchmark = True
+
+        # Train model. torch.cuda.device_count() is 0 on CPU-only hardware
+        # (there are no CUDA/ROCm devices to count), so it can't be used
+        # directly as the process count -- CPU training always runs as a
+        # single process today (see cpu_rocm_support_plan.md Stage 1).
+        world_size = torch.cuda.device_count() if accelerator != "cpu" else 1
         if world_size > 1:
             mp.spawn(  # type: ignore
                 self.run_cross_validation,

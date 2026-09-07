@@ -63,9 +63,7 @@ def random_augmentation(
         with the user defined probability.
     """
     # Generate a condition using a coin flip based on the provided probability.
-    condition = fn.cast(
-        fn.random.coin_flip(probability=probability), dtype=types.DALIDataType.BOOL
-    )
+    condition = fn.cast(fn.random.coin_flip(probability=probability), dtype=types.DALIDataType.BOOL)
 
     # Invert the condition (negation) for the alternative case.
     neg_condition = condition ^ True

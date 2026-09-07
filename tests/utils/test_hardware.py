@@ -10,6 +10,110 @@ import torch
 from mist.utils import hardware
 
 
+def test_get_accelerator_type_cpu_without_cuda(monkeypatch) -> None:
+    """get_accelerator_type is "cpu" when no CUDA/ROCm device is visible."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert hardware.get_accelerator_type() == "cpu"
+
+
+def test_get_accelerator_type_cuda_when_hip_unset(monkeypatch) -> None:
+    """get_accelerator_type is "cuda" when a device is visible and not ROCm."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.version, "hip", None, raising=False)
+    assert hardware.get_accelerator_type() == "cuda"
+
+
+def test_get_accelerator_type_rocm_when_hip_set(monkeypatch) -> None:
+    """get_accelerator_type is "rocm" when torch.version.hip is set.
+
+    torch.version.hip is a version string on ROCm builds of PyTorch and None
+    otherwise -- the documented way to distinguish ROCm from real CUDA, since
+    both report through the same torch.cuda compatibility shim.
+    """
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.version, "hip", "6.2.41134", raising=False)
+    assert hardware.get_accelerator_type() == "rocm"
+
+
+@pytest.mark.parametrize(
+    ("requested", "accelerator", "expected"),
+    [
+        ("auto", "cpu", "gloo"),
+        ("auto", "cuda", "nccl"),
+        ("auto", "rocm", "nccl"),
+        ("mpi", "cuda", "mpi"),
+        ("gloo", "cpu", "gloo"),
+    ],
+)
+def test_resolve_communication_backend(monkeypatch, requested, accelerator, expected) -> None:
+    """ "auto" resolves per accelerator; any other value passes through."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    assert hardware.resolve_communication_backend(requested) == expected
+
+
+@pytest.mark.parametrize(
+    ("requested", "accelerator", "expected"),
+    [
+        ("auto", "cpu", "generic"),
+        ("auto", "rocm", "generic"),
+        ("generic", "cuda", "generic"),
+        ("dali", "cpu", "dali"),  # An explicit value always passes through untouched.
+    ],
+)
+def test_resolve_data_loader(monkeypatch, requested, accelerator, expected) -> None:
+    """ "auto" resolves per accelerator; any other value passes through.
+
+    Cases that would actually reach the CUDA/"dali"-registered branch are
+    covered by the two dedicated tests below instead, since that branch
+    depends on data_loader_registry state, not just the accelerator.
+    """
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    assert hardware.resolve_data_loader(requested) == expected
+
+
+def test_resolve_data_loader_cuda_with_dali_registered(monkeypatch) -> None:
+    """ "auto" resolves to "dali" on CUDA when it's actually installed."""
+    from mist.data_loading import data_loader_registry
+
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
+    monkeypatch.setattr(
+        data_loader_registry, "list_registered_data_loaders", lambda: ["dali", "generic"]
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert hardware.resolve_data_loader("auto") == "dali"
+
+
+def test_resolve_data_loader_cuda_without_dali_warns_and_falls_back(monkeypatch) -> None:
+    """ "auto" on CUDA without DALI installed warns and falls back to "generic".
+
+    Regression guard: a CUDA machine that skipped `pip install
+    "mist-medical[dali]"` used to hit a ValueError deep inside
+    build_dataloaders() ("Data loader 'dali' is not registered") instead of
+    training on the generic loader with a clear warning.
+    """
+    from mist.data_loading import data_loader_registry
+
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
+    monkeypatch.setattr(data_loader_registry, "list_registered_data_loaders", lambda: ["generic"])
+    with pytest.warns(UserWarning, match=r"mist-medical\[dali\]"):
+        assert hardware.resolve_data_loader("auto") == "generic"
+
+
+@pytest.mark.parametrize(
+    ("accelerator", "expected"),
+    [
+        ("cpu", torch.device("cpu")),
+        ("cuda", torch.device("cuda", 1)),
+        ("rocm", torch.device("cuda", 1)),
+    ],
+)
+def test_get_device_for_rank(monkeypatch, accelerator, expected) -> None:
+    """CPU has no per-rank device; CUDA/ROCm both target "cuda:<rank>"."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    assert hardware.get_device_for_rank(rank=1) == expected
+
+
 def test_bf16_supported_false_without_cuda(monkeypatch) -> None:
     """bf16_supported is False when CUDA is unavailable."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
@@ -19,6 +123,7 @@ def test_bf16_supported_false_without_cuda(monkeypatch) -> None:
 def test_bf16_supported_true_on_ampere(monkeypatch) -> None:
     """bf16_supported is True on Ampere or newer (compute capability >= 8)."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.version, "hip", None, raising=False)
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (8, 0))
     assert hardware.bf16_supported() is True
 
@@ -30,7 +135,58 @@ def test_bf16_supported_false_on_pre_ampere(monkeypatch) -> None:
     software emulation, so the capability check must be used instead.
     """
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.version, "hip", None, raising=False)
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (7, 5))
+    assert hardware.bf16_supported() is False
+
+
+class _FakeDeviceProperties:
+    """Minimal stand-in for torch.cuda.get_device_properties()'s return."""
+
+    def __init__(self, gcn_arch_name: str) -> None:
+        self.gcnArchName = gcn_arch_name
+
+
+def test_bf16_supported_true_on_cdna(monkeypatch) -> None:
+    """bf16_supported is True on CDNA (MFMA matrix hardware), e.g. MI210."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.version, "hip", "6.2.41134", raising=False)
+    monkeypatch.setattr(
+        torch.cuda,
+        "get_device_properties",
+        lambda idx=0: _FakeDeviceProperties("gfx90a:sramecc+:xnack-"),
+    )
+    assert hardware.bf16_supported() is True
+
+
+def test_bf16_supported_true_on_rdna3(monkeypatch) -> None:
+    """bf16_supported is True on RDNA3+ (WMMA matrix hardware), e.g. RX 7900."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.version, "hip", "6.2.41134", raising=False)
+    monkeypatch.setattr(
+        torch.cuda,
+        "get_device_properties",
+        lambda idx=0: _FakeDeviceProperties("gfx1100"),
+    )
+    assert hardware.bf16_supported() is True
+
+
+def test_bf16_supported_false_on_rdna2(monkeypatch) -> None:
+    """bf16_supported is False on RDNA1/2 (no matrix hardware), e.g. RX 6800.
+
+    Regression guard: torch.cuda.is_bf16_supported() reports True on RDNA2
+    via software emulation on plain shader ALUs -- confirmed empirically to
+    regress training speed vs. FP32 on a real gfx1030 card -- so the
+    gcnArchName allow-list must be used instead of trusting it.
+    """
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.version, "hip", "6.3.42134", raising=False)
+    monkeypatch.setattr(
+        torch.cuda,
+        "get_device_properties",
+        lambda idx=0: _FakeDeviceProperties("gfx1030"),
+    )
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
     assert hardware.bf16_supported() is False
 
 
@@ -90,3 +246,26 @@ def test_autocast_context_enabled_is_autocast() -> None:
         ctx = hardware.autocast_context(True)
     assert not isinstance(ctx, contextlib.nullcontext)
     assert isinstance(ctx, torch.autocast)
+
+
+def test_autocast_context_enabled_uses_cuda_device_type_on_rocm(monkeypatch) -> None:
+    """ROCm reuses the "cuda" autocast device type, same as real CUDA."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "rocm")
+    # Constructing a CUDA autocast on this CPU-only dev host warns; unrelated
+    # to what we assert here (the device type it was constructed with).
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ctx = hardware.autocast_context(True)
+    assert ctx.device == "cuda"
+
+
+def test_autocast_context_enabled_uses_cpu_device_type_on_cpu(monkeypatch) -> None:
+    """A CPU accelerator gets a "cpu" autocast device type, not "cuda".
+
+    In practice bf16_supported() is always False on CPU, so resolve_amp()
+    never lets enabled=True reach here on real CPU-only hardware -- this
+    covers the defensive branch directly in case a caller bypasses that.
+    """
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cpu")
+    ctx = hardware.autocast_context(True)
+    assert ctx.device == "cpu"

@@ -77,13 +77,9 @@ class DataDumper:
         # When crop_to_foreground is enabled, use fg bounding box dims as the
         # image size denominator so vol-fraction-of-image reflects the actual
         # region the model sees rather than the full uncropped volume.
-        crop_to_fg = bool(
-            self.config.get("preprocessing", {}).get("crop_to_foreground", False)
-        )
+        crop_to_fg = bool(self.config.get("preprocessing", {}).get("crop_to_foreground", False))
         effective_dims = (
-            self.cropped_dims
-            if (crop_to_fg and self.cropped_dims is not None)
-            else None
+            self.cropped_dims if (crop_to_fg and self.cropped_dims is not None) else None
         )
 
         # Single pass over all patients to collect raw statistics.
@@ -92,9 +88,7 @@ class DataDumper:
         )
 
         image_stats = data_dump_utils.build_image_statistics(raw_stats, self.config)
-        label_stats = data_dump_utils.build_label_statistics(
-            raw_stats, self.dataset_info
-        )
+        label_stats = data_dump_utils.build_label_statistics(raw_stats, self.dataset_info)
         observations = data_dump_utils.generate_observations(
             image_stats, label_stats, dataset_summary
         )
@@ -160,16 +154,11 @@ class DataDumper:
             f"- **Task:** {ds['task']}",
             f"- **Modality:** {ds['modality'].upper()}",
             f"- **Patients:** {ds['num_patients']}",
-            (
-                f"- **Channels ({ds['num_channels']}):** "
-                f"{', '.join(ds['channel_names'])}"
-            ),
+            (f"- **Channels ({ds['num_channels']}):** {', '.join(ds['channel_names'])}"),
             f"- **Labels:** {ds['labels']}",
             (
                 "- **Final classes:** "
-                + ", ".join(
-                    f"{name} {labels}" for name, labels in ds["final_classes"].items()
-                )
+                + ", ".join(f"{name} {labels}" for name, labels in ds["final_classes"].items())
             ),
             f"- **Dataset size:** {ds['dataset_size_gb']:.3f} GB",
             "",
@@ -183,8 +172,7 @@ class DataDumper:
         for ax in range(3):
             s = img["spacing"]["per_axis"][f"axis_{ax}"]
             lines.append(
-                f"| {ax} | {s['mean']} | {s['std']} | {s['min']} "
-                f"| {s['median']} | {s['max']} |"
+                f"| {ax} | {s['mean']} | {s['std']} | {s['min']} | {s['median']} | {s['max']} |"
             )
 
         aniso = img["spacing"]["anisotropy_ratio"]
@@ -208,10 +196,7 @@ class DataDumper:
         med = img["dimensions"]["resampled_median"]
         lines += [
             "",
-            (
-                f"**Median resampled dimensions:** "
-                f"{med[0]} \u00d7 {med[1]} \u00d7 {med[2]} voxels"
-            ),
+            (f"**Median resampled dimensions:** {med[0]} \u00d7 {med[1]} \u00d7 {med[2]} voxels"),
             "",
             "### Intensity Distributions (foreground voxels)",
         ]
@@ -258,18 +243,10 @@ class DataDumper:
             sh = lbl_data["shape"]
             lin = f"{sh['linearity']:.2f}" if sh["linearity"] is not None else "\u2014"
             plan = f"{sh['planarity']:.2f}" if sh["planarity"] is not None else "\u2014"
-            sph = (
-                f"{sh['sphericity']:.2f}" if sh["sphericity"] is not None else "\u2014"
-            )
-            iq = (
-                f"{sh['compactness']:.3f}"
-                if sh.get("compactness") is not None
-                else "\u2014"
-            )
+            sph = f"{sh['sphericity']:.2f}" if sh["sphericity"] is not None else "\u2014"
+            iq = f"{sh['compactness']:.3f}" if sh.get("compactness") is not None else "\u2014"
             skel = (
-                f"{sh['skeleton_ratio']:.3f}"
-                if sh.get("skeleton_ratio") is not None
-                else "\u2014"
+                f"{sh['skeleton_ratio']:.3f}" if sh.get("skeleton_ratio") is not None else "\u2014"
             )
             vol_frac_fg = lbl_data["mean_volume_fraction_of_foreground_pct"]
             vol_frac_img = lbl_data["mean_volume_fraction_of_image_pct"]
@@ -313,102 +290,141 @@ class DataDumper:
             "The following definitions explain every metric reported above.",
             "",
             "### Spacing and Anisotropy",
-            "- **Spacing (mm):** Physical size of each voxel along each axis "
-            "(row, column, slice). Affects how the image is resampled before "
-            "training.",
-            "- **Anisotropy ratio:** max(spacing) / min(spacing) across all "
-            "axes and patients. A ratio > 3 indicates the dataset is "
-            "anisotropic — voxels are substantially thicker in one direction "
-            "— which may require axis-specific handling during resampling and "
-            "patch sampling.",
+            (
+                "- **Spacing (mm):** Physical size of each voxel along each axis "
+                "(row, column, slice). Affects how the image is resampled before "
+                "training."
+            ),
+            (
+                "- **Anisotropy ratio:** max(spacing) / min(spacing) across all "
+                "axes and patients. A ratio > 3 indicates the dataset is "
+                "anisotropic — voxels are substantially thicker in one direction "
+                "— which may require axis-specific handling during resampling and "
+                "patch sampling."
+            ),
             "",
             "### Image Dimensions",
-            "- **Original dimensions:** Voxel counts along each axis before "
-            "resampling.",
-            "- **Median resampled dimensions:** Estimated image size after "
-            "resampling to the target spacing, derived from the MIST config. "
-            "Used to inform patch size and memory budget.",
+            ("- **Original dimensions:** Voxel counts along each axis before resampling."),
+            (
+                "- **Median resampled dimensions:** Estimated image size after "
+                "resampling to the target spacing, derived from the MIST config. "
+                "Used to inform patch size and memory budget."
+            ),
             "",
             "### Intensity",
-            "- **Foreground voxels:** Voxels inside the ground-truth "
-            "segmentation mask (non-background). Intensity statistics are "
-            "computed over foreground only to avoid background bias.",
-            "- **Percentiles (p01–p99):** Robust summary of the intensity "
-            "distribution. Wide ranges suggest high inter-patient variability "
-            "or the presence of outliers.",
-            "- **Foreground density:** Proportion of voxels in the full image "
-            "volume that belong to any non-background label. Low values are "
-            "expected for tasks targeting small or sparse structures "
-            "(e.g., vessels, small lesions) and do not indicate a data "
-            "quality issue.",
+            (
+                "- **Foreground voxels:** Voxels inside the ground-truth "
+                "segmentation mask (non-background). Intensity statistics are "
+                "computed over foreground only to avoid background bias."
+            ),
+            (
+                "- **Percentiles (p01–p99):** Robust summary of the intensity "
+                "distribution. Wide ranges suggest high inter-patient variability "
+                "or the presence of outliers."
+            ),
+            (
+                "- **Foreground density:** Proportion of voxels in the full image "
+                "volume that belong to any non-background label. Low values are "
+                "expected for tasks targeting small or sparse structures "
+                "(e.g., vessels, small lesions) and do not indicate a data "
+                "quality issue."
+            ),
             "",
             "### Label / Class Statistics",
-            "- **Voxel count:** Number of voxels assigned to a label for each "
-            "patient. Mean ± std summarises cross-patient variability.",
-            "- **Presence rate:** Percentage of patients in which the label "
-            "appears at all. A low presence rate means the label is absent in "
-            "many scans.",
-            "- **Vol. fraction of foreground (%):** Mean label voxel count "
-            "divided by mean total foreground voxel count, expressed as a "
-            "percentage. Measures how much of the foreground each label "
-            "occupies. A label can be 100% of the foreground while still "
-            "being a tiny fraction of the overall image.",
-            "- **Vol. fraction of image (%):** Mean label voxel count divided "
-            "by mean effective image voxel count, expressed as a percentage. "
-            "When `crop_to_foreground` is enabled the denominator is the "
-            "foreground bounding box volume (the region the model actually "
-            "sees); otherwise it is the full original image volume. "
-            "Captures how sparse the label is relative to the image region "
-            "the model operates on. Low values are expected for small "
-            "structures like vessels or lesions even when they dominate "
-            "the foreground.",
-            "- **Size category:** Qualitative bucket based on vol. fraction of "
-            "foreground: tiny (< 0.1%), small (0.1–1%), medium (1–5%), "
-            "large (≥ 5%).",
-            "- **Class imbalance ratio:** dominant label vol. fraction / "
-            "minority label vol. fraction. A ratio > 10 indicates severe "
-            "imbalance that may require loss weighting or oversampling.",
+            (
+                "- **Voxel count:** Number of voxels assigned to a label for each "
+                "patient. Mean ± std summarises cross-patient variability."
+            ),
+            (
+                "- **Presence rate:** Percentage of patients in which the label "
+                "appears at all. A low presence rate means the label is absent in "
+                "many scans."
+            ),
+            (
+                "- **Vol. fraction of foreground (%):** Mean label voxel count "
+                "divided by mean total foreground voxel count, expressed as a "
+                "percentage. Measures how much of the foreground each label "
+                "occupies. A label can be 100% of the foreground while still "
+                "being a tiny fraction of the overall image."
+            ),
+            (
+                "- **Vol. fraction of image (%):** Mean label voxel count divided "
+                "by mean effective image voxel count, expressed as a percentage. "
+                "When `crop_to_foreground` is enabled the denominator is the "
+                "foreground bounding box volume (the region the model actually "
+                "sees); otherwise it is the full original image volume. "
+                "Captures how sparse the label is relative to the image region "
+                "the model operates on. Low values are expected for small "
+                "structures like vessels or lesions even when they dominate "
+                "the foreground."
+            ),
+            (
+                "- **Size category:** Qualitative bucket based on vol. fraction of "
+                "foreground: tiny (< 0.1%), small (0.1–1%), medium (1–5%), "
+                "large (≥ 5%)."
+            ),
+            (
+                "- **Class imbalance ratio:** dominant label vol. fraction / "
+                "minority label vol. fraction. A ratio > 10 indicates severe "
+                "imbalance that may require loss weighting or oversampling."
+            ),
             "",
             "### Shape Descriptors",
-            "Shape descriptors are computed per label per patient and then "
-            "averaged across patients. They characterise the geometry of the "
-            "label region and inform loss function and architecture choices.",
+            (
+                "Shape descriptors are computed per label per patient and then "
+                "averaged across patients. They characterise the geometry of the "
+                "label region and inform loss function and architecture choices."
+            ),
             "",
-            "**PCA-based descriptors** decompose the covariance matrix of the "
-            "label voxel coordinates (in mm-space) into three eigenvalues "
-            "\u03bb\u2081 \u2265 \u03bb\u2082 \u2265 \u03bb\u2083. The "
-            "normalised values sum to 1:",
-            "- **Linearity:** (\u03bb\u2081 \u2212 \u03bb\u2082) / "
-            "(\u03bb\u2081 + \u03bb\u2082 + \u03bb\u2083). Dominant when the "
-            "label extends strongly along one axis (e.g., a straight vessel "
-            "segment or spine).",
-            "- **Planarity:** (\u03bb\u2082 \u2212 \u03bb\u2083) / "
-            "(\u03bb\u2081 + \u03bb\u2082 + \u03bb\u2083). Dominant when the "
-            "label lies primarily in a plane (e.g., a thin cortical sheet).",
-            "- **Sphericity:** \u03bb\u2083 / "
-            "(\u03bb\u2081 + \u03bb\u2082 + \u03bb\u2083). Dominant when "
-            "spread is roughly equal in all directions (e.g., a round tumor).",
-            "- **Shape class:** The descriptor with the highest value "
-            "determines the class: tubular (linearity), planar (planarity), "
-            "or blob (sphericity). Note: PCA operates on the global bounding "
-            "ellipsoid of the label. A branching vessel tree may appear "
-            "blob-like by PCA even though it is locally thin and tubular — "
-            "use skeleton ratio as the primary tubular signal.",
+            (
+                "**PCA-based descriptors** decompose the covariance matrix of the "
+                "label voxel coordinates (in mm-space) into three eigenvalues "
+                "\u03bb\u2081 \u2265 \u03bb\u2082 \u2265 \u03bb\u2083. The "
+                "normalised values sum to 1:"
+            ),
+            (
+                "- **Linearity:** (\u03bb\u2081 \u2212 \u03bb\u2082) / "
+                "(\u03bb\u2081 + \u03bb\u2082 + \u03bb\u2083). Dominant when the "
+                "label extends strongly along one axis (e.g., a straight vessel "
+                "segment or spine)."
+            ),
+            (
+                "- **Planarity:** (\u03bb\u2082 \u2212 \u03bb\u2083) / "
+                "(\u03bb\u2081 + \u03bb\u2082 + \u03bb\u2083). Dominant when the "
+                "label lies primarily in a plane (e.g., a thin cortical sheet)."
+            ),
+            (
+                "- **Sphericity:** \u03bb\u2083 / "
+                "(\u03bb\u2081 + \u03bb\u2082 + \u03bb\u2083). Dominant when "
+                "spread is roughly equal in all directions (e.g., a round tumor)."
+            ),
+            (
+                "- **Shape class:** The descriptor with the highest value "
+                "determines the class: tubular (linearity), planar (planarity), "
+                "or blob (sphericity). Note: PCA operates on the global bounding "
+                "ellipsoid of the label. A branching vessel tree may appear "
+                "blob-like by PCA even though it is locally thin and tubular — "
+                "use skeleton ratio as the primary tubular signal."
+            ),
             "",
-            "**Compactness (Isoperimetric Quotient, IQ):** "
-            "36\u03c0 \u00b7 V\u00b2 / SA\u00b3, where V is label volume "
-            "(mm\u00b3) and SA is surface area (mm\u00b2). A perfect sphere "
-            "scores 1.0; thin, branching, or irregular structures score near "
-            "0 because they have disproportionately large surface area "
-            "relative to their volume.",
+            (
+                "**Compactness (Isoperimetric Quotient, IQ):** "
+                "36\u03c0 \u00b7 V\u00b2 / SA\u00b3, where V is label volume "
+                "(mm\u00b3) and SA is surface area (mm\u00b2). A perfect sphere "
+                "scores 1.0; thin, branching, or irregular structures score near "
+                "0 because they have disproportionately large surface area "
+                "relative to their volume."
+            ),
             "",
-            "**Skeleton ratio:** skeleton voxels / total label voxels, where "
-            "the skeleton is the morphological medial axis (skimage "
-            "skeletonize). High values indicate that most label voxels lie "
-            "close to the centerline — the hallmark of thin, branching "
-            "structures such as vessels or airways. Skeletonization is skipped "
-            "for labels exceeding 500,000 voxels (reported as \u2014); "
-            "structures that large are rarely thin/tubular.",
+            (
+                "**Skeleton ratio:** skeleton voxels / total label voxels, where "
+                "the skeleton is the morphological medial axis (skimage "
+                "skeletonize). High values indicate that most label voxels lie "
+                "close to the centerline — the hallmark of thin, branching "
+                "structures such as vessels or airways. Skeletonization is skipped "
+                "for labels exceeding 500,000 voxels (reported as \u2014); "
+                "structures that large are rarely thin/tubular."
+            ),
             "",
             "## Observations",
             "",

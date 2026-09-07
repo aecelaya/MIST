@@ -4,18 +4,22 @@
 #   pip install pre-commit
 #   pre-commit install
 #
-# After that, ruff (lint, with auto-fix) and codespell run automatically on the
-# files you stage. If a hook rewrites a file, the commit is aborted so you can
-# review, re-stage, and commit again. These are the same checks the Lint
-# workflow enforces in CI, so running them locally keeps PRs green.
+# After that, ruff (lint, with auto-fix), ruff-format, and codespell run
+# automatically on the files you stage. If a hook rewrites a file, the commit
+# is aborted so you can review, re-stage, and commit again. These are the same
+# checks the Lint workflow enforces in CI, so running them locally keeps PRs
+# green.
 #
 # https://pre-commit.com
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.20
     hooks:
+      # Linter first (with auto-fix)...
       - id: ruff
         args: [--fix]
+      # ...then the formatter, so lint fixes are also formatted.
+      - id: ruff-format
 
   - repo: https://github.com/codespell-project/codespell
     rev: v2.3.0

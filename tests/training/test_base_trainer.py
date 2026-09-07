@@ -312,9 +312,7 @@ def patch_registries(monkeypatch):
     monkeypatch.setattr(bt, "get_loss", lambda name: DummyLoss)
     monkeypatch.setattr(bt, "get_alpha_scheduler", lambda cfg: object())
 
-    def fake_get_optimizer(
-        name, params, weight_decay, eps, learning_rate=None, l2_penalty=None
-    ):
+    def fake_get_optimizer(name, params, weight_decay, eps, learning_rate=None, l2_penalty=None):
         """Fake optimizer that returns a dummy SGD."""
         lr = 0.1 if learning_rate is None else float(learning_rate)
         wd = float(weight_decay if l2_penalty is None else l2_penalty)
@@ -353,10 +351,23 @@ def patch_ddp_and_tb_and_save(monkeypatch):
     monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", lambda *a, **k: None)
 
 
+_NO_DEVICE_ID = object()
+
+
 @pytest.fixture(autouse=True)
 def patch_dist(monkeypatch):
     """Patch torch.distributed to be inert but count calls."""
-    calls = {"init": 0, "destroy": 0, "all_reduce": 0, "broadcast": 0, "barrier": 0}
+    calls = {
+        "init": 0,
+        "destroy": 0,
+        "all_reduce": 0,
+        "broadcast": 0,
+        "barrier": 0,
+        # Sentinel so tests can tell "device_id kwarg omitted" (CPU) apart
+        # from "device_id=None passed explicitly" -- setup() never does the
+        # latter, but the fake shouldn't quietly conflate the two.
+        "last_device_id": _NO_DEVICE_ID,
+    }
 
     class FakeDist:
         """Fake distributed module to track calls."""
@@ -386,9 +397,10 @@ def patch_dist(monkeypatch):
             return FakeDist._world_size
 
         @staticmethod
-        def init_process_group(backend, rank, world_size):
+        def init_process_group(backend, rank, world_size, device_id=_NO_DEVICE_ID):
             """Initialize the process group."""
             calls["init"] += 1
+            calls["last_device_id"] = device_id
             FakeDist._initialized = True
             FakeDist._rank = int(rank)
             FakeDist._world_size = int(world_size)
@@ -515,9 +527,7 @@ def test_build_components_single_gpu(tmp_pipeline, mist_args, monkeypatch):
     assert isinstance(state["model"], DummyModel)
 
 
-def test_build_components_multi_gpu_wraps_with_ddp(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_build_components_multi_gpu_wraps_with_ddp(tmp_pipeline, mist_args, monkeypatch):
     """Test build_components with multiple GPUs, DDP wrapping."""
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
     results, _ = tmp_pipeline
@@ -531,15 +541,59 @@ def test_build_components_multi_gpu_wraps_with_ddp(
     assert "scaler" not in state
 
 
-def test_setup_initializes_process_group_once(
-    tmp_pipeline, mist_args, monkeypatch, patch_dist
-):
+def test_setup_initializes_process_group_once(tmp_pipeline, mist_args, monkeypatch, patch_dist):
     """Ensure process group is initialized only once."""
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
     trainer = DummyTrainer(mist_args)
     trainer.setup(rank=0, world_size=2)
     trainer.setup(rank=0, world_size=2)
     assert patch_dist["init"] == 1
+
+
+@pytest.mark.parametrize("accelerator", ["cuda", "rocm"])
+def test_setup_passes_device_id_on_cuda_and_rocm(
+    tmp_pipeline, mist_args, monkeypatch, patch_dist, accelerator
+):
+    """setup() passes an explicit device_id on CUDA/ROCm (for NCCL/RCCL)."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: accelerator)
+    trainer = DummyTrainer(mist_args)
+    trainer.setup(rank=0, world_size=2)
+    assert patch_dist["last_device_id"] == torch.device("cuda", 0)
+
+
+def test_setup_omits_device_id_on_cpu(tmp_pipeline, mist_args, monkeypatch, patch_dist):
+    """setup() omits device_id on CPU -- gloo has no GPU device concept."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
+    trainer = DummyTrainer(mist_args)
+    trainer.setup(rank=0, world_size=2)
+    assert patch_dist["last_device_id"] is _NO_DEVICE_ID
+
+
+def test_train_fold_skips_cuda_set_device_on_cpu(tmp_pipeline, mist_args, monkeypatch, patch_dist):
+    """train_fold() must not call torch.cuda.set_device on CPU-only hardware."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
+    called = {"count": 0}
+    monkeypatch.setattr(
+        torch.cuda, "set_device", lambda *a, **k: called.__setitem__("count", called["count"] + 1)
+    )
+    trainer = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=2.0)
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+    assert called["count"] == 0
+
+
+@pytest.mark.parametrize("accelerator", ["cuda", "rocm"])
+def test_train_fold_calls_cuda_set_device_on_cuda_and_rocm(
+    tmp_pipeline, mist_args, monkeypatch, patch_dist, accelerator
+):
+    """train_fold() still calls torch.cuda.set_device on CUDA/ROCm."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: accelerator)
+    called = {"count": 0}
+    monkeypatch.setattr(
+        torch.cuda, "set_device", lambda *a, **k: called.__setitem__("count", called["count"] + 1)
+    )
+    trainer = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=2.0)
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+    assert called["count"] == 1
 
 
 def test_train_fold_runs_full_epoch(tmp_pipeline, mist_args, monkeypatch, patch_dist):
@@ -557,13 +611,27 @@ def test_train_fold_runs_full_epoch(tmp_pipeline, mist_args, monkeypatch, patch_
 
 
 def test_train_fold_early_stop_on_nan(tmp_pipeline, mist_args, monkeypatch, patch_dist):
-    """NaN training loss should trigger early stop and cleanup (DDP case)."""
-    # Use 2 GPUs so DDP is engaged, ensuring cleanup() destroys the process
-    # group.
+    """NaN training loss should trigger early stop (DDP case)."""
+    # Use 2 GPUs so DDP is engaged.
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
     trainer = DummyTrainer(mist_args, train_loss_value=float("nan"), val_loss_value=2.0)
     trainer.train_fold(fold=0, rank=0, world_size=2)
-    assert patch_dist["destroy"] >= 1
+    # The process group is shared across folds and is only destroyed once
+    # run_cross_validation's fold loop exits, not by train_fold itself -- see
+    # the comments in train_fold for why per-fold teardown is unsafe.
+    assert patch_dist["destroy"] == 0
+    assert patch_dist["init"] >= 1
+
+
+def test_run_cross_validation_cleans_up_process_group_once_after_nan(
+    tmp_pipeline, mist_args, monkeypatch, patch_dist
+):
+    """cleanup() runs exactly once, after run_cross_validation's fold loop,
+    even when a fold aborts early on a NaN loss."""
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
+    trainer = DummyTrainer(mist_args, train_loss_value=float("nan"), val_loss_value=2.0)
+    trainer.run_cross_validation(rank=0, world_size=2)
+    assert patch_dist["destroy"] == 1
 
 
 def test_overwrite_config_from_args(tmp_pipeline, mist_args, monkeypatch):
@@ -602,6 +670,45 @@ def test_overwrite_config_from_args(tmp_pipeline, mist_args, monkeypatch):
     assert cfg["training"]["val_percent"] == pytest.approx(0.025)
 
 
+@pytest.mark.parametrize(
+    ("accelerator", "expected_backend"),
+    [("cuda", "nccl"), ("rocm", "nccl"), ("cpu", "gloo")],
+)
+def test_overwrite_config_from_args_resolves_auto_communication_backend(
+    tmp_pipeline, mist_args, monkeypatch, accelerator, expected_backend
+):
+    """ "auto" is resolved and persisted to config.json at train time.
+
+    Mirrors training.amp's resolve-and-persist pattern: the analyze-time
+    machine that wrote "auto" may not be the train-time machine, so
+    resolution has to happen here, not in analyzer_utils.py.
+    """
+    results, _ = tmp_pipeline
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["hardware"]["communication_backend"] = "auto"
+    cfg_path.write_text(json.dumps(cfg))
+
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: accelerator)
+    trainer = DummyTrainer(mist_args)
+
+    assert trainer.config["training"]["hardware"]["communication_backend"] == expected_backend
+    persisted = json.loads(cfg_path.read_text())
+    assert persisted["training"]["hardware"]["communication_backend"] == expected_backend
+
+
+def test_overwrite_config_from_args_leaves_explicit_communication_backend(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """An explicit (non-"auto") backend from config.json is never overridden."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
+    trainer = DummyTrainer(mist_args)
+    # tmp_pipeline's base config.json already hardcodes "nccl" explicitly
+    # (not "auto"), even though this test pins the accelerator to "cpu" --
+    # confirming resolution is skipped entirely for explicit values.
+    assert trainer.config["training"]["hardware"]["communication_backend"] == "nccl"
+
+
 def test_fit_single_gpu_calls_run_directly(tmp_pipeline, mist_args, monkeypatch):
     """Test that fit with single GPU calls run directly."""
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1, raising=False)
@@ -633,9 +740,7 @@ def test_fit_multi_gpu_uses_spawn(tmp_pipeline, mist_args, monkeypatch):
     assert spawned["count"] == 1
 
 
-def test_fit_sets_cudnn_conv_fp32_precision_when_available(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_fit_sets_cudnn_conv_fp32_precision_when_available(tmp_pipeline, mist_args, monkeypatch):
     """fit() sets cudnn.conv.fp32_precision='tf32' on PyTorch >= 2.5."""
     fake_conv = SimpleNamespace(fp32_precision=None)
     monkeypatch.setattr(torch.backends.cudnn, "conv", fake_conv, raising=False)
@@ -644,6 +749,44 @@ def test_fit_sets_cudnn_conv_fp32_precision_when_available(
     trainer.run_cross_validation = lambda rank, world_size: None
     trainer.fit()
     assert fake_conv.fp32_precision == "tf32"
+
+
+def test_fit_skips_cudnn_tuning_on_cpu(tmp_pipeline, mist_args, monkeypatch):
+    """fit() must not touch cudnn/TF32 settings on CPU-only hardware."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
+    fake_conv = SimpleNamespace(fp32_precision=None)
+    monkeypatch.setattr(torch.backends.cudnn, "conv", fake_conv, raising=False)
+    monkeypatch.setattr(torch.backends.cudnn, "benchmark", False, raising=False)
+    trainer = DummyTrainer(mist_args)
+    trainer.run_cross_validation = lambda rank, world_size: None
+    trainer.fit()
+    assert fake_conv.fp32_precision is None
+    assert torch.backends.cudnn.benchmark is False
+
+
+def test_fit_world_size_is_one_on_cpu_regardless_of_device_count(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """Regression guard for the world_size = torch.cuda.device_count() bug.
+
+    torch.cuda.device_count() is 0 on CPU-only hardware, which used to flow
+    straight into run_cross_validation and break its world_size == 1 single-
+    process assumptions. Also covers a stale/misreported device_count > 0 on
+    a machine get_accelerator_type() has determined is CPU-only -- fit()
+    must still run as a single process.
+    """
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
+    called = {}
+
+    def spy_run(rank, world_size):
+        called["rank"] = rank
+        called["world_size"] = world_size
+
+    trainer = DummyTrainer(mist_args)
+    trainer.run_cross_validation = spy_run
+    trainer.fit()
+    assert called == {"rank": 0, "world_size": 1}
 
 
 def test_invalid_folds_subset_raises(tmp_pipeline, mist_args):
@@ -665,17 +808,20 @@ def test_invalid_folds_subset_raises(tmp_pipeline, mist_args):
     assert "Found folds: [0, 2]" in msg
 
 
-def test_update_num_gpus_raises_when_cuda_unavailable(
-    tmp_pipeline, mist_args, monkeypatch
-):
-    """Test that update_num_gpus raises when CUDA is unavailable."""
+def test_update_num_gpus_is_zero_on_cpu(tmp_pipeline, mist_args, monkeypatch):
+    """num_gpus is 0 (not a raise) on CPU-only hardware.
+
+    Regression guard for a real bug: this used to unconditionally raise
+    "CUDA is not available" here, which meant CPU-only training could never
+    even construct a trainer -- found via a real end-to-end CPU training run
+    (cpu_rocm_support_plan.md Stage 4), not by this mocked test alone.
+    """
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=False)
 
-    with pytest.raises(ValueError) as excinfo:
-        DummyTrainer(mist_args)
+    trainer = DummyTrainer(mist_args)
 
-    msg = str(excinfo.value)
-    assert "CUDA is not available" in msg
+    assert trainer.config["training"]["hardware"]["num_gpus"] == 0
+    assert trainer.batch_size == trainer.config["training"]["batch_size_per_gpu"]
 
 
 def test_update_num_gpus_raises_when_zero_devices(tmp_pipeline, mist_args, monkeypatch):
@@ -706,6 +852,16 @@ def test_update_num_gpus_sets_config_and_persists(tmp_pipeline, mist_args, monke
     assert on_disk["training"]["hardware"]["num_gpus"] == 2
 
 
+def test_update_num_gpus_sets_config_on_rocm(tmp_pipeline, mist_args, monkeypatch):
+    """num_gpus is set from device_count() on ROCm too, same as CUDA."""
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "rocm")
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
+
+    trainer = DummyTrainer(mist_args)
+
+    assert trainer.config["training"]["hardware"]["num_gpus"] == 2
+
+
 def test_train_fold_raises_when_val_images_less_than_world_size(
     tmp_pipeline, mist_args, monkeypatch
 ):
@@ -731,9 +887,7 @@ def test_train_fold_raises_when_val_images_less_than_world_size(
     assert "reduce the number of GPUs" in msg
 
 
-def test_train_loop_else_branch_rank_nonzero(
-    tmp_pipeline, mist_args, monkeypatch, patch_dist
-):
+def test_train_loop_else_branch_rank_nonzero(tmp_pipeline, mist_args, monkeypatch, patch_dist):
     """Test train_fold else branch for rank > 0."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True, raising=False)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
@@ -754,9 +908,7 @@ def test_train_loop_else_branch_rank_nonzero(
     assert patch_dist["barrier"] >= 1
 
 
-def test_validation_else_branch_rank_nonzero(
-    tmp_pipeline, mist_args, monkeypatch, patch_dist
-):
+def test_validation_else_branch_rank_nonzero(tmp_pipeline, mist_args, monkeypatch, patch_dist):
     """Test validation step else branch for rank > 0."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True, raising=False)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
@@ -867,9 +1019,7 @@ def test_run_cross_validation_nonzero_rank_no_print_but_calls_folds(
         {"name": "linear", "params": {"init_pause": 5}},
     ],
 )
-def test_build_components_composite_loss_scheduler(
-    tmp_pipeline, mist_args, monkeypatch, clw_cfg
-):
+def test_build_components_composite_loss_scheduler(tmp_pipeline, mist_args, monkeypatch, clw_cfg):
     """Test that build_components sets composite_loss_weighting correctly.
 
     Uses a composite loss name so the COMPOSITE_LOSSES guard is satisfied.
@@ -931,9 +1081,7 @@ def test_set_seed_swallows_dist_errors(tmp_pipeline, mist_args, monkeypatch):
     assert os.environ["PYTHONHASHSEED"] == "123"
 
 
-def test_resume_raises_on_incompatible_model_override(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_resume_raises_on_incompatible_model_override(tmp_pipeline, mist_args, monkeypatch):
     """--resume + --model mismatch raises ValueError before training starts."""
     mist_args.resume = True
     mist_args.model = "different_arch"
@@ -942,9 +1090,7 @@ def test_resume_raises_on_incompatible_model_override(
         DummyTrainer(mist_args)
 
 
-def test_resume_raises_on_incompatible_patch_size_override(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_resume_raises_on_incompatible_patch_size_override(tmp_pipeline, mist_args, monkeypatch):
     """--resume + --patch-size mismatch raises ValueError before training starts."""
     mist_args.resume = True
     mist_args.patch_size = [32, 32, 32]  # config default is [16, 16, 16]
@@ -959,9 +1105,7 @@ def test_resume_warns_on_loss_override(tmp_pipeline, mist_args, monkeypatch):
     mist_args.loss = "dice"  # config default is dummy_loss
 
     printed = []
-    monkeypatch.setattr(
-        console_mod.console, "print", lambda msg: printed.append(str(msg))
-    )
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
 
     DummyTrainer(mist_args)
 
@@ -974,9 +1118,7 @@ def test_resume_no_warning_when_no_overrides(tmp_pipeline, mist_args, monkeypatc
     mist_args.resume = True
 
     printed = []
-    monkeypatch.setattr(
-        console_mod.console, "print", lambda msg: printed.append(str(msg))
-    )
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
 
     DummyTrainer(mist_args)
 
@@ -1014,9 +1156,7 @@ def test_save_and_load_checkpoint_roundtrip(tmp_pipeline, mist_args, monkeypatch
     assert fresh_state["best_val_loss"] == pytest.approx(0.42)
 
 
-def test_load_checkpoint_returns_false_when_missing(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_load_checkpoint_returns_false_when_missing(tmp_pipeline, mist_args, monkeypatch):
     """load_checkpoint returns False and leaves state unchanged when no file."""
     trainer = DummyTrainer(mist_args)
     state = trainer.build_components(rank=0, world_size=1)
@@ -1026,6 +1166,75 @@ def test_load_checkpoint_returns_false_when_missing(
 
     assert loaded is False
     assert state["best_val_loss"] == pytest.approx(1.23)
+
+
+def test_load_checkpoint_uses_map_location_cpu(tmp_pipeline, mist_args, monkeypatch):
+    """load_checkpoint passes map_location="cpu" to torch.load.
+
+    Regression guard: without this, torch.load tries to recreate tensors on
+    whatever device type they were saved from, which crashes outright if
+    that device type isn't available on the current machine -- e.g. resuming
+    a checkpoint saved during CUDA or ROCm training on a CPU-only machine.
+    Can't reproduce the actual crash without real CUDA/ROCm hardware to
+    produce a genuinely non-CPU checkpoint, so this instead confirms the
+    kwarg itself is always passed, which is what prevents it.
+    """
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+    trainer.save_checkpoint(fold=0, state=state)
+
+    calls = []
+    real_load = torch.load
+
+    def spy_load(*args, **kwargs):
+        calls.append(kwargs)
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", spy_load)
+    trainer.load_checkpoint(fold=0, state=trainer.build_components(rank=0, world_size=1))
+
+    assert len(calls) == 1
+    assert calls[0].get("map_location") == "cpu"
+
+
+def test_run_cross_validation_resume_skip_check_uses_map_location_cpu(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """The resume-skip check in run_cross_validation also uses map_location="cpu".
+
+    Same regression as test_load_checkpoint_uses_map_location_cpu, but for
+    the second, separate torch.load call site -- the one that only reads
+    checkpoint["epoch"] to decide whether to skip an already-complete fold,
+    but still has to fully deserialize the tensors to get there.
+    """
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    trainer = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=0.5)
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+    assert trainer._checkpoint_path(0).exists()
+
+    mist_args.resume = True
+    trainer2 = DummyTrainer(mist_args, train_loss_value=1.0, val_loss_value=0.5)
+    trainer2.checkpoints_dir = trainer.checkpoints_dir
+
+    calls = []
+    real_load = torch.load
+
+    def spy_load(*args, **kwargs):
+        calls.append(kwargs)
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", spy_load)
+    trainer2.run_cross_validation(rank=0, world_size=1)
+
+    assert len(calls) >= 1
+    assert all(call.get("map_location") == "cpu" for call in calls)
 
 
 def test_train_fold_saves_checkpoint_each_epoch(tmp_pipeline, mist_args, monkeypatch):
@@ -1045,9 +1254,7 @@ def test_train_fold_saves_checkpoint_each_epoch(tmp_pipeline, mist_args, monkeyp
     assert checkpoint["fold"] == 0
 
 
-def test_resume_loads_checkpoint_and_prints_message(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_resume_loads_checkpoint_and_prints_message(tmp_pipeline, mist_args, monkeypatch):
     """With --resume and an existing checkpoint, train_fold loads it and prints."""
     monkeypatch.setattr(torch, "save", _real_torch_save)
     monkeypatch.setattr(torch, "load", _real_torch_load)
@@ -1090,9 +1297,7 @@ def test_resume_warns_when_no_checkpoint(tmp_pipeline, mist_args, monkeypatch):
     assert any("No checkpoint found" in s for s in out)
 
 
-def test_run_cross_validation_skips_completed_fold(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_run_cross_validation_skips_completed_fold(tmp_pipeline, mist_args, monkeypatch):
     """With --resume, completed folds (epoch >= epochs-1) are skipped."""
     monkeypatch.setattr(torch, "save", _real_torch_save)
     monkeypatch.setattr(torch, "load", _real_torch_load)
@@ -1132,9 +1337,7 @@ def test_run_cross_validation_skips_completed_fold(
     assert any("already complete" in s for s in out)
 
 
-def test_validation_rank0_ddp_allreduce_and_mean(
-    tmp_pipeline, mist_args, monkeypatch, patch_dist
-):
+def test_validation_rank0_ddp_allreduce_and_mean(tmp_pipeline, mist_args, monkeypatch, patch_dist):
     """With DDP, rank 0 validation uses all_reduce and divides by world_size."""
     # Enable multi-GPU (DDP path).
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
@@ -1235,9 +1438,7 @@ def test_check_resume_overrides_warns_on_all_training_diffs(tmp_pipeline, monkey
     )
 
     printed = []
-    monkeypatch.setattr(
-        console_mod.console, "print", lambda msg: printed.append(str(msg))
-    )
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
 
     DummyTrainer(args)
 
@@ -1256,9 +1457,7 @@ def test_check_resume_overrides_warns_on_all_training_diffs(tmp_pipeline, monkey
 # =============================================
 
 
-def test_validate_pretrained_config_warns_when_no_config_path(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_validate_pretrained_config_warns_when_no_config_path(tmp_pipeline, mist_args, monkeypatch):
     """pretrained_weights set but no config path emits a Python warning."""
     mist_args.pretrained_weights = "/fake/weights.pt"
     # pretrained_config is intentionally not set (absent == None via getattr)
@@ -1280,9 +1479,7 @@ def test_validate_pretrained_config_calls_validator_when_both_set(
     monkeypatch.setattr(
         bt.io,
         "read_json_file",
-        lambda path: (
-            source_cfg if path == "/fake/source_config.json" else _real_read(path)
-        ),
+        lambda path: source_cfg if path == "/fake/source_config.json" else _real_read(path),
     )
 
     calls = []
@@ -1303,9 +1500,7 @@ def test_validate_pretrained_config_calls_validator_when_both_set(
 # =============================================
 
 
-def test_build_components_loads_pretrained_encoder(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_build_components_loads_pretrained_encoder(tmp_pipeline, mist_args, monkeypatch):
     """When pretrained_weights is set, load_pretrained_encoder is called and
     the summary is printed on rank 0."""
     mist_args.pretrained_weights = "/fake/encoder.pt"
@@ -1331,9 +1526,7 @@ def test_build_components_loads_pretrained_encoder(
     monkeypatch.setattr(bt, "validate_encoder_compatibility", lambda *a: None)
 
     printed = []
-    monkeypatch.setattr(
-        console_mod.console, "print", lambda msg: printed.append(str(msg))
-    )
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
 
     trainer = DummyTrainer(mist_args)
     trainer.build_components(rank=0, world_size=1)
@@ -1349,9 +1542,7 @@ def test_build_components_loads_pretrained_encoder(
 # =============================================
 
 
-def test_build_components_spacing_aware_loss_injects_spacing(
-    tmp_pipeline, mist_args, monkeypatch
-):
+def test_build_components_spacing_aware_loss_injects_spacing(tmp_pipeline, mist_args, monkeypatch):
     """A spacing-aware loss name causes sddl_spacing_xyz to be passed to the
     loss constructor."""
     spacing_loss = next(iter(bt.TrainerConstants.SPACING_AWARE_LOSSES))
@@ -1402,9 +1593,7 @@ def test_train_fold_logs_alpha_for_composite_loss(tmp_pipeline, mist_args, monke
 
     # Stub get_alpha_scheduler to return a simple callable — no real scheduler
     # needed; we just need state["composite_loss_weighting"] to be non-None.
-    monkeypatch.setattr(
-        bt, "get_alpha_scheduler", lambda name, num_epochs, **kw: lambda epoch: 0.7
-    )
+    monkeypatch.setattr(bt, "get_alpha_scheduler", lambda name, num_epochs, **kw: lambda epoch: 0.7)
 
     # Capture the SummaryWriter used during training.
     created_writers = []

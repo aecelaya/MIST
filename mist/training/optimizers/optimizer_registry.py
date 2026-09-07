@@ -16,9 +16,7 @@ def _adam_optimizer(
     eps: float,
 ) -> Optimizer:
     """Internal Adam optimizer."""
-    return torch.optim.Adam(
-        params=params, lr=learning_rate, weight_decay=weight_decay, eps=eps
-    )
+    return torch.optim.Adam(params=params, lr=learning_rate, weight_decay=weight_decay, eps=eps)
 
 
 def _adamw_optimizer(
@@ -28,9 +26,7 @@ def _adamw_optimizer(
     eps: float,
 ) -> Optimizer:
     """Internal AdamW optimizer."""
-    return torch.optim.AdamW(
-        params=params, lr=learning_rate, weight_decay=weight_decay, eps=eps
-    )
+    return torch.optim.AdamW(params=params, lr=learning_rate, weight_decay=weight_decay, eps=eps)
 
 
 def _sgd_optimizer(

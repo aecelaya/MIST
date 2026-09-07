@@ -74,11 +74,7 @@ class MistSwinUNETR(MISTModel):
     def get_encoder_state_dict(self) -> OrderedDict:
         """Return encoder weights: Swin Transformer backbone only."""
         return OrderedDict(
-            {
-                k: v
-                for k, v in self.state_dict().items()
-                if k.startswith("model.swinViT.")
-            }
+            {k: v for k, v in self.state_dict().items() if k.startswith("model.swinViT.")}
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor | dict[str, Any]:

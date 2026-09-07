@@ -118,6 +118,4 @@ def test_mednext_forward_with_deep_supervision():
     assert "prediction" in output
     assert "deep_supervision" in output
     assert isinstance(output["deep_supervision"], list)
-    assert all(
-        ds.shape == output["prediction"].shape for ds in output["deep_supervision"]
-    )
+    assert all(ds.shape == output["prediction"].shape for ds in output["deep_supervision"])

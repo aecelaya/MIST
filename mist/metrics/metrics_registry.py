@@ -20,9 +20,7 @@ class Metric(ABC):
         super().__init_subclass__(**kwargs)
         for attr in ("name", "best", "worst"):
             if not any(
-                attr in base.__dict__
-                for base in cls.__mro__
-                if base not in (Metric, object)
+                attr in base.__dict__ for base in cls.__mro__ if base not in (Metric, object)
             ):
                 raise TypeError(f"{cls.__name__} must define class attribute '{attr}'")
 
@@ -142,9 +140,7 @@ class LesionWiseDice(Metric):
             min_lesion_volume=kwargs.get(
                 "min_lesion_volume", LesionWiseMetricsConstants.MIN_LESION_VOLUME
             ),
-            dilation_iters=kwargs.get(
-                "dilation_iters", LesionWiseMetricsConstants.DILATION_ITERS
-            ),
+            dilation_iters=kwargs.get("dilation_iters", LesionWiseMetricsConstants.DILATION_ITERS),
             gt_consolidation_iters=kwargs.get(
                 "gt_consolidation_iters",
                 LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS,
@@ -171,9 +167,7 @@ class LesionWiseHausdorff95(Metric):
             min_lesion_volume=kwargs.get(
                 "min_lesion_volume", LesionWiseMetricsConstants.MIN_LESION_VOLUME
             ),
-            dilation_iters=kwargs.get(
-                "dilation_iters", LesionWiseMetricsConstants.DILATION_ITERS
-            ),
+            dilation_iters=kwargs.get("dilation_iters", LesionWiseMetricsConstants.DILATION_ITERS),
             gt_consolidation_iters=kwargs.get(
                 "gt_consolidation_iters",
                 LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS,
@@ -200,9 +194,7 @@ class LesionWiseSurfaceDice(Metric):
             min_lesion_volume=kwargs.get(
                 "min_lesion_volume", LesionWiseMetricsConstants.MIN_LESION_VOLUME
             ),
-            dilation_iters=kwargs.get(
-                "dilation_iters", LesionWiseMetricsConstants.DILATION_ITERS
-            ),
+            dilation_iters=kwargs.get("dilation_iters", LesionWiseMetricsConstants.DILATION_ITERS),
             gt_consolidation_iters=kwargs.get(
                 "gt_consolidation_iters",
                 LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS,
@@ -237,9 +229,7 @@ class LesionWiseF1(Metric):
             min_lesion_volume=kwargs.get(
                 "min_lesion_volume", LesionWiseMetricsConstants.MIN_LESION_VOLUME
             ),
-            dilation_iters=kwargs.get(
-                "dilation_iters", LesionWiseMetricsConstants.DILATION_ITERS
-            ),
+            dilation_iters=kwargs.get("dilation_iters", LesionWiseMetricsConstants.DILATION_ITERS),
             gt_consolidation_iters=kwargs.get(
                 "gt_consolidation_iters",
                 LesionWiseMetricsConstants.GT_CONSOLIDATION_ITERS,
