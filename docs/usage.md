@@ -415,9 +415,8 @@ The main MIST pipeline is responsible for training and evaluating models. The
 
 !!! note
 
-    To use `mist_predict`, you need the models directory and config.json file from
-
-the output of the main MIST pipeline.
+    To use `mist_predict`, you need the models directory and config.json file
+    from the output of the main MIST pipeline.
 
 The `mist_predict` command uses the following arguments:
 
