@@ -104,7 +104,7 @@ data/
         mask.nii.gz
 ```
 
-!!!note
+!!! note
 
     The naming convention is for this example only. MIST does not enforce any
     specific naming conventions for the files inside of your dataset — only that
@@ -171,7 +171,7 @@ The same dataset JSON using relative paths:
 }
 ```
 
-!!!note
+!!! note
 
     Relative paths in the dataset JSON are resolved relative to the **location
     of the JSON file itself**, not the working directory from which you run MIST.

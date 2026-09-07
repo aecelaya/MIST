@@ -108,7 +108,7 @@ following arguments:
   (`data_dump.json` and `data_dump.md`). See [Data Dump](#data-dump) below.
 - `--overwrite`: Overwrite previous results/configuration.
 
-!!!note
+!!! note
 
     Paths in the dataset JSON file (i.e., `train-data` and `test-data`) can be
     absolute or relative. Relative paths are resolved relative to the **location
@@ -185,13 +185,13 @@ To run the preprocessing portion of the MIST pipeline only, use the
   into NumPy format.
 - `--overwrite`: Overwrite previous preprocessing output.
 
-!!!note
+!!! note
 
-Use `--no-preprocess` when your images are already fully preprocessed externally
-and stored as NIfTI files. MIST will read each image as-is and convert it
-directly to NumPy format — reorientation, cropping, resampling, and
-normalization are all skipped. DTMs are still computed if `--compute-dtms` is
-also passed.
+    Use `--no-preprocess` when your images are already fully preprocessed
+    externally and stored as NIfTI files. MIST will read each image as-is and
+    convert it directly to NumPy format — reorientation, cropping, resampling,
+    and normalization are all skipped. DTMs are still computed if
+    `--compute-dtms` is also passed.
 
 ### Example
 
