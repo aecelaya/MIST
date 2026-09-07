@@ -141,18 +141,18 @@ including:
 - **Label statistics** – per-label voxel counts, presence rates, volume
   fractions (relative to both foreground and the effective image region), and
   shape descriptors:
-  - _PCA-based descriptors_ — three shape metrics derived from the eigenvalues
-    of the label's spatial covariance matrix:
+  - **PCA-based descriptors** — three shape metrics derived from the
+    eigenvalues of the label's spatial covariance matrix:
     - _Linearity_: how much the shape extends along a single axis (high for
       elongated structures such as vessels).
     - _Planarity_: how much the shape lies in a plane (high for disc-like
       structures).
     - _Sphericity_: how uniformly the shape extends in all directions (high for
       compact, roughly spherical structures).
-  - _Isoperimetric Quotient (IQ)_ measuring compactness relative to a sphere.
-  - _Skeleton ratio_ — the fraction of label voxels on the morphological medial
-    axis, which is the primary signal for thin, branching structures such as
-    vessels or airways.
+  - **Isoperimetric Quotient (IQ)** measuring compactness relative to a sphere.
+  - **Skeleton ratio** — the fraction of label voxels on the morphological
+    medial axis, which is the primary signal for thin, branching structures
+    such as vessels or airways.
 - **Observations** – auto-generated notes flagging anisotropy, sparse labels,
   thin/branching structures, and other dataset characteristics that may
   influence architecture or loss function choices.
