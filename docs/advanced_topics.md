@@ -1301,13 +1301,6 @@ once, yourself:
 mist_finalize --results /shared/results
 ```
 
-On a Slurm cluster this maps directly onto a job dependency, so the finalize
-step only starts once every fold job has actually completed:
-
-```bash
-sbatch --dependency=afterok:<fold-job-id-0>:<fold-job-id-1>:... finalize_job.sh
-```
-
 `mist_finalize` is safe to re-run — each run recomputes `results.csv` (and
 test-set predictions, if configured) from whatever is currently in the results
 directory, so re-running it after a straggler fold finishes late just
