@@ -358,8 +358,8 @@ and about 102M parameters.
 
 The encoder's parameter names and shapes match nnU-Net's `ResidualEncoderUNet`,
 so encoder weights pretrained with nnU-Net or nnssl (for example,
-nnFoundationCNN) are compatible by key when converted to a plain PyTorch state
-dict.
+nnFoundationCNN) load directly with `--pretrained-weights`. See
+[Checkpoints from other frameworks](#checkpoints-from-other-frameworks).
 
 ### MedNeXt kernel size
 
@@ -1088,6 +1088,42 @@ loading weights. If the input channels differ between source and target, the
     Combine transfer learning with `--warmup-epochs` (e.g. 5–10 epochs) to
     avoid damaging the pretrained encoder features with a large initial LR
     update. See [Linear warmup](#linear-warmup) for details.
+
+### Checkpoints from other frameworks
+
+`--pretrained-weights` also accepts checkpoints saved by other training
+frameworks, as long as they hold weights for the same architecture with the same
+parameter names. MIST unwraps state dicts nested under `state_dict`,
+`model_state_dict`, `network_weights`, or `model`, and reads every checkpoint
+with PyTorch's weights-only loader, so the file cannot execute code.
+
+For example, the public
+[nnFoundationCNN](https://huggingface.co/MIC-DKFZ/nnFoundationCNN) checkpoint (a
+ResEnc-L encoder pretrained with [nnssl](https://github.com/MIC-DKFZ/nnssl))
+loads directly into `resenc`:
+
+```console
+mist_train --numpy /path/to/preprocessed/data \
+           --results /path/to/results \
+           --model resenc \
+           --pretrained-weights /path/to/checkpoint_final.pth
+```
+
+nnFoundationCNN was pretrained on single-channel `192 × 192 × 192` patches at 1
+mm spacing. A different patch size or spacing is fine for `resenc`: each stage's
+parameter shapes do not depend on the patch size, so every stage the two
+networks share transfers exactly. A patch smaller than 128 voxels per axis has
+fewer than six stages, so the deepest pretrained stage is unused, and
+anisotropic spacing can change some kernels, which keep their random
+initialization. If you write a `--pretrained-config` for such a checkpoint, a
+patch size or spacing mismatch produces a warning rather than an error for
+`resenc`.
+
+MIST raises an error if no encoder weights transfer and warns if fewer than half
+do, so a checkpoint for the wrong architecture cannot silently train from random
+initialization. The transfer summary printed at the start of training reports
+exactly what loaded. Check each checkpoint's license before use;
+nnFoundationCNN's weights are licensed under CC BY-SA 4.0.
 
 ## Docker
 

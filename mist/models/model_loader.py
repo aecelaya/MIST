@@ -65,6 +65,13 @@ def average_fold_weights(
 # target_spacing. Both must match for encoder weights to be compatible.
 _ADAPTIVE_ARCHITECTURES = {"nnunet", "nnunet-pocket", "resenc", "fmgnet", "wnet"}
 
+# Adaptive architectures whose parameter shapes depend only on the stage index
+# and kernel size. A patch_size or target_spacing mismatch only adds or removes
+# stages or changes some kernels, so the shared stages still transfer exactly
+# and the rest keep their random initialization. Mismatches warn instead of
+# raising for these.
+_STAGEWISE_ARCHITECTURES = {"resenc"}
+
 
 def validate_encoder_compatibility(
     source_config: dict,
@@ -72,6 +79,10 @@ def validate_encoder_compatibility(
     force: bool = False,
 ) -> None:
     """Validate that source and target configs have compatible encoder structure.
+
+    For adaptive architectures, patch_size and target_spacing must also match.
+    For stagewise architectures (resenc), a spatial mismatch only warns, since
+    the shared stages still transfer exactly.
 
     Args:
         source_config: MIST config dict for the pretrained source model.
@@ -102,11 +113,24 @@ def validate_encoder_compatibility(
     # For adaptive architectures the encoder depth and filter counts are
     # derived from patch_size and target_spacing; both must match.
     if source_arch in _ADAPTIVE_ARCHITECTURES:
+
+        def _spatial_mismatch(msg: str) -> None:
+            if source_arch in _STAGEWISE_ARCHITECTURES:
+                warnings.warn(
+                    f"{msg} For '{source_arch}', matching stages still transfer; "
+                    "deeper stages and kernels that differ keep their random "
+                    "initialization. See the transfer summary at the start of "
+                    "training.",
+                    stacklevel=3,
+                )
+            else:
+                _fail(msg)
+
         source_spatial = source_config["spatial_config"]
         target_spatial = target_config["spatial_config"]
 
         if list(source_spatial["patch_size"]) != list(target_spatial["patch_size"]):
-            _fail(
+            _spatial_mismatch(
                 f"patch_size mismatch: source {source_spatial['patch_size']} "
                 f"vs target {target_spatial['patch_size']}. For adaptive "
                 "architectures the encoder structure is determined by "
@@ -114,13 +138,37 @@ def validate_encoder_compatibility(
             )
 
         if list(source_spatial["target_spacing"]) != list(target_spatial["target_spacing"]):
-            _fail(
+            _spatial_mismatch(
                 "target_spacing mismatch: source "
                 f"{source_spatial['target_spacing']} vs target "
                 f"{target_spatial['target_spacing']}. For adaptive "
                 "architectures the encoder structure is determined by "
                 "target_spacing."
             )
+
+
+# Keys under which other training frameworks nest the model state dict, e.g.
+# PyTorch Lightning ("state_dict") or nnssl/nnU-Net ("network_weights").
+_CHECKPOINT_CONTAINER_KEYS = ("state_dict", "model_state_dict", "network_weights", "model")
+
+# Warn when less than this fraction of the target encoder's tensors transfer.
+_MIN_TRANSFER_FRACTION = 0.5
+
+
+def _unwrap_checkpoint(checkpoint: dict) -> dict:
+    """Return the state dict inside a checkpoint container, if there is one.
+
+    A plain state dict maps parameter names to tensors and is returned as is.
+    Otherwise the first known container key holding a dict is returned. If
+    neither applies, the checkpoint is returned unchanged; nothing will match
+    and load_pretrained_encoder reports the checkpoint's keys.
+    """
+    if any(isinstance(v, torch.Tensor) for v in checkpoint.values()):
+        return checkpoint
+    for key in _CHECKPOINT_CONTAINER_KEYS:
+        if isinstance(checkpoint.get(key), dict):
+            return checkpoint[key]
+    return checkpoint
 
 
 def load_pretrained_encoder(
@@ -134,6 +182,11 @@ def load_pretrained_encoder(
     loaded. The decoder and output heads always retain their randomly
     initialized weights from model construction.
 
+    The checkpoint can be a plain state dict or a checkpoint from another
+    framework that nests the state dict under a key such as "state_dict" or
+    "network_weights" (e.g., nnssl/nnFoundation checkpoints). Weights are read
+    with torch's weights-only loader, so the file cannot execute code.
+
     When in_channels differs between source and target, the in_channel_strategy
     controls how the first conv weight is handled:
         - "average": average source channels to 1, then tile to target count.
@@ -143,7 +196,8 @@ def load_pretrained_encoder(
     Args:
         model: Target MIST model (must implement get_encoder_state_dict()).
         weights_path: Path to the source checkpoint (.pt or .pth). This can be
-            a single fold checkpoint or the output of average_fold_weights().
+            a single fold checkpoint, the output of average_fold_weights(), or
+            a wrapped checkpoint from another framework.
         in_channel_strategy: How to handle in_channels mismatch. One of
             "average" (default), "first", or "skip".
 
@@ -153,7 +207,8 @@ def load_pretrained_encoder(
         each containing a list of parameter names.
 
     Raises:
-        ValueError: If in_channel_strategy is not a valid option.
+        ValueError: If in_channel_strategy is not a valid option, or if no
+            encoder weights transfer (for example, a different architecture).
         AttributeError: If the model does not implement get_encoder_state_dict.
     """
     valid_strategies = ("average", "first", "skip")
@@ -168,8 +223,9 @@ def load_pretrained_encoder(
             "All MIST models must inherit from MISTModel."
         )
 
-    # Load source weights and strip DDP module. prefix if present.
-    source_sd = torch.load(weights_path, weights_only=True, map_location="cpu")
+    # Load source weights, unwrap framework containers, and strip the DDP
+    # module. prefix if present.
+    source_sd = _unwrap_checkpoint(torch.load(weights_path, weights_only=True, map_location="cpu"))
     if any(k.startswith("module.") for k in source_sd):
         source_sd = OrderedDict(
             {(k[7:] if k.startswith("module.") else k): v for k, v in source_sd.items()}
@@ -222,6 +278,22 @@ def load_pretrained_encoder(
             # Shape mismatch beyond in_channels (e.g., filter count differs
             # between model variants): skip and retain random init.
             summary["skipped"].append(key)
+
+    # Fail loudly rather than silently training from random initialization.
+    n_transferred = len(partial_sd)
+    if n_transferred == 0:
+        raise ValueError(
+            f"No encoder weights from {weights_path} match {type(model).__name__}. "
+            f"Checkpoint keys include {list(source_sd)[:5]}. Check that the "
+            "checkpoint holds weights for the same architecture."
+        )
+    if n_transferred < _MIN_TRANSFER_FRACTION * len(target_encoder_sd):
+        warnings.warn(
+            f"Only {n_transferred} of {len(target_encoder_sd)} encoder tensors "
+            f"transferred from {weights_path}; the rest keep their random "
+            "initialization. Check that the source and target architectures match.",
+            stacklevel=2,
+        )
 
     # strict=False preserves decoder random initialization.
     model.load_state_dict(partial_sd, strict=False)
