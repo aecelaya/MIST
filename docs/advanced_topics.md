@@ -1118,9 +1118,10 @@ loading weights. If the input channels differ between source and target, the
 
 !!! note
 
-    `--pretrained-config` is required when `--pretrained-weights` is set.
-    MIST uses it to verify that the source and target architectures are
-    compatible before loading any weights.
+    `--pretrained-config` is optional but recommended. When given, MIST uses
+    it to verify that the source and target architectures are compatible
+    before loading any weights. Without it, MIST warns, skips that check, and
+    loads whatever encoder weights match; it still raises an error if none do.
 
 !!! tip
 

@@ -281,9 +281,9 @@ the following arguments:
   encoder from. Accepts a single fold checkpoint or the output of
   `mist_average_weights`. See
   [Transfer learning](advanced_topics.md#transfer-learning) for details.
-- `--pretrained-config`: Path to the source model's `config.json`. Required when
-  `--pretrained-weights` is set — used to validate encoder compatibility between
-  source and target models.
+- `--pretrained-config`: Path to the source model's `config.json`, used to
+  validate encoder compatibility between source and target models. Optional but
+  recommended; without it, MIST warns and skips the compatibility check.
 - `--input-channel-strategy`: How to handle an input-channel mismatch between
   the source and target encoder. Choices: `average` (mean over source channels),
   `first` (use first source channel only), `skip` (keep random initialization).
