@@ -23,7 +23,8 @@ a configuration file for when you need more control.
 
 ## Installation
 
-**CPU** (default — runs the full pipeline: train, predict, evaluate, everything):
+**CPU** (default — runs the full pipeline: train, predict, evaluate,
+everything):
 
 ```bash
 pip install mist-medical
@@ -188,37 +189,36 @@ Full documentation, including configuration reference and advanced topics, is at
   `pip install --upgrade "mist-medical[dali]"` for DALI-accelerated data loading
   on NVIDIA GPUs (highly recommended).
 - September 2026 — **CPU and AMD ROCm training support** — the full pipeline,
-  including `mist_train`, now runs on CPU-only machines and AMD ROCm GPUs via
-  a new generic, pure-PyTorch data loader, auto-selected whenever NVIDIA
-  DALI isn't the right fit for the detected hardware (or isn't installed).
+  including `mist_train`, now runs on CPU-only machines and AMD ROCm GPUs via a
+  new generic, pure-PyTorch data loader, auto-selected whenever NVIDIA DALI
+  isn't the right fit for the detected hardware (or isn't installed).
   Communication backend (`nccl`/RCCL on ROCm, `gloo` on CPU) and data loader
-  selection are both detected automatically and persisted to `config.json`.
-  The `train` install extra is now called `dali`, to reflect that it gates
-  DALI's CUDA acceleration specifically, not training capability in
-  general — `pip install mist-medical` trains everywhere on its own;
-  `pip install "mist-medical[dali]"` is recommended on top of that for
-  NVIDIA GPU training. `[train]` is kept working as an alias for `[dali]`
-  for anyone upgrading from an older release. AMP (BF16) is also now correctly
-  scoped to hardware with real matrix acceleration — NVIDIA Ampere+ and AMD
-  CDNA/RDNA3+ — rather than trusting `torch.cuda.is_bf16_supported()`, which
-  reports available on older AMD RDNA1/2 GPUs despite having no BF16
-  acceleration at all.
+  selection are both detected automatically and persisted to `config.json`. The
+  `train` install extra is now called `dali`, to reflect that it gates DALI's
+  CUDA acceleration specifically, not training capability in general —
+  `pip install mist-medical` trains everywhere on its own;
+  `pip install "mist-medical[dali]"` is recommended on top of that for NVIDIA
+  GPU training. `[train]` is kept working as an alias for `[dali]` for anyone
+  upgrading from an older release. AMP (BF16) is also now correctly scoped to
+  hardware with real matrix acceleration — NVIDIA Ampere+ and AMD CDNA/RDNA3+ —
+  rather than trusting `torch.cuda.is_bf16_supported()`, which reports available
+  on older AMD RDNA1/2 GPUs despite having no BF16 acceleration at all.
 - September 2026 — **`mist_finalize` for distributed per-fold training** —
   `mist_train` now supports the one-fold-per-node HPC pattern: when an
   invocation's `--folds`/`training.folds` doesn't cover every configured fold,
   it writes out-of-fold predictions for the fold(s) it trained and prints a
   reminder instead of guessing at final results from a partial run. Run
   `mist_finalize --results <dir>` once, after every per-fold job sharing that
-  results directory has finished, to aggregate every fold's held-out
-  predictions into `results.csv` and run held-out test-set inference.
-  `mist_finalize` is safe to re-run any time — each run recomputes from
-  whatever's currently on disk.
+  results directory has finished, to aggregate every fold's held-out predictions
+  into `results.csv` and run held-out test-set inference. `mist_finalize` is
+  safe to re-run any time — each run recomputes from whatever's currently on
+  disk.
 - September 2026 — **ANTs dependency removed** — MIST's image I/O,
   preprocessing, postprocessing, evaluation, analysis, and inference now run
-  entirely on SimpleITK; `antspyx` is no longer a dependency at all. A
-  six-stage migration, each stage verified against real trained models
-  (pocket nnU-Net, FMGNet, SwinUNETR-small) across a full 2-GPU H100 pipeline
-  run before shipping.
+  entirely on SimpleITK; `antspyx` is no longer a dependency at all. A six-stage
+  migration, each stage verified against real trained models (pocket nnU-Net,
+  FMGNet, SwinUNETR-small) across a full 2-GPU H100 pipeline run before
+  shipping.
 - July 2026 — **Probability-level ensembling** — `mist_predict --output-probs`
   writes each model's final softmax probability volume alongside its discrete
   prediction; `mist_ensemble --input-type probabilities` averages probability

@@ -1,10 +1,10 @@
 # Shared regression fixture/pipeline harness
 
 Originally built as the Stage 0 harness for the ANTs → SimpleITK migration: a
-small, deterministic harness that ran the pipeline over fixed edge-case
-fixtures and diffed later stages against golden artifacts, to catch the
-migration's signature failure mode — a missed `(x, y, z)` ↔ `(z, y, x)`
-transpose producing spatially wrong (but non-crashing) output.
+small, deterministic harness that ran the pipeline over fixed edge-case fixtures
+and diffed later stages against golden artifacts, to catch the migration's
+signature failure mode — a missed `(x, y, z)` ↔ `(z, y, x)` transpose producing
+spatially wrong (but non-crashing) output.
 
 That migration is complete (MIST no longer depends on `ants` at all), and the
 migration-specific diffing/golden-set workflow is gone along with it. What's
@@ -23,7 +23,7 @@ Four patients, each stressing one edge case from the original migration plan.
 Geometry is defined with **SimpleITK only**:
 
 | Patient         | Stresses                                                                                            |
-| --------------- | ----------------------------------------------------------------------------------------------------- |
+| --------------- | --------------------------------------------------------------------------------------------------- |
 | `iso_small`     | Tiny isotropic, identity direction — baseline.                                                      |
 | `anisotropic`   | Spacing `(1, 1, 3)` — resample / target-spacing path.                                               |
 | `oblique`       | Non-identity/oblique direction cosines — most likely to expose a reorient convention mismatch.      |

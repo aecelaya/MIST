@@ -1014,14 +1014,13 @@ Or set it directly in `config.json`:
 Setting `training.amp` to `true` in `config.json` enables automatic mixed
 precision (AMP) using bfloat16 (BF16). BF16 has the same exponent range as
 float32, so it never requires gradient loss scaling and is numerically more
-stable than float16. It is hardware-accelerated on NVIDIA Ampere and later
-GPUs (A100, RTX 30 series, and newer) and on AMD GPUs with matrix-acceleration
+stable than float16. It is hardware-accelerated on NVIDIA Ampere and later GPUs
+(A100, RTX 30 series, and newer) and on AMD GPUs with matrix-acceleration
 hardware — CDNA (MI100/200/300 series) and RDNA3 and newer (RX 7000 series and
 newer). Older AMD RDNA1/2 GPUs (RX 5000/6000 series, Radeon PRO W6000 series)
-report BF16 as available but have no matrix hardware for it, so MIST treats
-them the same as pre-Ampere NVIDIA GPUs and downgrades to FP32. CPU-only
-hardware has no BF16 acceleration and always trains in float32 regardless of
-this setting.
+report BF16 as available but have no matrix hardware for it, so MIST treats them
+the same as pre-Ampere NVIDIA GPUs and downgrades to FP32. CPU-only hardware has
+no BF16 acceleration and always trains in float32 regardless of this setting.
 
 AMP applies to the full training loop and is also propagated to inference:
 
@@ -1033,9 +1032,9 @@ AMP applies to the full training loop and is also propagated to inference:
   skipped if no GPU is available (CPU-only inference always runs in float32).
 
 `training.amp` is set to `true` by default. If BF16 isn't supported on the
-detected hardware, MIST downgrades to float32 automatically and prints a
-warning explaining why, rather than requiring you to set this by hand. To
-disable AMP explicitly, set it to `false` in `config.json`:
+detected hardware, MIST downgrades to float32 automatically and prints a warning
+explaining why, rather than requiring you to set this by hand. To disable AMP
+explicitly, set it to `false` in `config.json`:
 
 ```json
 "training": {
@@ -1301,56 +1300,53 @@ from background.
 ## Accelerator support (NVIDIA, AMD ROCm, CPU)
 
 MIST auto-detects the accelerator it's running on — NVIDIA CUDA, AMD ROCm, or
-CPU-only — and configures itself accordingly. You don't need to set anything
-for this to work; it's resolved once, the first time you run `mist_train`,
-and the resolved values are written back to `config.json` so every later
-run and all downstream inference read the same settings.
+CPU-only — and configures itself accordingly. You don't need to set anything for
+this to work; it's resolved once, the first time you run `mist_train`, and the
+resolved values are written back to `config.json` so every later run and all
+downstream inference read the same settings.
 
 Two things get resolved this way:
 
 - **`training.hardware.data_loader`** — which data-loading backend to use.
-  `"dali"` (NVIDIA's GPU-accelerated data loading library) is used
-  automatically on CUDA hardware where it's installed; everywhere else — AMD
-  ROCm, CPU-only machines, or a CUDA machine that skipped installing DALI —
-  MIST falls back to its own generic, pure-PyTorch data loader
-  automatically. The generic loader implements the same augmentations
-  (flips, zoom, noise, blur, brightness, contrast) but runs them on CPU
-  instead of as part of a GPU pipeline, so it's slower per batch than DALI
-  but requires no NVIDIA-specific dependencies. If your hardware is CUDA but
-  DALI isn't installed, MIST warns and falls back to the generic loader
-  rather than failing outright — install
+  `"dali"` (NVIDIA's GPU-accelerated data loading library) is used automatically
+  on CUDA hardware where it's installed; everywhere else — AMD ROCm, CPU-only
+  machines, or a CUDA machine that skipped installing DALI — MIST falls back to
+  its own generic, pure-PyTorch data loader automatically. The generic loader
+  implements the same augmentations (flips, zoom, noise, blur, brightness,
+  contrast) but runs them on CPU instead of as part of a GPU pipeline, so it's
+  slower per batch than DALI but requires no NVIDIA-specific dependencies. If
+  your hardware is CUDA but DALI isn't installed, MIST warns and falls back to
+  the generic loader rather than failing outright — install
   `pip install "mist-medical[dali]"` to get DALI's acceleration back
   (recommended whenever training on an NVIDIA GPU).
 - **`training.hardware.communication_backend`** — the `torch.distributed`
-  backend used for multi-GPU coordination. Resolves to `"nccl"` on both
-  NVIDIA CUDA and AMD ROCm (on ROCm, the `"nccl"` backend name transparently
-  routes to RCCL, AMD's NCCL-compatible collective communications library —
-  no code or config change needed), and to `"gloo"` on CPU-only hardware.
+  backend used for multi-GPU coordination. Resolves to `"nccl"` on both NVIDIA
+  CUDA and AMD ROCm (on ROCm, the `"nccl"` backend name transparently routes to
+  RCCL, AMD's NCCL-compatible collective communications library — no code or
+  config change needed), and to `"gloo"` on CPU-only hardware.
 
 Both fields default to `"auto"` in a freshly analyzed `config.json` and are
-resolved the first time you run `mist_train`. If you set either one
-explicitly instead (e.g. `"data_loader": "generic"` to force the generic
-loader even on a CUDA machine), MIST respects that choice and never
-overrides it automatically. Because resolution happens once and is
-persisted, moving an already-resolved `config.json` to a different kind of
-machine (say, from a CUDA analyze node to a CPU-only training node) means
-you'll need to edit these two fields by hand, or restore the `"auto"`
-sentinel, to get them to re-resolve for the new hardware.
+resolved the first time you run `mist_train`. If you set either one explicitly
+instead (e.g. `"data_loader": "generic"` to force the generic loader even on a
+CUDA machine), MIST respects that choice and never overrides it automatically.
+Because resolution happens once and is persisted, moving an already-resolved
+`config.json` to a different kind of machine (say, from a CUDA analyze node to a
+CPU-only training node) means you'll need to edit these two fields by hand, or
+restore the `"auto"` sentinel, to get them to re-resolve for the new hardware.
 
-CPU-only training is single-process — MIST does not (yet) support
-distributed training across multiple CPU processes, only across multiple
-GPUs (see [Multi-GPU training](#multi-gpu-training) below, which applies
-identically to AMD ROCm GPUs as it does to NVIDIA ones).
+CPU-only training is single-process — MIST does not (yet) support distributed
+training across multiple CPU processes, only across multiple GPUs (see
+[Multi-GPU training](#multi-gpu-training) below, which applies identically to
+AMD ROCm GPUs as it does to NVIDIA ones).
 
 ## Multi-GPU training
 
 MIST uses PyTorch's DistributedDataParallel (DDP) for multi-GPU data
 parallelism, on both NVIDIA CUDA and AMD ROCm GPUs. MIST will use all GPUs
 visible to the process. On HPC clusters (SLURM, LSF, PBS), the job scheduler
-controls which GPUs are visible via `CUDA_VISIBLE_DEVICES` — MIST respects
-that assignment automatically. On shared workstations, set
-`CUDA_VISIBLE_DEVICES` yourself before running MIST to restrict which GPUs
-are used.
+controls which GPUs are visible via `CUDA_VISIBLE_DEVICES` — MIST respects that
+assignment automatically. On shared workstations, set `CUDA_VISIBLE_DEVICES`
+yourself before running MIST to restrict which GPUs are used.
 
 !!! note
 
@@ -1383,17 +1379,17 @@ mist_train --numpy /shared/numpy --results /shared/results --folds 1
 # ...and so on for the rest of nfolds.
 ```
 
-Each node's job still uses DDP across that node's own GPUs exactly as
-described above — one fold per node and multi-GPU per fold are independent
-and compose normally.
+Each node's job still uses DDP across that node's own GPUs exactly as described
+above — one fold per node and multi-GPU per fold are independent and compose
+normally.
 
 Because each of these jobs only trains a subset of the configured folds,
 `mist_train` skips its usual automatic finalization step (aggregating
 out-of-fold predictions into `results.csv`, and running held-out test-set
-inference if configured) rather than have every node race to overwrite the
-same shared files. Instead, each job prints a reminder and exits once its own
-fold(s) are done. Once every per-fold job has finished, run the finalize step
-once, yourself:
+inference if configured) rather than have every node race to overwrite the same
+shared files. Instead, each job prints a reminder and exits once its own fold(s)
+are done. Once every per-fold job has finished, run the finalize step once,
+yourself:
 
 ```bash
 mist_finalize --results /shared/results
@@ -1401,10 +1397,10 @@ mist_finalize --results /shared/results
 
 `mist_finalize` is safe to re-run — each run recomputes `results.csv` (and
 test-set predictions, if configured) from whatever is currently in the results
-directory, so re-running it after a straggler fold finishes late just
-refreshes both. If you run it before every fold has finished, it prints a
-warning naming the folds still missing a saved model, rather than silently
-producing partial results.
+directory, so re-running it after a straggler fold finishes late just refreshes
+both. If you run it before every fold has finished, it prints a warning naming
+the folds still missing a saved model, rather than silently producing partial
+results.
 
 ## Parallelism
 
@@ -1416,21 +1412,22 @@ Analysis, preprocessing, evaluation, and postprocessing all operate
 patient-by-patient. Each stage exposes a `--num-workers-*` flag that controls
 how many patients are processed in parallel using a Python thread pool:
 
-| Command                                | Flag                        | Default |
-| -------------------------------------- | --------------------------- | ------- |
-| `mist_analyze`, `mist_run_all`         | `--num-workers-analyze`     | `1`     |
-| `mist_preprocess`, `mist_run_all`      | `--num-workers-preprocess`  | `1`     |
-| `mist_train`, `mist_run_all`, `mist_finalize` | `--num-workers-evaluate` | `1`     |
-| `mist_evaluate`                        | `--num-workers-evaluate`    | `1`     |
-| `mist_postprocess`                     | `--num-workers-postprocess` | `1`     |
-| `mist_postprocess`                     | `--num-workers-evaluate`    | `1`     |
-| `mist_convert_msd`, `mist_convert_csv` | `--num-workers-conversion`  | `1`     |
+| Command                                       | Flag                        | Default |
+| --------------------------------------------- | --------------------------- | ------- |
+| `mist_analyze`, `mist_run_all`                | `--num-workers-analyze`     | `1`     |
+| `mist_preprocess`, `mist_run_all`             | `--num-workers-preprocess`  | `1`     |
+| `mist_train`, `mist_run_all`, `mist_finalize` | `--num-workers-evaluate`    | `1`     |
+| `mist_evaluate`                               | `--num-workers-evaluate`    | `1`     |
+| `mist_postprocess`                            | `--num-workers-postprocess` | `1`     |
+| `mist_postprocess`                            | `--num-workers-evaluate`    | `1`     |
+| `mist_convert_msd`, `mist_convert_csv`        | `--num-workers-conversion`  | `1`     |
 
 `mist_train` exposes `--num-workers-evaluate` because, once every configured
 fold has finished training, it automatically aggregates the held-out fold
 predictions into `results.csv`. The flag controls the parallelism for that
-built-in evaluation step. When folds are trained across separate per-node
-jobs (see [Distributed training across nodes](#distributed-training-across-nodes-one-fold-per-node)
+built-in evaluation step. When folds are trained across separate per-node jobs
+(see
+[Distributed training across nodes](#distributed-training-across-nodes-one-fold-per-node)
 above), each job trains only its own fold(s) and this step runs later, via
 `mist_finalize`, which takes the same flag.
 
@@ -1452,26 +1449,26 @@ number of patients in the dataset.
 
 ### Training data-loading parallelism
 
-Training uses a different mechanism from analysis/preprocessing/evaluation,
-and it depends on which data loader backend was resolved (see
+Training uses a different mechanism from analysis/preprocessing/evaluation, and
+it depends on which data loader backend was resolved (see
 [Accelerator support](#accelerator-support-nvidia-amd-rocm-cpu) above).
 
-On NVIDIA GPUs with DALI installed, MIST builds a GPU-accelerated data
-pipeline that reads, augments, and assembles batches while the GPU is busy
-computing gradients. DALI's parallelism is controlled by CPU threads
-_within_ the pipeline, not by Python worker processes.
+On NVIDIA GPUs with DALI installed, MIST builds a GPU-accelerated data pipeline
+that reads, augments, and assembles batches while the GPU is busy computing
+gradients. DALI's parallelism is controlled by CPU threads _within_ the
+pipeline, not by Python worker processes.
 
-On AMD ROCm, CPU-only hardware, or a CUDA machine without DALI installed,
-MIST uses its generic data loader instead — a plain
-`torch.utils.data.DataLoader` running the same augmentations on CPU, in
-separate worker processes rather than pipeline threads.
+On AMD ROCm, CPU-only hardware, or a CUDA machine without DALI installed, MIST
+uses its generic data loader instead — a plain `torch.utils.data.DataLoader`
+running the same augmentations on CPU, in separate worker processes rather than
+pipeline threads.
 
 Either way, the number of workers/threads is set via
-`training.hardware.num_cpu_workers` in `config.json` (default: `8`). There is
-no CLI flag for this — it is a hardware-tuning setting that belongs in the
-configuration file alongside the rest of the training hardware parameters.
-Edit it directly if your machine has significantly more or fewer CPU cores
-than the default assumes:
+`training.hardware.num_cpu_workers` in `config.json` (default: `8`). There is no
+CLI flag for this — it is a hardware-tuning setting that belongs in the
+configuration file alongside the rest of the training hardware parameters. Edit
+it directly if your machine has significantly more or fewer CPU cores than the
+default assumes:
 
 ```json
 "hardware": {

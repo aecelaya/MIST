@@ -150,8 +150,8 @@ including:
 - **Label statistics** – per-label voxel counts, presence rates, volume
   fractions (relative to both foreground and the effective image region), and
   shape descriptors:
-  - **PCA-based descriptors** — three shape metrics derived from the
-    eigenvalues of the label's spatial covariance matrix:
+  - **PCA-based descriptors** — three shape metrics derived from the eigenvalues
+    of the label's spatial covariance matrix:
     - _Linearity_: how much the shape extends along a single axis (high for
       elongated structures such as vessels).
     - _Planarity_: how much the shape lies in a plane (high for disc-like
@@ -160,8 +160,8 @@ including:
       compact, roughly spherical structures).
   - **Isoperimetric Quotient (IQ)** measuring compactness relative to a sphere.
   - **Skeleton ratio** — the fraction of label voxels on the morphological
-    medial axis, which is the primary signal for thin, branching structures
-    such as vessels or airways.
+    medial axis, which is the primary signal for thin, branching structures such
+    as vessels or airways.
 - **Observations** – auto-generated notes flagging anisotropy, sparse labels,
   thin/branching structures, and other dataset characteristics that may
   influence architecture or loss function choices.
@@ -313,12 +313,11 @@ mist_train --numpy /path/to/preprocessed/data \
 At the end of the training loop, MIST will run inference on the held out fold
 and write the predictions to `./results/predictions/train/raw`. If this
 invocation trained every configured fold (the default, and the case in the
-example above), it then evaluates the results with the metrics specified in
-the `evaluation` entry of the configuration file, saving the computed metrics
-to `./results/results.csv`. If `--folds` was used to train only a subset of
-the folds (e.g. one fold per node on an HPC cluster), this step is skipped
-instead — see [Finalizing a distributed run](#finalizing-a-distributed-run)
-below.
+example above), it then evaluates the results with the metrics specified in the
+`evaluation` entry of the configuration file, saving the computed metrics to
+`./results/results.csv`. If `--folds` was used to train only a subset of the
+folds (e.g. one fold per node on an HPC cluster), this step is skipped instead —
+see [Finalizing a distributed run](#finalizing-a-distributed-run) below.
 
 ### Resuming training
 
@@ -360,25 +359,25 @@ On resume:
 
 ## Finalizing a distributed run
 
-When each fold is trained as its own job — one fold (or a few) per node,
-sharing a `--results` directory, e.g. `mist_train --folds 0 --results
-/shared/results` on one node and `--folds 1` on another — `mist_train` skips
-its usual automatic finalization step in each of those jobs, to avoid every
-node racing to overwrite the same shared `results.csv` and test-set
-predictions. Instead, run `mist_finalize` once yourself, after every per-fold
-job has finished, to aggregate out-of-fold predictions into `results.csv` and
-run held-out test-set inference (if a test set is configured). See
+When each fold is trained as its own job — one fold (or a few) per node, sharing
+a `--results` directory, e.g. `mist_train --folds 0 --results /shared/results`
+on one node and `--folds 1` on another — `mist_train` skips its usual automatic
+finalization step in each of those jobs, to avoid every node racing to overwrite
+the same shared `results.csv` and test-set predictions. Instead, run
+`mist_finalize` once yourself, after every per-fold job has finished, to
+aggregate out-of-fold predictions into `results.csv` and run held-out test-set
+inference (if a test set is configured). See
 [Distributed training across nodes](advanced_topics.md#distributed-training-across-nodes-one-fold-per-node)
 for the full workflow.
 
 The `mist_finalize` command takes the following arguments:
 
-- `--results`: Path to the MIST results directory shared by every per-fold
-  job. _(default: `./results`)_
+- `--results`: Path to the MIST results directory shared by every per-fold job.
+  _(default: `./results`)_
 - `--num-workers-evaluate`: Number of parallel workers for evaluation.
   _(default: `1`)_
-- `--device`: Device for held-out test-set inference (ignored if no test set
-  is configured): `cpu`, `cuda`, or a CUDA index like `0`. _(default: `cuda`)_
+- `--device`: Device for held-out test-set inference (ignored if no test set is
+  configured): `cpu`, `cuda`, or a CUDA index like `0`. _(default: `cuda`)_
 
 ### Example
 
@@ -387,11 +386,10 @@ mist_finalize --results /shared/results --num-workers-evaluate 4
 ```
 
 `mist_finalize` is safe to re-run: each run recomputes `results.csv` (and
-test-set predictions, if configured) from whatever is currently in the
-results directory, rather than depending on state from a previous run. If any
-configured fold is still missing a saved model when it runs, it prints a
-warning naming the missing fold(s) rather than silently producing partial
-results.
+test-set predictions, if configured) from whatever is currently in the results
+directory, rather than depending on state from a previous run. If any configured
+fold is still missing a saved model when it runs, it prints a warning naming the
+missing fold(s) rather than silently producing partial results.
 
 ## Averaging Model Weights
 

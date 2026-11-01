@@ -12,13 +12,14 @@ Getting Started
 
 MIST runs the full pipeline — analyze, preprocess, **train**, predict, evaluate
 — on **CPU**, with no NVIDIA-specific dependencies, and sufficient memory to
-handle 3D medical images. CPU training is slower than GPU-accelerated
-training, so scale patch size, batch size, and epochs accordingly.
+handle 3D medical images. CPU training is slower than GPU-accelerated training,
+so scale patch size, batch size, and epochs accordingly.
 
 An **NVIDIA GPU** is optional but recommended: install the `dali` extra for
 DALI-accelerated data loading, which is substantially faster than the base CPU
-data loader. An **AMD ROCm GPU** also works, using the same generic data
-loader as CPU (see [Accelerator support](advanced_topics.md#accelerator-support-nvidia-amd-rocm-cpu)).
+data loader. An **AMD ROCm GPU** also works, using the same generic data loader
+as CPU (see
+[Accelerator support](advanced_topics.md#accelerator-support-nvidia-amd-rocm-cpu)).
 
 ### Install
 
@@ -46,10 +47,10 @@ pip install "mist-medical[dali]"
 #### AMD ROCm GPU
 
 PyPI's default `torch` wheel has no ROCm support, so install a ROCm-enabled
-PyTorch build *first* — matching your machine's installed ROCm version, which
-you can check with `cat /opt/rocm/.info/version` — then install MIST on top
-of it. No install extra is needed; DALI (`dali`) is CUDA-only, and
-ROCm uses MIST's built-in generic data loader automatically:
+PyTorch build _first_ — matching your machine's installed ROCm version, which
+you can check with `cat /opt/rocm/.info/version` — then install MIST on top of
+it. No install extra is needed; DALI (`dali`) is CUDA-only, and ROCm uses MIST's
+built-in generic data loader automatically:
 
 ```console
 pip install torch --index-url https://download.pytorch.org/whl/rocm6.4
@@ -58,23 +59,23 @@ pip install mist-medical
 
 Swap `rocm6.4` for whichever ROCm release matches your driver (see the
 [ROCm PyTorch install docs](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/3rd-party/pytorch-install.html)
-for the full list of supported versions). Verify it took before installing
-MIST:
+for the full list of supported versions). Verify it took before installing MIST:
 
 ```console
 python -c "import torch; print(torch.__version__, torch.version.hip, torch.cuda.is_available())"
 ```
 
-You want a version string ending in `+rocmX.Y`, a non-`None` `torch.version.hip`,
-and `True` — that combination is what MIST's hardware detection checks for.
+You want a version string ending in `+rocmX.Y`, a non-`None`
+`torch.version.hip`, and `True` — that combination is what MIST's hardware
+detection checks for.
 
 #### Development install
 
 To install MIST and customize the underlying code (e.g., add a loss function or
-new architecture), clone the repo and install in editable mode. Add
-`[dali]` if you want DALI-accelerated data loading (recommended on NVIDIA
-GPUs; on AMD ROCm, install the ROCm PyTorch wheel first, as above, then
-install in editable mode with no extra):
+new architecture), clone the repo and install in editable mode. Add `[dali]` if
+you want DALI-accelerated data loading (recommended on NVIDIA GPUs; on AMD ROCm,
+install the ROCm PyTorch wheel first, as above, then install in editable mode
+with no extra):
 
 ```console
 git clone https://github.com/mist-medical/MIST.git
