@@ -63,7 +63,7 @@ def average_fold_weights(
 
 # Architectures whose encoder structure is computed from patch_size and
 # target_spacing. Both must match for encoder weights to be compatible.
-_ADAPTIVE_ARCHITECTURES = {"nnunet", "nnunet-pocket", "fmgnet", "wnet"}
+_ADAPTIVE_ARCHITECTURES = {"nnunet", "nnunet-pocket", "resenc", "fmgnet", "wnet"}
 
 
 def validate_encoder_compatibility(

@@ -276,7 +276,7 @@ mist_train --numpy /path/to/numpy --results /path/to/results \
 Each architecture imposes its own patch size constraints when overriding
 manually. The key distinction is between _adaptive_ and _fixed_ topology:
 
-- **Adaptive** (nnUNet, FMG-Net, W-Net): the architecture inspects
+- **Adaptive** (nnUNet, ResEnc, FMG-Net, W-Net): the architecture inspects
   `target_spacing` at construction time and skips downsampling on any axis that
   is already low-resolution (applying stride-1 there instead). Those axes accept
   any patch size ≥ 1.
@@ -287,6 +287,7 @@ manually. The key distinction is between _adaptive_ and _fixed_ topology:
 | Architecture              | Constraint                          | Notes                                                                                                      |
 | ------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `nnunet`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: the low-res axis uses stride-1, so any value is valid there                                      |
+| `resenc`                  | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet                                                                           |
 | `fmgnet`, `wnet`          | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet                                                                           |
 | `mednext-*`               | All dimensions divisible by **16**  | Fixed 4-stage encoder (`2⁴ = 16`); no adaptation for anisotropic axes                                      |
 | `swinunetr-*`             | All dimensions divisible by **32**  | Fixed: `patch_size=2` tokenizer × 4 downsampling stages; raises an error at model construction if violated |
@@ -309,6 +310,7 @@ available:
 | -------------------- | -------------------- |
 | nnUNet (default)     | `nnunet`             |
 | nnUNet (pocket)      | `nnunet-pocket`      |
+| ResEnc UNet          | `resenc`             |
 | MedNeXt (small)      | `mednext-small`      |
 | MedNeXt (base)       | `mednext-base`       |
 | MedNeXt (medium)     | `mednext-medium`     |
@@ -338,6 +340,26 @@ mist_train --numpy /path/to/preprocessed/npy/files \
            --results /path/to/results/folder \
            --model nnunet-pocket
 ```
+
+### Residual Encoder UNet (ResEnc)
+
+`resenc` is the Residual Encoder UNet from _nnU-Net Revisited_ (Isensee et al.,
+MICCAI 2024). Its encoder stacks ResNet-D residual blocks, with more blocks in
+deeper stages (1, 3, 4, 6, 6, 6), and its decoder is a lightweight plain UNet
+decoder with one convolution per stage. MIST's default `nnunet`, by contrast,
+uses a single residual block per stage in both the encoder and the decoder.
+`resenc` uses the same adaptive topology as `nnunet`, so the number of stages,
+kernel sizes, and strides follow `patch_size` and `target_spacing`.
+
+nnU-Net's ResEnc M, L, and XL presets share this network and differ only in the
+planned patch and batch size, which MIST sets through its own analysis. With a
+patch of at least 128 voxels per downsampled axis, the network has six stages
+and about 102M parameters.
+
+The encoder's parameter names and shapes match nnU-Net's `ResidualEncoderUNet`,
+so encoder weights pretrained with nnU-Net or nnssl (for example,
+nnFoundationCNN) are compatible by key when converted to a plain PyTorch state
+dict.
 
 ### MedNeXt kernel size
 

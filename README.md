@@ -128,6 +128,7 @@ mist_predict --models-dir /path/to/results/models \
 | --------------------------------------- | ------------------------------------------------------------------ |
 | nnU-Net                                 | `nnunet`                                                           |
 | nnU-Net Pocket                          | `nnunet-pocket`                                                    |
+| ResEnc UNet                             | `resenc`                                                           |
 | MedNeXt (small / base / medium / large) | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large` |
 | FMG-Net                                 | `fmgnet`                                                           |
 | W-Net                                   | `wnet`                                                             |
