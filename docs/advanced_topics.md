@@ -321,8 +321,6 @@ available:
 | SwinUNETR-V2 (small) | `swinunetr-small`    |
 | SwinUNETR-V2 (base)  | `swinunetr-base`     |
 | SwinUNETR-V2 (large) | `swinunetr-large`    |
-| Primus (small)       | `primus-small`       |
-| Primus (base)        | `primus-base`        |
 | Primus (medium)      | `primus-medium`      |
 | Primus (large)       | `primus-large`       |
 | PrimusV2 (small)     | `primusv2-small`     |
@@ -388,10 +386,14 @@ on par with ResEnc and MedNeXt across the paper's benchmarks.
 | medium  | 16     | 12    | 864            | ~147M      |
 | large   | 24     | 16    | 1056           | ~326M      |
 
-The paper recommends `medium` as the default. Primus has no deep supervision.
-Its learned position embedding is sized for the patch size, so the model only
-accepts inputs of exactly that size; MIST's patch-based training and sliding
-window inference already guarantee this.
+The paper recommends `medium` as the default. PrimusV2 is available in all four
+sizes; Primus is available as `primus-medium` and `primus-large` only. Use
+PrimusV2 to train from scratch. Use Primus for masked-autoencoder pretraining,
+where its non-overlapping tokens let masked tokens be dropped without leaking
+their content, and to load nnssl ViT checkpoints, which use its tokenizer.
+Primus has no deep supervision. Its learned position embedding is sized for the
+patch size, so the model only accepts inputs of exactly that size; MIST's
+patch-based training and sliding window inference already guarantee this.
 
 The encoder's parameter names match nnU-Net's Primus, so encoder weights
 pretrained with nnU-Net or nnssl load directly with `--pretrained-weights`. If

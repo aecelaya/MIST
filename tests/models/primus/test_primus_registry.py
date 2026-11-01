@@ -8,7 +8,14 @@ from mist.models.primus.mist_primus import Primus
 from mist.models.primus.primus_constants import PrimusConstants as constants
 from mist.models.primus.primus_registry import create_primus
 
-VARIANT_NAMES = ["small", "base", "medium", "large"]
+REGISTERED = [
+    ("primus", "medium"),
+    ("primus", "large"),
+    ("primusv2", "small"),
+    ("primusv2", "base"),
+    ("primusv2", "medium"),
+    ("primusv2", "large"),
+]
 
 
 @pytest.fixture
@@ -22,10 +29,9 @@ def valid_config():
     }
 
 
-@pytest.mark.parametrize("version", ["primus", "primusv2"])
-@pytest.mark.parametrize("variant", VARIANT_NAMES)
+@pytest.mark.parametrize(("version", "variant"), REGISTERED)
 def test_registered_variants(valid_config, version, variant):
-    """Every size of Primus and PrimusV2 is registered with the paper's sizes."""
+    """Registered Primus and PrimusV2 sizes match the paper's configurations."""
     model = get_model_from_registry(f"{version}-{variant}", **valid_config)
     depth, num_heads, embed_dim = constants.VARIANTS[variant]
     assert isinstance(model, Primus)
@@ -47,3 +53,10 @@ def test_create_primus_missing_key_raises(valid_config, missing_key):
     del valid_config[missing_key]
     with pytest.raises(ValueError, match=f"Missing required key '{missing_key}'"):
         create_primus("small", use_deeper_tokenizer=False, **valid_config)
+
+
+@pytest.mark.parametrize("name", ["primus-small", "primus-base"])
+def test_small_primus_v1_not_registered(valid_config, name):
+    """Primus (V1) is only offered in the medium and large sizes."""
+    with pytest.raises(ValueError, match="is not registered"):
+        get_model_from_registry(name, **valid_config)

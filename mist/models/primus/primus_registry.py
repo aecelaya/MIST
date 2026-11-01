@@ -41,16 +41,10 @@ def create_primus(variant: str, use_deeper_tokenizer: bool, **kwargs) -> Primus:
     )
 
 
-@register_model("primus-small")
-def create_primus_small(**kwargs) -> Primus:
-    """Create a small Primus model."""
-    return create_primus("small", use_deeper_tokenizer=False, **kwargs)
-
-
-@register_model("primus-base")
-def create_primus_base(**kwargs) -> Primus:
-    """Create a base Primus model."""
-    return create_primus("base", use_deeper_tokenizer=False, **kwargs)
+# Primus (V1) is registered only in the medium and large sizes. Its main uses
+# are masked-autoencoder pretraining, where its non-overlapping tokens allow
+# dropping masked tokens, and loading nnssl ViT checkpoints; for training from
+# scratch, PrimusV2 is the better choice at every size.
 
 
 @register_model("primus-medium")
