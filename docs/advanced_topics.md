@@ -280,8 +280,8 @@ manually. The key distinction is between _adaptive_ and _fixed_ topology:
   `target_spacing` at construction time and skips downsampling on any axis that
   is already low-resolution (applying stride-1 there instead). Those axes accept
   any patch size ≥ 1.
-- **Fixed** (MedNeXt, SwinUNETR): the same stride schedule is applied to every
-  axis regardless of spacing, so all dimensions must meet the divisibility
+- **Fixed** (MedNeXt, SwinUNETR, Primus): the same stride schedule is applied to
+  every axis regardless of spacing, so all dimensions must meet the divisibility
   requirement.
 
 | Architecture              | Constraint                          | Notes                                                                                                      |
@@ -291,6 +291,7 @@ manually. The key distinction is between _adaptive_ and _fixed_ topology:
 | `fmgnet`, `wnet`          | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet                                                                           |
 | `mednext-*`               | All dimensions divisible by **16**  | Fixed 4-stage encoder (`2⁴ = 16`); no adaptation for anisotropic axes                                      |
 | `swinunetr-*`             | All dimensions divisible by **32**  | Fixed: `patch_size=2` tokenizer × 4 downsampling stages; raises an error at model construction if violated |
+| `primus-*`, `primusv2-*`  | All dimensions divisible by **8**   | Fixed: one token per `8 × 8 × 8` patch; raises an error at model construction if violated                  |
 
 The automatic patch selection always produces multiples of 32 (which satisfies
 all constraints), so manual overrides are the only case where you need to check
@@ -320,6 +321,14 @@ available:
 | SwinUNETR-V2 (small) | `swinunetr-small`    |
 | SwinUNETR-V2 (base)  | `swinunetr-base`     |
 | SwinUNETR-V2 (large) | `swinunetr-large`    |
+| Primus (small)       | `primus-small`       |
+| Primus (base)        | `primus-base`        |
+| Primus (medium)      | `primus-medium`      |
+| Primus (large)       | `primus-large`       |
+| PrimusV2 (small)     | `primusv2-small`     |
+| PrimusV2 (base)      | `primusv2-base`      |
+| PrimusV2 (medium)    | `primusv2-medium`    |
+| PrimusV2 (large)     | `primusv2-large`     |
 
 The architecture can be specified with the `--model` flag in the `mist_run_all`
 or `mist_train` commands or directly edited in the `config.json` file.
@@ -360,6 +369,34 @@ The encoder's parameter names and shapes match nnU-Net's `ResidualEncoderUNet`,
 so encoder weights pretrained with nnU-Net or nnssl (for example,
 nnFoundationCNN) load directly with `--pretrained-weights`. See
 [Checkpoints from other frameworks](#checkpoints-from-other-frameworks).
+
+### Primus and PrimusV2
+
+`primus-*` and `primusv2-*` are the transformer-centric architectures from
+_Primus: Enforcing Attention Usage for 3D Medical Image Segmentation_ (Wald et
+al., 2025). The input is split into `8 × 8 × 8` tokens, processed by an EVA-02
+style transformer with learned absolute and 3D rotary position embeddings, and
+decoded back to full resolution by a lightweight transposed-convolution decoder.
+PrimusV2 replaces the single strided-convolution tokenizer with a small residual
+network, which the paper found helps on small and fine structures; PrimusV2 is
+on par with ResEnc and MedNeXt across the paper's benchmarks.
+
+| Variant | Layers | Heads | Embedding dim. | Parameters |
+| ------- | ------ | ----- | -------------- | ---------- |
+| small   | 12     | 6     | 396            | ~24M       |
+| base    | 12     | 12    | 792            | ~93M       |
+| medium  | 16     | 12    | 864            | ~147M      |
+| large   | 24     | 16    | 1056           | ~326M      |
+
+The paper recommends `medium` as the default. Primus has no deep supervision.
+Its learned position embedding is sized for the patch size, so the model only
+accepts inputs of exactly that size; MIST's patch-based training and sliding
+window inference already guarantee this.
+
+The encoder's parameter names match nnU-Net's Primus, so encoder weights
+pretrained with nnU-Net or nnssl load directly with `--pretrained-weights`. If
+the pretrained patch size differs, MIST resizes the learned position embedding
+to the new token grid (for cubic pretraining patches).
 
 ### MedNeXt kernel size
 

@@ -25,3 +25,19 @@ class MISTModel(nn.Module, ABC):
         Returns:
             OrderedDict of encoder parameter name → tensor.
         """
+
+    def adapt_pretrained_state_dict(self, state_dict: dict) -> dict:
+        """Adapt a pretrained state dict to this model before encoder loading.
+
+        Override when pretrained tensors can be transformed to fit this model,
+        for example resizing a learned position embedding pretrained at a
+        different patch size. The default returns the state dict unchanged.
+
+        Args:
+            state_dict: Source state dict, already unwrapped and stripped of
+                any DDP prefix.
+
+        Returns:
+            The (possibly modified) state dict.
+        """
+        return state_dict

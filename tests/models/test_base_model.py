@@ -184,3 +184,9 @@ def test_swinunetr_encoder_keys_subset_of_full_state_dict(swinunetr_model):
     enc_keys = set(swinunetr_model.get_encoder_state_dict().keys())
     assert enc_keys.issubset(full_keys)
     assert enc_keys != full_keys
+
+
+def test_adapt_pretrained_state_dict_default_is_identity(nnunet_model):
+    """By default, a pretrained state dict is returned unchanged."""
+    state_dict = {"a": 1}
+    assert nnunet_model.adapt_pretrained_state_dict(state_dict) is state_dict

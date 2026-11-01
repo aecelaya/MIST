@@ -1,20 +1,26 @@
 """Building blocks for the Residual Encoder UNet (ResEnc).
 
 Adapted from MIC-DKFZ's dynamic-network-architectures (Apache License 2.0),
-specialized to 3D with instance normalization and LeakyReLU. Module and
+specialized to 3D with instance normalization and LeakyReLU (or another
+activation, for reuse in Primus's tokenizer). Module and
 attribute names deliberately mirror the original so that state dict keys match
 nnU-Net and nnssl checkpoints exactly. In particular, ConvNormAct registers its
 convolution both as ``conv`` and inside ``all_modules``, so every convolution
 weight appears under two keys, as it does upstream.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import torch
 from torch import nn
 
 # MIST imports.
 from mist.models.resenc.resenc_constants import ResEncConstants as constants
+
+
+def leaky_relu() -> nn.Module:
+    """Return the default ResEnc activation."""
+    return nn.LeakyReLU(negative_slope=constants.NEGATIVE_SLOPE, inplace=True)
 
 
 def _to_3d(value: int | Sequence[int]) -> list[int]:
@@ -25,12 +31,13 @@ def _to_3d(value: int | Sequence[int]) -> list[int]:
 
 
 class ConvNormAct(nn.Module):
-    """Convolution, instance normalization, and optional LeakyReLU.
+    """Convolution, instance normalization, and optional activation.
 
     Attributes:
         conv: The 3D convolution.
         norm: Instance normalization.
-        nonlin: LeakyReLU activation, present only if use_activation is True.
+        nonlin: Activation (LeakyReLU by default), present only if
+            use_activation is True.
         all_modules: The above layers applied in sequence.
     """
 
@@ -42,6 +49,7 @@ class ConvNormAct(nn.Module):
         stride: int | Sequence[int],
         use_activation: bool = True,
         conv_bias: bool = constants.CONV_BIAS,
+        activation: Callable[[], nn.Module] = leaky_relu,
     ):
         super().__init__()
         kernel_size = _to_3d(kernel_size)
@@ -56,7 +64,7 @@ class ConvNormAct(nn.Module):
         self.norm = nn.InstanceNorm3d(out_channels, eps=constants.NORM_EPS, affine=True)
         ops = [self.conv, self.norm]
         if use_activation:
-            self.nonlin = nn.LeakyReLU(negative_slope=constants.NEGATIVE_SLOPE, inplace=True)
+            self.nonlin = activation()
             ops.append(self.nonlin)
         self.all_modules = nn.Sequential(*ops)
 
@@ -102,12 +110,23 @@ class BasicBlockD(nn.Module):
         out_channels: int,
         kernel_size: int | Sequence[int],
         stride: int | Sequence[int],
+        conv_bias: bool = constants.CONV_BIAS,
+        activation: Callable[[], nn.Module] = leaky_relu,
     ):
         super().__init__()
         stride = _to_3d(stride)
-        self.conv1 = ConvNormAct(in_channels, out_channels, kernel_size, stride)
-        self.conv2 = ConvNormAct(out_channels, out_channels, kernel_size, 1, use_activation=False)
-        self.nonlin2 = nn.LeakyReLU(negative_slope=constants.NEGATIVE_SLOPE, inplace=True)
+        self.conv1 = ConvNormAct(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            conv_bias=conv_bias,
+            activation=activation,
+        )
+        self.conv2 = ConvNormAct(
+            out_channels, out_channels, kernel_size, 1, use_activation=False, conv_bias=conv_bias
+        )
+        self.nonlin2 = activation()
 
         has_stride = any(s != 1 for s in stride)
         requires_projection = in_channels != out_channels
@@ -148,12 +167,15 @@ class StackedResidualBlocks(nn.Module):
         out_channels: int,
         kernel_size: int | Sequence[int],
         initial_stride: int | Sequence[int],
+        conv_bias: bool = constants.CONV_BIAS,
+        activation: Callable[[], nn.Module] = leaky_relu,
     ):
         super().__init__()
+        block_kwargs = {"conv_bias": conv_bias, "activation": activation}
         self.blocks = nn.Sequential(
-            BasicBlockD(in_channels, out_channels, kernel_size, initial_stride),
+            BasicBlockD(in_channels, out_channels, kernel_size, initial_stride, **block_kwargs),
             *[
-                BasicBlockD(out_channels, out_channels, kernel_size, 1)
+                BasicBlockD(out_channels, out_channels, kernel_size, 1, **block_kwargs)
                 for _ in range(1, num_blocks)
             ],
         )

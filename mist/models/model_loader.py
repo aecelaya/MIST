@@ -231,6 +231,11 @@ def load_pretrained_encoder(
             {(k[7:] if k.startswith("module.") else k): v for k, v in source_sd.items()}
         )
 
+    # Let the model adapt tensors it can transform to fit (e.g., resizing a
+    # position embedding pretrained at another patch size).
+    if hasattr(model, "adapt_pretrained_state_dict"):
+        source_sd = model.adapt_pretrained_state_dict(source_sd)
+
     target_encoder_sd = model.get_encoder_state_dict()
     partial_sd = OrderedDict()
     summary: dict[str, list[str]] = {

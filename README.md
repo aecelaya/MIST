@@ -124,15 +124,17 @@ mist_predict --models-dir /path/to/results/models \
 
 ## Supported Architectures
 
-| Model                                   | Key                                                                |
-| --------------------------------------- | ------------------------------------------------------------------ |
-| nnU-Net                                 | `nnunet`                                                           |
-| nnU-Net Pocket                          | `nnunet-pocket`                                                    |
-| ResEnc UNet                             | `resenc`                                                           |
-| MedNeXt (small / base / medium / large) | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large` |
-| FMG-Net                                 | `fmgnet`                                                           |
-| W-Net                                   | `wnet`                                                             |
-| Swin UNETR (small / base / large)       | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`             |
+| Model                                    | Key                                                                    |
+| ---------------------------------------- | ---------------------------------------------------------------------- |
+| nnU-Net                                  | `nnunet`                                                               |
+| nnU-Net Pocket                           | `nnunet-pocket`                                                        |
+| ResEnc UNet                              | `resenc`                                                               |
+| Primus (small / base / medium / large)   | `primus-small`, `primus-base`, `primus-medium`, `primus-large`         |
+| PrimusV2 (small / base / medium / large) | `primusv2-small`, `primusv2-base`, `primusv2-medium`, `primusv2-large` |
+| MedNeXt (small / base / medium / large)  | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`     |
+| FMG-Net                                  | `fmgnet`                                                               |
+| W-Net                                    | `wnet`                                                                 |
+| Swin UNETR (small / base / large)        | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                 |
 
 Change the architecture in `config.json` or pass `--model <key>` at the command
 line.
