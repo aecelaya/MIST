@@ -36,6 +36,32 @@ def test_resenc_full_depth_matches_nnfoundation_cnn_size():
     assert 102.0e6 < n_params < 102.5e6
 
 
+# SHA-256 of the sorted "name:shape" lines of the nnFoundationCNN checkpoint's
+# network_weights (huggingface.co/MIC-DKFZ/nnFoundationCNN, checkpoint_final.pth),
+# excluding the duplicate "decoder.encoder.*" names nnU-Net's decoder registers.
+# The checkpoint is 410 MB, so the fingerprint stands in for it. With the
+# weights loaded, MIST's network was verified to match nnU-Net's own
+# ResidualEncoderUNet output exactly.
+NNFOUNDATION_CNN_TENSORS = 508
+NNFOUNDATION_CNN_FINGERPRINT = "e6587bdf1a95a2d3bb66a675714a6f48d301f0dd0360e3594d1f87da30d34892"
+
+
+def test_resenc_layout_matches_nnfoundation_cnn_checkpoint():
+    """At 192^3 and 1 mm, every name and shape matches nnFoundationCNN exactly.
+
+    Encoder, decoder, and head all line up, so the checkpoint loads in full:
+    MIST transfers the encoder, and MISFIT can start MAE pretraining from the
+    whole network. A failure here means a change to the ResEnc layout broke
+    compatibility with nnFoundationCNN and nnssl ResEnc-L checkpoints.
+    """
+    import hashlib
+
+    model = ResEncUNet(1, 1, [192, 192, 192], [1.0, 1.0, 1.0], use_deep_supervision=False)
+    lines = sorted(f"{k}:{tuple(v.shape)}" for k, v in model.state_dict().items())
+    assert len(lines) == NNFOUNDATION_CNN_TENSORS
+    assert hashlib.sha256("\n".join(lines).encode()).hexdigest() == (NNFOUNDATION_CNN_FINGERPRINT)
+
+
 def test_resenc_non_3d_patch_size_raises(base_kwargs):
     """2D patch_size raises a clear 3D-only error."""
     base_kwargs["patch_size"] = [32, 32]
