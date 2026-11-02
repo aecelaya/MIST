@@ -126,10 +126,19 @@ def validate_encoder_compatibility(
             else:
                 _fail(msg)
 
-        source_spatial = source_config["spatial_config"]
+        # MISFIT pretraining configs use this same spatial_config section. Older
+        # ones lack it and keep the patch size under "model"; a null
+        # target_spacing means MISFIT pretrained at native (non-resampled)
+        # resolution, so there is no spacing to compare.
+        source_spatial = source_config.get("spatial_config") or {
+            "patch_size": source_config["model"].get("patch_size"),
+            "target_spacing": None,
+        }
         target_spatial = target_config["spatial_config"]
 
-        if list(source_spatial["patch_size"]) != list(target_spatial["patch_size"]):
+        if source_spatial["patch_size"] is not None and list(source_spatial["patch_size"]) != list(
+            target_spatial["patch_size"]
+        ):
             _spatial_mismatch(
                 f"patch_size mismatch: source {source_spatial['patch_size']} "
                 f"vs target {target_spatial['patch_size']}. For adaptive "
@@ -137,7 +146,15 @@ def validate_encoder_compatibility(
                 "patch_size."
             )
 
-        if list(source_spatial["target_spacing"]) != list(target_spatial["target_spacing"]):
+        if source_spatial["target_spacing"] is None:
+            warnings.warn(
+                "The pretrained source has no target_spacing: it was trained on "
+                "data that was not resampled (e.g. a MISFIT run without "
+                "--target-spacing), so spacing compatibility cannot be checked. "
+                "Its encoder was planned isotropically.",
+                stacklevel=2,
+            )
+        elif list(source_spatial["target_spacing"]) != list(target_spatial["target_spacing"]):
             _spatial_mismatch(
                 "target_spacing mismatch: source "
                 f"{source_spatial['target_spacing']} vs target "

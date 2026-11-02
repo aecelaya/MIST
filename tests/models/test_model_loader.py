@@ -655,3 +655,58 @@ def test_validate_encoder_compatibility_resenc_spatial_mismatch_warns():
     with pytest.warns(UserWarning, match="matching stages still transfer") as record:
         validate_encoder_compatibility(source, target)
     assert len(record) == 2
+
+
+def test_validate_encoder_compatibility_null_source_spacing_warns():
+    """A MISFIT config pretrained without resampling has target_spacing null."""
+    source = {
+        "model": {"architecture": "resenc", "patch_size": [96, 96, 96]},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": None},
+    }
+    target = {
+        "model": {"architecture": "resenc"},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": [1, 1, 1]},
+    }
+    with pytest.warns(UserWarning, match="spacing compatibility cannot be checked") as record:
+        validate_encoder_compatibility(source, target)
+    assert len(record) == 1  # patch sizes match, so only the spacing warning
+
+
+def test_validate_encoder_compatibility_null_source_spacing_does_not_raise_for_nnunet():
+    """Unknown spacing is not a mismatch, even for non-stagewise architectures."""
+    source = {
+        "model": {"architecture": "nnunet"},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": None},
+    }
+    target = {
+        "model": {"architecture": "nnunet"},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": [1, 1, 1]},
+    }
+    with pytest.warns(UserWarning, match="spacing compatibility cannot be checked"):
+        validate_encoder_compatibility(source, target)
+
+
+def test_validate_encoder_compatibility_legacy_source_without_spatial_config():
+    """Older MISFIT configs have no spatial_config; patch_size is under model."""
+    source = {"model": {"architecture": "resenc", "patch_size": [128, 128, 128]}}
+    target = {
+        "model": {"architecture": "resenc"},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": [1, 1, 1]},
+    }
+    with pytest.warns(UserWarning) as record:
+        validate_encoder_compatibility(source, target)
+    messages = [str(w.message) for w in record]
+    assert any("patch_size mismatch" in m for m in messages)
+    assert any("spacing compatibility cannot be checked" in m for m in messages)
+
+
+def test_validate_encoder_compatibility_source_without_any_patch_size():
+    """No patch size anywhere in the source: only the spacing warning."""
+    source = {"model": {"architecture": "resenc"}}
+    target = {
+        "model": {"architecture": "resenc"},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": [1, 1, 1]},
+    }
+    with pytest.warns(UserWarning, match="spacing compatibility") as record:
+        validate_encoder_compatibility(source, target)
+    assert len(record) == 1

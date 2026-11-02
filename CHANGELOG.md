@@ -27,6 +27,9 @@ All notable changes to MIST are listed here, newest first. MIST follows
   initialization.
 - For `resenc`, a patch size or spacing mismatch with `--pretrained-config` is a
   warning rather than an error, since shared stages still transfer exactly.
+- `--pretrained-config` accepts MISFIT pretraining configs: a null
+  `target_spacing` (pretrained without resampling) or a missing `spatial_config`
+  warns that spacing can't be checked instead of failing.
 
 ### Fixed
 
