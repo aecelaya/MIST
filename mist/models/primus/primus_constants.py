@@ -18,6 +18,9 @@ class PrimusConstants:
         "base": (12, 12, 792),
         "medium": (16, 12, 864),
         "large": (24, 16, 1056),
+        # PrimusX: large's width with 40 layers. Not in the Primus paper; it is
+        # the encoder of nnFoundationViT (nnssl), so its checkpoint loads in full.
+        "x": (40, 16, 1056),
     }
 
     TOKEN_SIZE = 8  # Edge length of the 3D patch mapped to one token.

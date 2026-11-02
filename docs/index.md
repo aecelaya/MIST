@@ -74,7 +74,7 @@ for details and how to pick the right `rocmX.Y` version for your machine.
 | nnU-Net                                  | `nnunet`                                                               |
 | nnU-Net Pocket                           | `nnunet-pocket`                                                        |
 | ResEnc UNet                              | `resenc`                                                               |
-| Primus (medium / large)                  | `primus-medium`, `primus-large`                                        |
+| Primus (medium / large / X)              | `primus-medium`, `primus-large`, `primus-x`                            |
 | PrimusV2 (small / base / medium / large) | `primusv2-small`, `primusv2-base`, `primusv2-medium`, `primusv2-large` |
 | MedNeXt (small / base / medium / large)  | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`     |
 | FMG-Net                                  | `fmgnet`                                                               |

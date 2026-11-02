@@ -317,6 +317,25 @@ def load_pretrained_encoder(
             stacklevel=2,
         )
 
+    # Encoder tensors in the checkpoint with no place in the model mean the
+    # pretrained encoder is larger (e.g., a 40-layer nnFoundationViT loaded
+    # into 24-layer primus-large, or a six-stage ResEnc into a five-stage one).
+    # Only a truncated part of it is used, which the counts above can't show.
+    # Tensors the model has anywhere (e.g., decoder weights that share the
+    # encoder's top-level prefix) are not leftovers.
+    encoder_prefixes = tuple({k.split(".")[0] + "." for k in target_encoder_sd})
+    model_keys = set(model.state_dict())
+    unused = [k for k in source_sd if k.startswith(encoder_prefixes) and k not in model_keys]
+    if unused:
+        warnings.warn(
+            f"{len(unused)} encoder tensors in {weights_path} have no "
+            f"counterpart in {type(model).__name__} (e.g., {unused[:3]}): the "
+            "pretrained encoder is larger than this model, so only part of it "
+            "is used. Check that the model variant matches the checkpoint "
+            "(e.g., primus-x for nnFoundationViT).",
+            stacklevel=2,
+        )
+
     # strict=False preserves decoder random initialization.
     model.load_state_dict(partial_sd, strict=False)
     return model, summary

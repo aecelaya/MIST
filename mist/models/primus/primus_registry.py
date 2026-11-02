@@ -10,7 +10,7 @@ def create_primus(variant: str, use_deeper_tokenizer: bool, **kwargs) -> Primus:
     """Factory method to create Primus model variants.
 
     Args:
-        variant: Size variant: 'small', 'base', 'medium', or 'large'.
+        variant: Size variant: 'small', 'base', 'medium', 'large', or 'x'.
         use_deeper_tokenizer: If True, create PrimusV2.
         **kwargs: Model configuration, including in_channels, out_channels,
             and patch_size. target_spacing is accepted but not used.
@@ -41,10 +41,10 @@ def create_primus(variant: str, use_deeper_tokenizer: bool, **kwargs) -> Primus:
     )
 
 
-# Primus (V1) is registered only in the medium and large sizes. Its main uses
-# are masked-autoencoder pretraining, where its non-overlapping tokens allow
-# dropping masked tokens, and loading nnssl ViT checkpoints; for training from
-# scratch, PrimusV2 is the better choice at every size.
+# Primus (V1) is registered only in the medium, large, and x sizes. Its main
+# uses are masked-autoencoder pretraining, where its non-overlapping tokens
+# allow dropping masked tokens, and loading nnssl ViT checkpoints; for training
+# from scratch, PrimusV2 is the better choice at every size.
 
 
 @register_model("primus-medium")
@@ -57,6 +57,12 @@ def create_primus_medium(**kwargs) -> Primus:
 def create_primus_large(**kwargs) -> Primus:
     """Create a large Primus model."""
     return create_primus("large", use_deeper_tokenizer=False, **kwargs)
+
+
+@register_model("primus-x")
+def create_primus_x(**kwargs) -> Primus:
+    """Create a PrimusX model, the architecture of nnFoundationViT."""
+    return create_primus("x", use_deeper_tokenizer=False, **kwargs)
 
 
 @register_model("primusv2-small")

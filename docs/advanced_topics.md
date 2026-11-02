@@ -323,6 +323,7 @@ available:
 | SwinUNETR-V2 (large) | `swinunetr-large`    |
 | Primus (medium)      | `primus-medium`      |
 | Primus (large)       | `primus-large`       |
+| PrimusX              | `primus-x`           |
 | PrimusV2 (small)     | `primusv2-small`     |
 | PrimusV2 (base)      | `primusv2-base`      |
 | PrimusV2 (medium)    | `primusv2-medium`    |
@@ -385,15 +386,20 @@ on par with ResEnc and MedNeXt across the paper's benchmarks.
 | base    | 12     | 12    | 792            | ~93M       |
 | medium  | 16     | 12    | 864            | ~147M      |
 | large   | 24     | 16    | 1056           | ~326M      |
+| x       | 40     | 16    | 1056           | ~540M      |
 
-The paper recommends `medium` as the default. PrimusV2 is available in all four
-sizes; Primus is available as `primus-medium` and `primus-large` only. Use
-PrimusV2 to train from scratch. Use Primus for masked-autoencoder pretraining,
-where its non-overlapping tokens let masked tokens be dropped without leaking
-their content, and to load nnssl ViT checkpoints, which use its tokenizer.
-Primus has no deep supervision. Its learned position embedding is sized for the
-patch size, so the model only accepts inputs of exactly that size; MIST's
-patch-based training and sliding window inference already guarantee this.
+The paper recommends `medium` as the default. PrimusV2 is available in the
+paper's four sizes; Primus is available as `primus-medium`, `primus-large`, and
+`primus-x`. `primus-x` (PrimusX) is not in the paper: it is the encoder of
+[nnFoundationViT](https://huggingface.co/MIC-DKFZ/nnFoundationViT), an openly
+released nnssl model pretrained at 192³ and 1 mm, whose checkpoint loads into it
+in full with `--pretrained-weights`. Use PrimusV2 to train from scratch. Use
+Primus for masked-autoencoder pretraining, where its non-overlapping tokens let
+masked tokens be dropped without leaking their content, and to load nnssl ViT
+checkpoints, which use its tokenizer. Primus has no deep supervision. Its
+learned position embedding is sized for the patch size, so the model only
+accepts inputs of exactly that size; MIST's patch-based training and sliding
+window inference already guarantee this.
 
 The encoder's parameter names match nnU-Net's Primus, so encoder weights
 pretrained with nnU-Net or nnssl load directly with `--pretrained-weights`. If

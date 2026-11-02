@@ -12,9 +12,10 @@ All notable changes to MIST are listed here, newest first. MIST follows
   nnU-Net and nnssl checkpoints, including nnFoundationCNN.
 - **Primus and PrimusV2** (`primus-medium`, `primus-large`, `primusv2-small`,
   `primusv2-base`, `primusv2-medium`, `primusv2-large`) — the
-  transformer-centric architectures from Wald et al. (2025). Encoder weights are
-  compatible with nnU-Net and nnssl checkpoints, and a learned position
-  embedding pretrained at another patch size is resized automatically.
+  transformer-centric architectures from Wald et al. (2025), plus `primus-x`,
+  the 40-layer encoder of nnFoundationViT. Encoder weights are compatible with
+  nnU-Net and nnssl checkpoints, and a learned position embedding pretrained at
+  another patch size is resized automatically.
 - **Checkpoints from other frameworks** — `--pretrained-weights` unwraps state
   dicts nested under `state_dict`, `model_state_dict`, `network_weights`, or
   `model`, so checkpoints from PyTorch Lightning, nnU-Net, and nnssl load
@@ -25,6 +26,9 @@ All notable changes to MIST are listed here, newest first. MIST follows
 - Transfer learning now raises an error if no encoder weights transfer, and
   warns if fewer than half do, instead of silently training from random
   initialization.
+- Transfer learning also warns when the checkpoint's encoder is larger than the
+  model's (e.g., nnFoundationViT loaded into `primus-large` instead of
+  `primus-x`), since only part of it is used.
 - For `resenc`, a patch size or spacing mismatch with `--pretrained-config` is a
   warning rather than an error, since shared stages still transfer exactly.
 - `--pretrained-config` accepts MISFIT pretraining configs: a null

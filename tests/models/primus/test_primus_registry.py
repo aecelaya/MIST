@@ -11,6 +11,7 @@ from mist.models.primus.primus_registry import create_primus
 REGISTERED = [
     ("primus", "medium"),
     ("primus", "large"),
+    ("primus", "x"),
     ("primusv2", "small"),
     ("primusv2", "base"),
     ("primusv2", "medium"),

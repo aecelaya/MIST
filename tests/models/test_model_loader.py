@@ -559,7 +559,9 @@ def test_load_pretrained_encoder_target_key_absent_from_source_is_skipped(
         def forward(self, x):
             return x
 
-    _, summary = load_pretrained_encoder(_ExtraKeyModel(), source_checkpoint)
+    # The toy model exposes only part of the checkpoint's encoder.
+    with pytest.warns(UserWarning, match="no counterpart"):
+        _, summary = load_pretrained_encoder(_ExtraKeyModel(), source_checkpoint)
     assert summary["skipped"] == ["nonexistent_key"]
     assert summary["loaded"] == [matching_key]
 
@@ -585,7 +587,9 @@ def test_load_pretrained_encoder_incompatible_shape_is_skipped(nnunet_source, so
         def forward(self, x):
             return x
 
-    _, summary = load_pretrained_encoder(_IncompatibleModel(), source_checkpoint)
+    # The toy model exposes only part of the checkpoint's encoder.
+    with pytest.warns(UserWarning, match="no counterpart"):
+        _, summary = load_pretrained_encoder(_IncompatibleModel(), source_checkpoint)
     assert first_key in summary["skipped"]
 
 
@@ -639,6 +643,39 @@ def test_load_pretrained_encoder_partial_transfer_warns(nnunet_source, tmp_path)
     torch.save({one_key: encoder_sd[one_key]}, path)
     target = _pocket_nnunet()
     with pytest.warns(UserWarning, match=f"Only 1 of {len(encoder_sd)} encoder tensors"):
+        load_pretrained_encoder(target, str(path))
+
+
+def _saved_resenc(tmp_path, patch):
+    from mist.models.resenc.mist_resenc import ResEncUNet
+
+    model = ResEncUNet(1, 2, patch, [1.0, 1.0, 1.0], use_deep_supervision=False)
+    path = tmp_path / f"resenc_{patch[0]}.pt"
+    torch.save(model.state_dict(), path)
+    return path
+
+
+def test_load_pretrained_encoder_larger_source_warns(tmp_path):
+    """Encoder tensors with no place in the model (a deeper source) warn."""
+    from mist.models.resenc.mist_resenc import ResEncUNet
+
+    path = _saved_resenc(tmp_path, [64, 64, 64])  # five stages
+    target = ResEncUNet(1, 2, [32, 32, 32], [1.0, 1.0, 1.0], use_deep_supervision=False)
+    with pytest.warns(UserWarning, match=r"encoder tensors .* have no counterpart.*larger"):
+        _, summary = load_pretrained_encoder(target, str(path))
+    assert summary["skipped"] == []  # every target tensor still loads
+
+
+def test_load_pretrained_encoder_matching_source_does_not_warn(tmp_path):
+    """A source of the same size loads without the larger-source warning."""
+    import warnings
+
+    from mist.models.resenc.mist_resenc import ResEncUNet
+
+    path = _saved_resenc(tmp_path, [32, 32, 32])
+    target = ResEncUNet(1, 2, [32, 32, 32], [1.0, 1.0, 1.0], use_deep_supervision=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
         load_pretrained_encoder(target, str(path))
 
 

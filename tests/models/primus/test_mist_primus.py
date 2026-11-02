@@ -120,3 +120,35 @@ def test_primus_pretrained_transfer_across_patch_size_and_channels(tmp_path):
     assert "eva.pos_embed" in summary["loaded"]
     key = "eva.blocks.1.mlp.fc2.weight"
     assert torch.equal(target.state_dict()[key], source.state_dict()[key])
+
+
+# SHA-256 of the sorted "name:shape" lines of the encoder tensors ("eva.*" and
+# "down_projection.*") in the nnFoundationViT checkpoint's network_weights
+# (huggingface.co/MIC-DKFZ/nnFoundationViT, checkpoint_final.pth). The
+# checkpoint is 2.7 GB, so the fingerprint stands in for it. With the weights
+# loaded, primus-x was verified to match the encoder output of nnU-Net's own
+# Primus exactly.
+NNFOUNDATION_VIT_ENCODER_TENSORS = 925
+NNFOUNDATION_VIT_ENCODER_FINGERPRINT = (
+    "fa9f488e3632cc8acea3c2d9e50afb48d6f43078da1a066d2f690f88ea2f0127"
+)
+
+
+def test_primus_x_encoder_matches_nnfoundation_vit_checkpoint():
+    """At 192^3, every primus-x encoder name and shape matches nnFoundationViT.
+
+    A failure means a change to Primus broke loading nnFoundationViT, whose
+    40-layer encoder only loads in full into primus-x.
+    """
+    import hashlib
+
+    from mist.models.model_registry import get_model_from_registry
+
+    model = get_model_from_registry(
+        "primus-x", in_channels=1, out_channels=1, patch_size=[192] * 3, target_spacing=[1] * 3
+    )
+    lines = sorted(f"{k}:{tuple(v.shape)}" for k, v in model.get_encoder_state_dict().items())
+    assert len(lines) == NNFOUNDATION_VIT_ENCODER_TENSORS
+    assert hashlib.sha256("\n".join(lines).encode()).hexdigest() == (
+        NNFOUNDATION_VIT_ENCODER_FINGERPRINT
+    )
