@@ -13,6 +13,15 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Changed
 
+- **Predictions are restored to the original image space by resampling class
+  probabilities, then taking the argmax**, as nnU-Net does. Previously MIST
+  took the argmax at the training spacing and resampled the labels. This helps
+  most for small or thin structures when the original images are finer than
+  the training spacing; along the low-resolution axis of anisotropic images
+  both use nearest-neighbor interpolation, so nothing changes there. Classes
+  are resampled one at a time, so memory doesn't grow with the number of
+  classes. This applies to cross-validation predictions and to `mist_infer`,
+  including for models trained with earlier versions.
 - **Which model is saved to `models/` now depends on `val_percent`.** With the
   default `val_percent` of `0.0`, the saved model is the final-epoch model.
   Previously it was the model with the lowest loss on the held-out fold, which

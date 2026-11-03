@@ -384,9 +384,9 @@ def infer_runner(mock_mist_config, monkeypatch, tmp_path):
 # ============================
 
 
-@patch("mist.inference.inference_utils.back_to_original_space")
+@patch("mist.inference.inference_utils.labels_from_probabilities_in_original_space")
 def test_predict_single_example_no_remap_no_crop(
-    mock_back_to_original_space,
+    mock_labels_from_probabilities,
     mock_mist_config,
     monkeypatch,
 ):
@@ -399,7 +399,7 @@ def test_predict_single_example_no_remap_no_crop(
     monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
 
     mocked_img = _make_sitk_image(np.ones((2, 2, 2), dtype=np.int64))
-    mock_back_to_original_space.return_value = mocked_img
+    mock_labels_from_probabilities.return_value = mocked_img
 
     pre_img = torch.randn(1, 1, 2, 2, 2)
     orig_image = _make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64))
@@ -412,10 +412,12 @@ def test_predict_single_example_no_remap_no_crop(
         foreground_bounding_box=None,
     )
 
-    call_kwargs = mock_back_to_original_space.call_args.kwargs
+    # The probabilities, not argmax labels, are restored to original space.
+    call_kwargs = mock_labels_from_probabilities.call_args.kwargs
     assert call_kwargs["original_image"] is orig_image
-    np.testing.assert_array_equal(call_kwargs["raw_prediction"], np.ones((2, 2, 2)))
-    assert call_kwargs["training_labels"] == [0, 1]
+    assert call_kwargs["raw_probabilities"].shape == (2, 2, 2, 2)
+    np.testing.assert_array_equal(call_kwargs["raw_probabilities"][1], np.ones((2, 2, 2)))
+    assert call_kwargs["target_spacing"] == tuple(cfg["spatial_config"]["target_spacing"])
     assert call_kwargs["foreground_bounding_box"] is None
     assert isinstance(out, sitk.Image)
     assert out.GetPixelID() == sitk.sitkUInt8
@@ -424,11 +426,11 @@ def test_predict_single_example_no_remap_no_crop(
 
 
 @patch("mist.inference.inference_utils.remap_mask_labels")
-@patch("mist.inference.inference_utils.back_to_original_space")
+@patch("mist.inference.inference_utils.labels_from_probabilities_in_original_space")
 @patch("mist.preprocessing.preprocessing_utils.get_fg_mask_bbox")
 def test_predict_single_example_with_crop_and_remap(
     mock_get_fg_bbox,
-    mock_back_to_original_space,
+    mock_labels_from_probabilities,
     mock_remap_labels,
     mock_mist_config,
     monkeypatch,
@@ -445,7 +447,7 @@ def test_predict_single_example_with_crop_and_remap(
     mock_get_fg_bbox.return_value = bbox
 
     restored_image = _make_sitk_image(np.full((2, 2, 2), 1, dtype=np.int64))
-    mock_back_to_original_space.return_value = restored_image
+    mock_labels_from_probabilities.return_value = restored_image
 
     remapped = np.full((2, 2, 2), 2, dtype=np.int64)
     mock_remap_labels.return_value = remapped
@@ -462,9 +464,8 @@ def test_predict_single_example_with_crop_and_remap(
     )
 
     mock_get_fg_bbox.assert_called_once_with(orig_image)
-    call_kwargs = mock_back_to_original_space.call_args.kwargs
+    call_kwargs = mock_labels_from_probabilities.call_args.kwargs
     assert call_kwargs["foreground_bounding_box"] == bbox
-    assert call_kwargs["training_labels"] == [0, 1]
     mock_remap_labels.assert_called_once()
     np.testing.assert_array_equal(
         mock_remap_labels.call_args.args[0], sitk_io.array_from_image(restored_image)
@@ -520,9 +521,9 @@ def test_predict_single_example_skip_true_bypasses_spatial_restore(
 
 
 @patch("mist.inference.inference_utils.probabilities_back_to_original_space")
-@patch("mist.inference.inference_utils.back_to_original_space")
+@patch("mist.inference.inference_utils.labels_from_probabilities_in_original_space")
 def test_predict_single_example_output_probs_no_crop_no_skip(
-    mock_back_to_original_space,
+    mock_labels_from_probabilities,
     mock_probs_back_to_original_space,
     mock_mist_config,
     monkeypatch,
@@ -535,7 +536,9 @@ def test_predict_single_example_output_probs_no_crop_no_skip(
 
     monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
 
-    mock_back_to_original_space.return_value = _make_sitk_image(np.ones((2, 2, 2), dtype=np.int64))
+    mock_labels_from_probabilities.return_value = _make_sitk_image(
+        np.ones((2, 2, 2), dtype=np.int64)
+    )
     probs_sentinel = object()
     mock_probs_back_to_original_space.return_value = probs_sentinel
 
@@ -559,6 +562,32 @@ def test_predict_single_example_output_probs_no_crop_no_skip(
     assert call_kwargs["foreground_bounding_box"] is None
 
 
+@patch("mist.inference.inference_utils.labels_from_probabilities_in_original_space")
+def test_predict_single_example_skip_true_does_not_resample_probabilities(
+    mock_labels_from_probabilities,
+    mock_mist_config,
+    monkeypatch,
+):
+    """Without preprocessing, the argmax is already in original space."""
+    cfg = copy.deepcopy(mock_mist_config)
+    cfg["model"]["params"]["out_channels"] = 2
+    cfg["preprocessing"]["skip"] = True
+    cfg["dataset_info"]["labels"] = [0, 1]
+
+    monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
+
+    out, _ = ir.predict_single_example(
+        preprocessed_image=torch.randn(1, 1, 2, 2, 2),
+        original_image=_make_sitk_image(np.zeros((2, 2, 2), dtype=np.int64)),
+        mist_configuration=cfg,
+        predictor=_predictor_logits_two_class,
+        foreground_bounding_box=None,
+    )
+
+    mock_labels_from_probabilities.assert_not_called()
+    assert np.all(sitk_io.array_from_image(out) == 1)
+
+
 def test_predict_single_example_output_probs_false_returns_none(mock_mist_config, monkeypatch):
     """output_probs=False (the default) always returns None for probs."""
     cfg = copy.deepcopy(mock_mist_config)
@@ -569,7 +598,7 @@ def test_predict_single_example_output_probs_false_returns_none(mock_mist_config
     monkeypatch.setattr(ir, "ic", SimpleNamespace(ARGMAX_AXIS=1, BATCH_AXIS=0), raising=False)
     monkeypatch.setattr(
         ir.inference_utils,
-        "back_to_original_space",
+        "labels_from_probabilities_in_original_space",
         MagicMock(return_value=_make_sitk_image(np.ones((2, 2, 2), dtype=np.int64))),
     )
 

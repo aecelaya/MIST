@@ -1331,6 +1331,22 @@ Adjusting this value can improve convergence on highly imbalanced datasets, but
 setting it too high may reduce the model’s ability to distinguish foreground
 from background.
 
+## Restoring predictions to the original image space
+
+The network predicts at the training spacing (`spatial_config.target_spacing`),
+so each prediction is resampled back to the original image's spacing and size.
+MIST resamples each class's probabilities with linear interpolation, then takes
+the argmax at the original resolution, as nnU-Net does. Boundaries therefore
+follow the network's confidence rather than an upsampled label map, which helps
+most for small or thin structures when the original images are finer than the
+training spacing. Along the low-resolution axis of anisotropic images, MIST
+uses nearest-neighbor interpolation instead, as it does when preprocessing.
+
+The classes are resampled one at a time, so memory use at the original
+resolution does not grow with the number of classes. When preprocessing is
+skipped, predictions are already in the original image space and nothing is
+resampled.
+
 ## Accelerator support (NVIDIA, AMD ROCm, CPU)
 
 MIST auto-detects the accelerator it's running on — NVIDIA CUDA, AMD ROCm, or
