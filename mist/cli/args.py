@@ -103,13 +103,6 @@ def add_analyzer_args(parser: ArgParser) -> None:
         "--verify",
         help=("Verify dataset integrity before analysis (checks headers, dimensions, etc.)."),
     )
-    parser.flag(
-        "--data-dump",
-        help=(
-            "Save a detailed data dump (data_dump.json and data_dump.md) "
-            "alongside the configuration."
-        ),
-    )
     parser.boolean_flag(
         "--overwrite",
         default=False,

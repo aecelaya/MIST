@@ -49,33 +49,6 @@ class AnalyzeConstants:
     # How many digits are printed for floating point numbers.
     PRINT_FLOATING_POINT_PRECISION = 4
 
-    # Maximum number of voxel coordinates sampled per label per patient for
-    # PCA-based shape descriptor computation.
-    MAX_SHAPE_COORDS = 10_000
-
-    # Labels with more voxels than this are skipped for skeletonization to
-    # bound compute time. Structures this large are rarely thin/tubular.
-    MAX_SKELETON_VOXELS = 500_000
-
-    # Skeleton ratio threshold for flagging a label as tubular/branching.
-    # Above this fraction of label voxels lie on the medial axis → thin
-    # branching structure; clDice loss is recommended.
-    TUBULAR_SKELETON_RATIO_THRESHOLD = 0.05
-
-    # Two-tier image-fraction thresholds. Labels below VERY_SPARSE get the
-    # "very sparse" observation; labels in [VERY_SPARSE, SPARSE) get "sparse".
-    # Both are relative to the effective image volume (fg bbox when
-    # crop_to_foreground is enabled, otherwise full original image).
-    # Distinct from size_category, which is relative to foreground only.
-    VERY_SPARSE_IMAGE_FRACTION_PCT_THRESHOLD = 1.0
-    SPARSE_IMAGE_FRACTION_PCT_THRESHOLD = 5.0
-
-    # Size categories considered "small" for the resampling warning. Labels
-    # in these categories that are also geometrically thin may lose structural
-    # detail when resampled to a heuristic target spacing derived from
-    # whole-image statistics.
-    SMALL_STRUCTURE_SIZE_CATEGORIES = frozenset({"tiny", "small"})
-
     # Minimum patch size along the low-resolution (anisotropic) axis in the
     # quasi-2D patch selection mode. With a 3×3×3 kernel, at least 5 voxels
     # are needed in the low-res axis to ensure the kernel has genuine

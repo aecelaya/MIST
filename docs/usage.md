@@ -63,8 +63,6 @@ results/
     test_paths.csv              (only if test-data is set in dataset JSON)
     evaluation_paths.csv
     results.csv
-    data_dump.json              (only with --data-dump)
-    data_dump.md                (only with --data-dump)
 ```
 
 ### Breakdown of outputs
@@ -81,8 +79,6 @@ results/
 | `test_paths.csv`       | Paths to test images/masks. Only produced when `test-data` is set in the dataset JSON.                                           |
 | `evaluation_paths.csv` | Ground truth and prediction paths used for cross-validation evaluation.                                                          |
 | `results.csv`          | Per-patient and aggregate evaluation metrics from cross-validation.                                                              |
-| `data_dump.json`       | Structured dataset statistics (machine-readable). Only produced with `--data-dump`.                                              |
-| `data_dump.md`         | Narrative dataset summary. Only produced with `--data-dump`.                                                                     |
 
 ## Analysis
 
@@ -104,8 +100,6 @@ following arguments:
   _(default: 1)_
 - `--verify`: Verify dataset integrity before analysis (checks headers,
   dimensions, and that all declared files are present).
-- `--data-dump`: Save extended dataset statistics alongside `config.json`
-  (`data_dump.json` and `data_dump.md`). See [Data Dump](#data-dump) below.
 - `--overwrite`: Overwrite previous results/configuration.
 
 !!! note
@@ -124,52 +118,6 @@ Run the MIST analysis pipeline.
 mist_analyze --data /path/to/dataset.json \
              --results /path/to/analysis/results
 ```
-
-### Data Dump
-
-!!! warning "Experimental feature"
-
-    The data dump is still under active development. The statistics and
-    shape descriptors it reports are useful today, but the format of
-    `data_dump.json`/`data_dump.md` and the set of fields they contain may
-    still change. You are welcome to try it, but you may encounter rough
-    edges. If you run into problems, please
-    [open an issue on GitHub](https://github.com/mist-medical/MIST/issues).
-
-When the `--data-dump` flag is passed, the analysis step produces two additional
-files alongside `config.json`: `data_dump.json` and `data_dump.md`.
-
-`data_dump.json` contains a full structured summary of the dataset statistics,
-including:
-
-- **Spacing and anisotropy** – per-axis voxel spacing statistics and anisotropy
-  ratio.
-- **Image dimensions** – original and estimated resampled dimensions.
-- **Intensity distributions** – per-channel foreground intensity statistics
-  (mean, std, and key percentiles).
-- **Label statistics** – per-label voxel counts, presence rates, volume
-  fractions (relative to both foreground and the effective image region), and
-  shape descriptors:
-  - **PCA-based descriptors** — three shape metrics derived from the eigenvalues
-    of the label's spatial covariance matrix:
-    - _Linearity_: how much the shape extends along a single axis (high for
-      elongated structures such as vessels).
-    - _Planarity_: how much the shape lies in a plane (high for disc-like
-      structures).
-    - _Sphericity_: how uniformly the shape extends in all directions (high for
-      compact, roughly spherical structures).
-  - **Isoperimetric Quotient (IQ)** measuring compactness relative to a sphere.
-  - **Skeleton ratio** — the fraction of label voxels on the morphological
-    medial axis, which is the primary signal for thin, branching structures such
-    as vessels or airways.
-- **Observations** – auto-generated notes flagging anisotropy, sparse labels,
-  thin/branching structures, and other dataset characteristics that may
-  influence architecture or loss function choices.
-
-`data_dump.md` is a human-readable Markdown version of the same statistics,
-pre-filled with metric definitions and auto-generated observations. It is
-intended to be reviewed and annotated by the user before being passed to an LLM
-for architecture and training configuration advice.
 
 ## Preprocessing
 

@@ -41,6 +41,12 @@ All notable changes to MIST are listed here, newest first. MIST follows
   `target_spacing` (pretrained without resampling) or a missing `spatial_config`
   warns that spacing can't be checked instead of failing.
 
+### Removed
+
+- The experimental `mist_analyze --data-dump` option (`data_dump.json` and
+  `data_dump.md`). Dataset summaries for LLM-assisted configuration will live in
+  a separate tool.
+
 ### Fixed
 
 - Documentation: `--pretrained-config` is optional, not required.

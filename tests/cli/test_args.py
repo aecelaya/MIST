@@ -196,7 +196,6 @@ def test_add_analyzer_args_defaults_and_parsing():
     assert ns.results is None
     assert ns.nfolds is None
     assert ns.verify is False
-    assert ns.data_dump is False
     assert ns.overwrite is False
 
     # Explicit values.
@@ -209,7 +208,6 @@ def test_add_analyzer_args_defaults_and_parsing():
             "--nfolds",
             "3",
             "--verify",
-            "--data-dump",
             "--overwrite",
         ]
     )
@@ -217,7 +215,6 @@ def test_add_analyzer_args_defaults_and_parsing():
     assert ns.results == "out"
     assert ns.nfolds == 3
     assert ns.verify is True
-    assert ns.data_dump is True
     assert ns.overwrite is True
 
 

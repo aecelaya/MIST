@@ -227,7 +227,6 @@ def test_run_all_entry_forwards_subsets_correctly(monkeypatch, tmp_path):
         "nfolds",
         "num_workers_analyze",
         "verify",
-        "data_dump",
         "overwrite",
     ]
     preprocess_keys = [
