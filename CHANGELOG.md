@@ -3,6 +3,15 @@
 All notable changes to MIST are listed here, newest first. MIST follows
 [semantic versioning](https://semver.org/) from 2.3.0 onward.
 
+## 2.5.0 — Unreleased
+
+### Fixed
+
+- The transfer summary printed at the start of training no longer double-counts
+  parameters registered under two names (e.g., `resenc`'s convolutions), which
+  made nnFoundationCNN report about 180.6M loaded parameters instead of about
+  90.3M. Only the printout was affected.
+
 ## 2.4.0 — 2026-11-02
 
 ### Added
