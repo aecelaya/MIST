@@ -71,7 +71,7 @@ results/
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `checkpoints/`         | Per-fold training checkpoints used by `--resume` to continue interrupted runs.                                                   |
 | `logs/`                | TensorBoard logs for each fold.                                                                                                  |
-| `models/`              | Trained PyTorch model weights for each fold (`fold_0.pt`, `fold_1.pt`, …).                                                       |
+| `models/`              | Trained PyTorch model weights for each fold (`fold_0.pt`, `fold_1.pt`, …): the final-epoch model, or the best model if `val_percent` > 0. |
 | `predictions/`         | Cross-validation predictions and test-set predictions (if a test set was provided).                                              |
 | `config.json`          | Full pipeline configuration (target spacing, normalization, patch size, model, loss, etc.). Required by all downstream commands. |
 | `fg_bboxes.csv`        | Foreground bounding box for each training image, used to restore predictions to original space.                                  |
@@ -211,9 +211,14 @@ the following arguments:
 - `--optimizer`: Optimizer _(default: `adamw`)_.
 - `--l2-penalty`: L2 penalty (weight decay). _(default: `0.0001`)_
 - `--folds`: Specify which folds to run. If not provided, all folds are trained.
-- `--val-percent`: Specify a percentage of the training data to set aside as a
-  validation set. If not specified, we use the entire held out fold as a
-  validation set during training.
+- `--val-percent`: Percentage of each fold's training data to set aside as a
+  validation set. If above `0.0`, the model with the lowest smoothed validation
+  loss is saved; otherwise, the held-out fold is used for validation and the
+  final-epoch model is saved. See
+  [Custom cross validation](advanced_topics.md#custom-cross-validation) for details.
+  _(default: `0.0`)_
+- `--validate-every`: Run validation every N epochs. Validation always runs on
+  the last epoch. _(default: `1`)_
 - `--resume`: Resume training from the latest checkpoint. See
   [Resuming training](#resuming-training) for details.
 
@@ -276,7 +281,7 @@ mist_train --numpy /path/to/preprocessed/data \
 MIST saves a checkpoint at the end of every completed epoch to
 `results/checkpoints/fold_{fold}_checkpoint.pt`. The checkpoint stores the full
 training state: model weights, optimizer state, learning rate scheduler state,
-epoch index, global step, and best validation loss.
+epoch index, global step, and the best and smoothed validation losses.
 
 On resume:
 

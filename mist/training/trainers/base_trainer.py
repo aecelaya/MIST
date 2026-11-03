@@ -243,6 +243,10 @@ class BaseTrainer(ABC):
         if self.mist_args.val_percent is not None:
             self.config["training"]["val_percent"] = float(self.mist_args.val_percent)
 
+        # Overwrite how often validation runs if specified in command line.
+        if getattr(self.mist_args, "validate_every", None) is not None:
+            self.config["training"]["validate_every"] = int(self.mist_args.validate_every)
+
         # Resolve AMP against the current hardware. BF16 autocast is only
         # hardware-accelerated on Ampere or newer GPUs; downgrade to FP32 on
         # pre-Ampere/CPU. Resolving here (once, in the parent process) persists
@@ -344,6 +348,18 @@ class BaseTrainer(ABC):
 
         if tr_old["l2_penalty"] != tr_new["l2_penalty"]:
             warnings.append(f"  --l2-penalty: {tr_old['l2_penalty']} → {tr_new['l2_penalty']}")
+
+        if tr_old["val_percent"] != tr_new["val_percent"]:
+            warnings.append(
+                f"  --val-percent: {tr_old['val_percent']} → {tr_new['val_percent']} "
+                "(changes the validation split and whether the best or final "
+                "model is saved)"
+            )
+
+        old_every = tr_old.get("validate_every", 1)
+        new_every = tr_new.get("validate_every", 1)
+        if old_every != new_every:
+            warnings.append(f"  --validate-every: {old_every} → {new_every}")
 
         if warnings:
             print_warning(
@@ -483,6 +499,15 @@ class BaseTrainer(ABC):
                 (train_images, val_images, train_labels, val_labels, *maybe_dtms) = splits
                 if self._use_dtms():
                     train_dtms, _ = maybe_dtms
+
+                if len(val_images) < TrainerConstants.MIN_VAL_CASES_FOR_SELECTION:
+                    print_warning(
+                        f"Fold {fold}: val_percent={training['val_percent']} holds "
+                        f"out only {len(val_images)} of {len(train_images) + len(val_images)} "
+                        "training cases for validation, so selecting the best "
+                        "model will be noisy. Consider a larger val_percent or "
+                        "val_percent 0.0 to use the final-epoch model."
+                    )
 
             # Sanity check the fold data.
             training_utils.sanity_check_fold_data(
@@ -641,6 +666,7 @@ class BaseTrainer(ABC):
             "epoch": 0,
             "global_step": 0,
             "best_val_loss": np.inf,
+            "smoothed_val_loss": None,
             "alpha": 0.5,
         }
 
@@ -666,6 +692,7 @@ class BaseTrainer(ABC):
             "epoch": state["epoch"],
             "global_step": state["global_step"],
             "best_val_loss": state["best_val_loss"],
+            "smoothed_val_loss": state["smoothed_val_loss"],
             "model_state_dict": unwrapped.state_dict(),
             "optimizer_state_dict": state["optimizer"].state_dict(),
             "lr_scheduler_state_dict": state["lr_scheduler"].state_dict(),
@@ -721,6 +748,9 @@ class BaseTrainer(ABC):
         state["epoch"] = checkpoint["epoch"] + 1
         state["global_step"] = checkpoint["global_step"]
         state["best_val_loss"] = checkpoint["best_val_loss"]
+        # Checkpoints written before 2.5.0 have no smoothed loss; smoothing
+        # restarts from the next validation.
+        state["smoothed_val_loss"] = checkpoint.get("smoothed_val_loss")
 
         return True
 
@@ -758,6 +788,52 @@ class BaseTrainer(ABC):
         if dist.is_initialized():
             dist.destroy_process_group()
 
+    @staticmethod
+    def _save_model(state: dict[str, Any], model_name: str) -> None:
+        """Save the model weights used for inference (rank 0 only).
+
+        Unwraps DDP so the weights load cleanly in non-DDP contexts.
+        """
+        model = state["model"]
+        to_save = model.module if hasattr(model, "module") else model
+        torch.save(to_save.state_dict(), model_name)
+
+    def _update_best_model(
+        self, state: dict[str, Any], val_mean_loss: float, model_name: str
+    ) -> None:
+        """Smooth the validation loss and save the model if it improved.
+
+        The loss is smoothed with an exponential moving average so that a
+        single lucky epoch does not pick the model.
+
+        Args:
+            state: The current training state dictionary.
+            val_mean_loss: Mean validation loss for this epoch.
+            model_name: Path to save the best model to.
+        """
+        decay = TrainerConstants.VAL_LOSS_EMA_DECAY
+        previous = state["smoothed_val_loss"]
+        smoothed = (
+            val_mean_loss
+            if previous is None or not np.isfinite(previous)
+            else decay * previous + (1.0 - decay) * val_mean_loss
+        )
+        state["smoothed_val_loss"] = smoothed
+
+        if smoothed < state["best_val_loss"]:
+            print_success(
+                f"Smoothed validation loss improved from "
+                f"{state['best_val_loss']:.4f} to {smoothed:.4f} "
+                f"(this epoch: {val_mean_loss:.4f})"
+            )
+            state["best_val_loss"] = smoothed
+            self._save_model(state, model_name)
+        else:
+            print_info(
+                f"Smoothed validation loss did not improve ({smoothed:.4f}; "
+                f"this epoch: {val_mean_loss:.4f})."
+            )
+
     def train_fold(self, fold: int, rank: int, world_size: int) -> None:
         """Generic training loop for a single fold."""
         # Set up for distributed training.
@@ -778,6 +854,15 @@ class BaseTrainer(ABC):
                 "of GPUs being used or reduce the number of GPUs."
             )
         val_steps = math.ceil(len(fold_data["val_images"]) / max(1, world_size))
+
+        # Model selection and validation frequency. Only a validation split
+        # carved from the training data (val_percent > 0) may pick the best
+        # model; otherwise the held-out fold would choose its own model and
+        # bias the cross-validation results.
+        training = self.config["training"]
+        select_best = training["val_percent"] > 0.0
+        validate_every = training.get("validate_every", 1)
+        last_epoch = training["epochs"] - 1
 
         # Build components for the fold.
         state = self.build_components(rank=rank, world_size=world_size)
@@ -807,7 +892,8 @@ class BaseTrainer(ABC):
             # Set up tensorboard summary writer.
             logs_writer = SummaryWriter(str(self.logs_dir / f"fold_{fold}"))
 
-            # Path and name for best model for this fold.
+            # Path for the model used for inference: the best model when a
+            # validation split is held out, otherwise the final-epoch model.
             model_name = str(self.models_dir / f"fold_{fold}.pt")
 
         # Stop training flag if we encounter nan or inf losses. Same
@@ -899,69 +985,66 @@ class BaseTrainer(ABC):
             if use_ddp:
                 dist.barrier()
 
+            # Validate every `validate_every` epochs and always on the last
+            # epoch, so the curve ends on the model that training finishes with.
+            run_validation = (epoch + 1) % validate_every == 0 or epoch == last_epoch
+
             # Run the validation steps for this epoch. Rank 0 shows a progress
-            # bar and tracks best loss; other ranks run silently.
-            state["model"].eval()
-            with torch.inference_mode():
-                pbv_ctx = (
-                    progress_bar.ValidationProgressBar(val_steps)
-                    if rank == 0
-                    else contextlib.nullcontext()
-                )
-                with pbv_ctx as pbv:
-                    for _ in range(val_steps):
-                        # Get a batch of validation data.
-                        batch = val_loader.next()[0]
+            # bar and tracks the loss; other ranks run silently.
+            if run_validation:
+                state["model"].eval()
+                with torch.inference_mode():
+                    pbv_ctx = (
+                        progress_bar.ValidationProgressBar(val_steps)
+                        if rank == 0
+                        else contextlib.nullcontext()
+                    )
+                    with pbv_ctx as pbv:
+                        for _ in range(val_steps):
+                            # Get a batch of validation data.
+                            batch = val_loader.next()[0]
 
-                        # Compute validation loss.
-                        val_loss = self.validation_step(state=state, data=batch)
+                            # Compute validation loss.
+                            val_loss = self.validation_step(state=state, data=batch)
 
-                        # Aggregate mean across ranks.
-                        val_det = val_loss.detach()
-                        if use_ddp:
-                            dist.all_reduce(val_det, op=dist.ReduceOp.SUM)
-                            mean_val = (val_det / world_size).item()
-                        else:
-                            mean_val = val_det.item()
+                            # Aggregate mean across ranks.
+                            val_det = val_loss.detach()
+                            if use_ddp:
+                                dist.all_reduce(val_det, op=dist.ReduceOp.SUM)
+                                mean_val = (val_det / world_size).item()
+                            else:
+                                mean_val = val_det.item()
 
-                        # Update running average and progress bar (rank 0 only).
-                        if rank == 0:
-                            val_mean_loss = running_val_loss(mean_val)
-                            pbv.update(loss=val_mean_loss)
+                            # Update running average and progress bar (rank 0 only).
+                            if rank == 0:
+                                val_mean_loss = running_val_loss(mean_val)
+                                pbv.update(loss=val_mean_loss)
 
-                # Check if validation loss improved and save model (rank 0 only).
                 if rank == 0:
-                    if val_mean_loss < state["best_val_loss"]:
-                        print_success(
-                            f"Validation loss improved from "
-                            f"{state['best_val_loss']:.4f} to "
-                            f"{val_mean_loss:.4f}"
-                        )
-
-                        # Update the best validation loss.
-                        state["best_val_loss"] = val_mean_loss
-
-                        # Save the model. Unwrap DDP so it loads cleanly in
-                        # non-DDP contexts.
-                        to_save = (
-                            state["model"].module
-                            if hasattr(state["model"], "module")
-                            else state["model"]
-                        )
-                        torch.save(to_save.state_dict(), model_name)
+                    if select_best:
+                        self._update_best_model(state, val_mean_loss, model_name)
                     else:
-                        print_info("Validation loss did not improve.")
+                        print_info(f"Validation loss: {val_mean_loss:.4f}")
 
-            # Reset the dataloaders for the next epoch.
+            # Without a validation split, the saved model is the final one.
+            # Save it before the last checkpoint so that a fold whose last
+            # checkpoint exists (and is skipped on resume) always has a model.
+            if rank == 0 and not select_best and epoch == last_epoch:
+                self._save_model(state, model_name)
+
+            # Reset the dataloaders for the next epoch. The validation loader
+            # is only reset after a pass over it.
             train_loader.reset()
-            val_loader.reset()
+            if run_validation:
+                val_loader.reset()
 
             # Log the running losses to tensorboard.
             if rank == 0:
-                summary_data = {
-                    "train": float(train_mean_loss),
-                    "validation": float(val_mean_loss),
-                }
+                summary_data = {"train": float(train_mean_loss)}
+                if run_validation:
+                    summary_data["validation"] = float(val_mean_loss)
+                    if select_best:
+                        summary_data["validation_smoothed"] = float(state["smoothed_val_loss"])
                 logs_writer.add_scalars("losses", summary_data, epoch + 1)
 
                 # Log learning rate.

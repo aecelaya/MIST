@@ -933,7 +933,7 @@ def test_validation_else_branch_rank_nonzero(tmp_pipeline, mist_args, monkeypatc
 
 
 def test_validation_no_improvement_message(tmp_pipeline, mist_args, monkeypatch):
-    """Test that validation step logs no improvement message."""
+    """With a validation split, a non-improving epoch logs a message."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True, raising=False)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1, raising=False)
     monkeypatch.setattr(torch.cuda, "set_device", lambda idx: None, raising=False)
@@ -943,6 +943,7 @@ def test_validation_no_improvement_message(tmp_pipeline, mist_args, monkeypatch)
 
     trainer.folds[0]["steps_per_epoch"] = 1
     trainer.folds[0]["val_images"] = ["val0", "val1"]
+    trainer.config["training"]["val_percent"] = 0.5
 
     monkeypatch.setattr(trainer, "setup", lambda *a, **k: None)
 
@@ -951,7 +952,7 @@ def test_validation_no_improvement_message(tmp_pipeline, mist_args, monkeypatch)
 
     trainer.train_fold(fold=0, rank=0, world_size=1)
 
-    assert any("Validation loss did not improve" in s for s in out)
+    assert any("Smoothed validation loss did not improve" in s for s in out)
 
 
 def test_run_cross_validation_rank0_prints_and_calls_all_folds(
@@ -1433,7 +1434,8 @@ def test_check_resume_overrides_warns_on_all_training_diffs(tmp_pipeline, monkey
         learning_rate=0.001,  # differs from 0.01
         lr_scheduler="cosine",  # differs from "constant"
         warmup_epochs=3,  # differs from missing/0
-        val_percent=None,
+        val_percent=0.5,  # differs from 0.0
+        validate_every=2,  # differs from missing/1
         resume=True,
     )
 
@@ -1450,6 +1452,8 @@ def test_check_resume_overrides_warns_on_all_training_diffs(tmp_pipeline, monkey
     assert "--lr-scheduler" in combined
     assert "--warmup-epochs" in combined
     assert "--l2-penalty" in combined
+    assert "--val-percent" in combined
+    assert "--validate-every" in combined
 
 
 # =============================================
@@ -1650,3 +1654,197 @@ def test_train_fold_logs_alpha_for_composite_loss(tmp_pipeline, mist_args, monke
     # Each logged alpha value should be the fixed 0.7 returned by the stub.
     for _, value, _ in alpha_entries:
         assert value == pytest.approx(0.7)
+
+
+# =============================================
+# Model selection and validation frequency
+# =============================================
+
+
+class SequenceValTrainer(DummyTrainer):
+    """DummyTrainer whose validation loss follows a per-epoch sequence."""
+
+    def __init__(self, mist_args, val_losses):
+        self._val_losses = list(val_losses)
+        self.val_calls = []
+        super().__init__(mist_args)
+
+    def validation_step(self, **kwargs):
+        """Return this epoch's validation loss and record the call."""
+        epoch = kwargs["state"]["epoch"]
+        self.val_calls.append(epoch)
+        return torch.tensor(self._val_losses[epoch])
+
+
+def _set_epochs(results, epochs, **training):
+    """Rewrite config.json with the given epoch count and training keys."""
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["epochs"] = epochs
+    cfg["training"].update(training)
+    cfg_path.write_text(json.dumps(cfg))
+
+
+@pytest.fixture
+def saved_model_epochs(monkeypatch):
+    """Record the epoch at which each inference model is saved."""
+    saved = []
+    monkeypatch.setattr(
+        bt.BaseTrainer,
+        "_save_model",
+        staticmethod(lambda state, model_name: saved.append(state["epoch"])),
+    )
+    return saved
+
+
+def test_final_model_saved_once_on_last_epoch(tmp_pipeline, mist_args, saved_model_epochs):
+    """Without a validation split, only the final-epoch model is saved."""
+    results, _ = tmp_pipeline
+    _set_epochs(results, 3)
+
+    # Validation improves every epoch, which used to save each time.
+    trainer = SequenceValTrainer(mist_args, val_losses=[0.9, 0.5, 0.1])
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+
+    assert saved_model_epochs == [2]
+
+
+def test_final_model_saved_even_if_validation_never_improves(
+    tmp_pipeline, mist_args, saved_model_epochs
+):
+    """The final-epoch model is saved regardless of the validation loss."""
+    results, _ = tmp_pipeline
+    _set_epochs(results, 2)
+
+    trainer = SequenceValTrainer(mist_args, val_losses=[float("inf"), float("inf")])
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+
+    assert saved_model_epochs == [1]
+
+
+def test_best_model_uses_smoothed_validation_loss(tmp_pipeline, mist_args, saved_model_epochs):
+    """With a validation split, the best smoothed loss picks the saved model."""
+    results, _ = tmp_pipeline
+    _set_epochs(results, 4)
+
+    # A single low epoch (0.1) moves the smoothed loss only a little.
+    trainer = SequenceValTrainer(mist_args, val_losses=[1.0, 0.1, 1.0, 1.0])
+    trainer.config["training"]["val_percent"] = 0.5
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+
+    # Smoothed: 1.0, 0.91, 0.919, 0.9271 -> improves at epochs 0 and 1 only.
+    assert saved_model_epochs == [0, 1]
+
+
+def test_update_best_model_smoothing_math(tmp_pipeline, mist_args, saved_model_epochs):
+    """The smoothed loss is an EMA with the configured decay."""
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+
+    trainer._update_best_model(state, 1.0, "unused.pt")
+    assert state["smoothed_val_loss"] == pytest.approx(1.0)
+    assert state["best_val_loss"] == pytest.approx(1.0)
+
+    trainer._update_best_model(state, 0.0, "unused.pt")
+    decay = bt.TrainerConstants.VAL_LOSS_EMA_DECAY
+    assert state["smoothed_val_loss"] == pytest.approx(decay)
+    assert state["best_val_loss"] == pytest.approx(decay)
+    assert len(saved_model_epochs) == 2
+
+
+def test_update_best_model_restarts_after_non_finite(tmp_pipeline, mist_args, saved_model_epochs):
+    """A non-finite smoothed loss restarts smoothing at the next value."""
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+
+    trainer._update_best_model(state, float("inf"), "unused.pt")
+    assert saved_model_epochs == []
+
+    trainer._update_best_model(state, 0.3, "unused.pt")
+    assert state["smoothed_val_loss"] == pytest.approx(0.3)
+    assert len(saved_model_epochs) == 1
+
+
+def test_validate_every_skips_epochs_but_always_runs_last(tmp_pipeline, mist_args, monkeypatch):
+    """Validation runs every N epochs and on the last epoch only."""
+    results, _ = tmp_pipeline
+    _set_epochs(results, 5, validate_every=2)
+
+    writers = []
+
+    class CapturingWriter(DummySummaryWriter):
+        def __init__(self, log_dir):
+            super().__init__(log_dir)
+            writers.append(self)
+
+    monkeypatch.setattr(bt, "SummaryWriter", CapturingWriter)
+
+    trainer = SequenceValTrainer(mist_args, val_losses=[0.5] * 5)
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+
+    # Fold 0 has two validation cases, so each validation makes two calls.
+    val_steps = len(trainer.folds[0]["val_images"])
+    assert trainer.val_calls == [e for e in (1, 3, 4) for _ in range(val_steps)]
+
+    losses = [e for e in writers[-1].scalars if e[0] == "losses"]
+    logged_val_steps = [step for _, values, step in losses if "validation" in values]
+    assert logged_val_steps == [2, 4, 5]
+    assert all("train" in values for _, values, _ in losses)
+
+
+def test_small_validation_split_warns(tmp_pipeline, mist_args, monkeypatch):
+    """A validation split with too few cases prints a warning."""
+    results, _ = tmp_pipeline
+    _set_epochs(results, 1, val_percent=0.5)
+
+    printed = []
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
+
+    DummyTrainer(mist_args)
+
+    combined = "\n".join(printed)
+    assert "holds out only 1 of 2" in combined
+
+
+def test_overwrite_config_sets_validate_every(tmp_pipeline, mist_args):
+    """--validate-every overrides training.validate_every."""
+    mist_args.validate_every = 3
+    trainer = DummyTrainer(mist_args)
+    assert trainer.config["training"]["validate_every"] == 3
+
+
+def test_checkpoint_roundtrips_smoothed_val_loss(tmp_pipeline, mist_args, monkeypatch):
+    """The smoothed validation loss survives save and load."""
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+    state["smoothed_val_loss"] = 0.37
+    trainer.save_checkpoint(fold=0, state=state)
+
+    fresh_state = trainer.build_components(rank=0, world_size=1)
+    trainer.load_checkpoint(fold=0, state=fresh_state)
+    assert fresh_state["smoothed_val_loss"] == pytest.approx(0.37)
+
+
+def test_load_pre_2_5_checkpoint_without_smoothed_loss(tmp_pipeline, mist_args, monkeypatch):
+    """Checkpoints without a smoothed loss load with smoothing reset."""
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+    trainer.save_checkpoint(fold=0, state=state)
+
+    path = trainer._checkpoint_path(0)
+    checkpoint = torch.load(path, weights_only=False)
+    del checkpoint["smoothed_val_loss"]
+    torch.save(checkpoint, path)
+
+    fresh_state = trainer.build_components(rank=0, world_size=1)
+    fresh_state["smoothed_val_loss"] = 0.5
+    trainer.load_checkpoint(fold=0, state=fresh_state)
+    assert fresh_state["smoothed_val_loss"] is None

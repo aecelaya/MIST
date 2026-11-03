@@ -5,6 +5,28 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ## 2.5.0 — Unreleased
 
+### Added
+
+- `training.validate_every` (and `--validate-every`) runs validation every N
+  epochs instead of every epoch. Validation always runs on the last epoch.
+  Defaults to `1`, the previous behavior.
+
+### Changed
+
+- **Which model is saved to `models/` now depends on `val_percent`.** With the
+  default `val_percent` of `0.0`, the saved model is the final-epoch model.
+  Previously it was the model with the lowest loss on the held-out fold, which
+  let the fold used for cross-validation choose its own model and made
+  cross-validation results optimistic. nnU-Net also uses the final model by
+  default. With `val_percent` above `0.0`, the saved model is still the best one
+  on the validation split carved from the training cases, now chosen by the
+  validation loss smoothed with an exponential moving average (decay 0.9) so
+  that one noisy epoch doesn't pick it. Cross-validation scores from a default
+  run may come out slightly lower than in 2.4.0; that is the bias being removed.
+- MIST warns when `val_percent` leaves fewer than 5 validation cases in a fold.
+- `--resume` warns if `--val-percent` or `--validate-every` differ from the
+  saved run.
+
 ### Fixed
 
 - The transfer summary printed at the start of training no longer double-counts

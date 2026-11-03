@@ -510,6 +510,7 @@ def build_base_config() -> dict[str, Any]:
             "nfolds": 5,
             "folds": None,
             "val_percent": 0.0,
+            "validate_every": 1,
             "epochs": 1000,
             "min_steps_per_epoch": 250,
             "batch_size_per_gpu": 2,

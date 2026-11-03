@@ -38,7 +38,20 @@ def training_summary_rows(
         ("Global batch size", f"{global_batch} ({per_gpu}/GPU × {num_gpus})"),
         ("Patch size", patch_size),
         ("Epochs", str(training["epochs"])),
+        ("Saved model", _saved_model_description(training)),
     ]
+
+
+def _saved_model_description(training: dict[str, Any]) -> str:
+    """Describe which model is saved for inference and how often validation runs."""
+    validate_every = training.get("validate_every", 1)
+    every = "every epoch" if validate_every == 1 else f"every {validate_every} epochs"
+    if training.get("val_percent", 0.0) > 0.0:
+        return (
+            f"best smoothed validation loss ({training['val_percent'] * 100:g}% "
+            f"of training cases, validated {every})"
+        )
+    return f"final epoch (held-out fold validated {every})"
 
 
 class RunningMean:

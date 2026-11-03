@@ -30,6 +30,23 @@ def test_training_summary_rows_labels_and_values():
     assert values["Parameters"] == "0.68M (683,412)"
 
 
+def test_training_summary_rows_saved_model_final():
+    """Without a validation split, the final-epoch model is reported."""
+    values = dict(tu.training_summary_rows(_summary_config(), 1000, world_size=1))
+    assert values["Saved model"] == "final epoch (held-out fold validated every epoch)"
+
+
+def test_training_summary_rows_saved_model_best():
+    """With a validation split, the best smoothed model is reported."""
+    config = _summary_config()
+    config["training"]["val_percent"] = 0.025
+    config["training"]["validate_every"] = 5
+    values = dict(tu.training_summary_rows(config, 1000, world_size=1))
+    assert values["Saved model"] == (
+        "best smoothed validation loss (2.5% of training cases, validated every 5 epochs)"
+    )
+
+
 def test_training_summary_rows_amp_off_label():
     """AMP disabled is reported as 'off (FP32)'."""
     config = _summary_config()
@@ -63,6 +80,7 @@ def test_training_summary_rows_order_is_stable():
         "Global batch size",
         "Patch size",
         "Epochs",
+        "Saved model",
     ]
 
 

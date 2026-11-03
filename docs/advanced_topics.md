@@ -69,6 +69,7 @@ Below is an example of a valid `config.json` file.
     "nfolds": 5,
     "folds": [0, 1, 2, 3, 4],
     "val_percent": 0.0,
+    "validate_every": 1,
     "epochs": 1000,
     "min_steps_per_epoch": 250,
     "batch_size_per_gpu": 2,
@@ -1228,9 +1229,24 @@ This flexibility allows you to:
 
 Another feature is the ability to adjust the train/validation/test split via the
 `val_percent` entry in the configuration file, which takes values from `0.0` to
-`1.0`. By default it is `0.0`, meaning the entire held-out fold is used for both
-validation and test. For example, setting `0.025` holds out 2.5% of the training
-set for validation while the held-out fold remains the independent test set.
+`1.0`. It also decides which model is saved to `models/fold_{fold}.pt`:
+
+- **`0.0` (default)** — the held-out fold is the validation set, used only to
+  track the validation loss. The saved model is the one from the final epoch, so
+  the held-out fold never chooses its own model and the cross-validation results
+  are unbiased. nnU-Net does the same by default.
+- **Above `0.0`** — that share of each fold's training cases is held out for
+  validation, and the held-out fold remains an independent test set. The saved
+  model is the one with the lowest validation loss after exponential smoothing
+  (decay 0.9), which keeps a single lucky epoch from choosing the model. For
+  example, `0.05` holds out 5% of the training set. MIST warns if this leaves
+  fewer than 5 validation cases, since selecting on so few is noisy.
+
+The validation loss is the soft Dice loss over the foreground classes, computed
+for each validation case with sliding-window inference. Validation runs every
+epoch by default; set `validate_every` (or `--validate-every`) to run it every N
+epochs instead, which saves time on large validation sets. Validation always runs
+on the last epoch.
 
 The `--val-percent` flag can also be used to override this setting at the
 command line when running `mist_run_all` or `mist_train`. This makes it easy to

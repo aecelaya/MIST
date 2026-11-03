@@ -225,7 +225,16 @@ def add_train_args(parser: ArgParser) -> None:
     g.add_argument(
         "--val-percent",
         type=float_0_1,
-        help="Percent of training set to use for validation (0.0-1.0).",
+        help=(
+            "Percent of the training set to hold out for validation (0.0-1.0). "
+            "If above 0, the model with the lowest smoothed validation loss is "
+            "saved; otherwise the final-epoch model is saved."
+        ),
+    )
+    g.add_argument(
+        "--validate-every",
+        type=positive_int,
+        help="Run validation every N epochs (always on the last epoch).",
     )
     g.add_argument(
         "--resume",

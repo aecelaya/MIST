@@ -29,3 +29,12 @@ class TrainerConstants:
     DEFAULT_SDDL_SPACING: Sequence[float] = (1.0, 1.0, 1.0)
     DEFAULT_SDDL_TAU_MM: str = "auto"
     DEFAULT_SDDL_TAU_MM_SAFETY_FACTOR: float = 1.25
+
+    # Model selection. With a validation split carved from the training data
+    # (val_percent > 0), the saved model is the one with the lowest validation
+    # loss after exponential smoothing with this decay, which damps
+    # epoch-to-epoch noise (nnU-Net smooths its pseudo-Dice the same way).
+    VAL_LOSS_EMA_DECAY: float = 0.9
+
+    # Fewer validation cases than this make best-model selection noisy.
+    MIN_VAL_CASES_FOR_SELECTION: int = 5
