@@ -72,7 +72,6 @@ def run_all_entry(argv: list[str] | None = None) -> None:
         "nfolds",
         "num_workers_analyze",
         "verify",
-        "data_dump",
         "overwrite",
     ]
     preprocess_keys = [

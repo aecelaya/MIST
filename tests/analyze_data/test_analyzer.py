@@ -13,7 +13,6 @@ from mist.analyze_data import analyzer_utils as au
 
 # MIST imports.
 from mist.analyze_data.analyzer import Analyzer
-from mist.analyze_data.data_dumper import DataDumper
 from mist.preprocessing import preprocessing_utils
 from mist.utils import io as io_mod
 from mist.utils import progress_bar, sitk_io
@@ -218,9 +217,6 @@ def _patch_env(monkeypatch, tmp_path):
         raising=True,
     )
     monkeypatch.setattr(metadata, "version", lambda _pkg: "0.9.0", raising=True)
-
-    # Prevent DataDumper from running during Analyzer tests.
-    monkeypatch.setattr(DataDumper, "run", lambda self: None, raising=True)
 
 
 @pytest.fixture
@@ -881,19 +877,6 @@ class TestAnalyzerRun:
         monkeypatch.setattr(
             Analyzer,
             "validate_dataset",
-            lambda self: called.append(True),
-            raising=True,
-        )
-        Analyzer(args).run()
-        assert called
-
-    def test_run_calls_data_dumper_when_data_dump_true(self, args, monkeypatch):
-        """run() instantiates and runs DataDumper when args.data_dump is True."""
-        args.data_dump = True
-        called = []
-        monkeypatch.setattr(
-            DataDumper,
-            "run",
             lambda self: called.append(True),
             raising=True,
         )

@@ -27,7 +27,7 @@ Below is an example of a valid `config.json` file.
 
 ```json
 {
-  "mist_version": "2.3.0",
+  "mist_version": "2.4.0",
 
   "dataset_info": {
     "task": "ivygap",
@@ -276,20 +276,22 @@ mist_train --numpy /path/to/numpy --results /path/to/results \
 Each architecture imposes its own patch size constraints when overriding
 manually. The key distinction is between _adaptive_ and _fixed_ topology:
 
-- **Adaptive** (nnUNet, FMG-Net, W-Net): the architecture inspects
+- **Adaptive** (nnUNet, ResEnc, FMG-Net, W-Net): the architecture inspects
   `target_spacing` at construction time and skips downsampling on any axis that
   is already low-resolution (applying stride-1 there instead). Those axes accept
   any patch size ≥ 1.
-- **Fixed** (MedNeXt, SwinUNETR): the same stride schedule is applied to every
-  axis regardless of spacing, so all dimensions must meet the divisibility
+- **Fixed** (MedNeXt, SwinUNETR, Primus): the same stride schedule is applied to
+  every axis regardless of spacing, so all dimensions must meet the divisibility
   requirement.
 
 | Architecture              | Constraint                          | Notes                                                                                                      |
 | ------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `nnunet`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: the low-res axis uses stride-1, so any value is valid there                                      |
+| `resenc`                  | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet                                                                           |
 | `fmgnet`, `wnet`          | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet                                                                           |
 | `mednext-*`               | All dimensions divisible by **16**  | Fixed 4-stage encoder (`2⁴ = 16`); no adaptation for anisotropic axes                                      |
 | `swinunetr-*`             | All dimensions divisible by **32**  | Fixed: `patch_size=2` tokenizer × 4 downsampling stages; raises an error at model construction if violated |
+| `primus-*`, `primusv2-*`  | All dimensions divisible by **8**   | Fixed: one token per `8 × 8 × 8` patch; raises an error at model construction if violated                  |
 
 The automatic patch selection always produces multiples of 32 (which satisfies
 all constraints), so manual overrides are the only case where you need to check
@@ -309,6 +311,7 @@ available:
 | -------------------- | -------------------- |
 | nnUNet (default)     | `nnunet`             |
 | nnUNet (pocket)      | `nnunet-pocket`      |
+| ResEnc UNet          | `resenc`             |
 | MedNeXt (small)      | `mednext-small`      |
 | MedNeXt (base)       | `mednext-base`       |
 | MedNeXt (medium)     | `mednext-medium`     |
@@ -318,6 +321,13 @@ available:
 | SwinUNETR-V2 (small) | `swinunetr-small`    |
 | SwinUNETR-V2 (base)  | `swinunetr-base`     |
 | SwinUNETR-V2 (large) | `swinunetr-large`    |
+| Primus (medium)      | `primus-medium`      |
+| Primus (large)       | `primus-large`       |
+| PrimusX              | `primus-x`           |
+| PrimusV2 (small)     | `primusv2-small`     |
+| PrimusV2 (base)      | `primusv2-base`      |
+| PrimusV2 (medium)    | `primusv2-medium`    |
+| PrimusV2 (large)     | `primusv2-large`     |
 
 The architecture can be specified with the `--model` flag in the `mist_run_all`
 or `mist_train` commands or directly edited in the `config.json` file.
@@ -338,6 +348,63 @@ mist_train --numpy /path/to/preprocessed/npy/files \
            --results /path/to/results/folder \
            --model nnunet-pocket
 ```
+
+### Residual Encoder UNet (ResEnc)
+
+`resenc` is the Residual Encoder UNet from _nnU-Net Revisited_ (Isensee et al.,
+MICCAI 2024). Its encoder stacks ResNet-D residual blocks, with more blocks in
+deeper stages (1, 3, 4, 6, 6, 6), and its decoder is a lightweight plain UNet
+decoder with one convolution per stage. MIST's default `nnunet`, by contrast,
+uses a single residual block per stage in both the encoder and the decoder.
+`resenc` uses the same adaptive topology as `nnunet`, so the number of stages,
+kernel sizes, and strides follow `patch_size` and `target_spacing`.
+
+nnU-Net's ResEnc M, L, and XL presets share this network and differ only in the
+planned patch and batch size, which MIST sets through its own analysis. With a
+patch of at least 128 voxels per downsampled axis, the network has six stages
+and about 102M parameters.
+
+The encoder's parameter names and shapes match nnU-Net's `ResidualEncoderUNet`,
+so encoder weights pretrained with nnU-Net or nnssl (for example,
+nnFoundationCNN) load directly with `--pretrained-weights`. See
+[Checkpoints from other frameworks](#checkpoints-from-other-frameworks).
+
+### Primus and PrimusV2
+
+`primus-*` and `primusv2-*` are the transformer-centric architectures from
+_Primus: Enforcing Attention Usage for 3D Medical Image Segmentation_ (Wald et
+al., 2025). The input is split into `8 × 8 × 8` tokens, processed by an EVA-02
+style transformer with learned absolute and 3D rotary position embeddings, and
+decoded back to full resolution by a lightweight transposed-convolution decoder.
+PrimusV2 replaces the single strided-convolution tokenizer with a small residual
+network, which the paper found helps on small and fine structures; PrimusV2 is
+on par with ResEnc and MedNeXt across the paper's benchmarks.
+
+| Variant | Layers | Heads | Embedding dim. | Parameters |
+| ------- | ------ | ----- | -------------- | ---------- |
+| small   | 12     | 6     | 396            | ~24M       |
+| base    | 12     | 12    | 792            | ~93M       |
+| medium  | 16     | 12    | 864            | ~147M      |
+| large   | 24     | 16    | 1056           | ~326M      |
+| x       | 40     | 16    | 1056           | ~540M      |
+
+The paper recommends `medium` as the default. PrimusV2 is available in the
+paper's four sizes; Primus is available as `primus-medium`, `primus-large`, and
+`primus-x`. `primus-x` (PrimusX) is not in the paper: it is the encoder of
+[nnFoundationViT](https://huggingface.co/MIC-DKFZ/nnFoundationViT), an openly
+released nnssl model pretrained at 192³ and 1 mm, whose checkpoint loads into it
+in full with `--pretrained-weights`. Use PrimusV2 to train from scratch. Use
+Primus for masked-autoencoder pretraining, where its non-overlapping tokens let
+masked tokens be dropped without leaking their content, and to load nnssl ViT
+checkpoints, which use its tokenizer. Primus has no deep supervision. Its
+learned position embedding is sized for the patch size, so the model only
+accepts inputs of exactly that size; MIST's patch-based training and sliding
+window inference already guarantee this.
+
+The encoder's parameter names match nnU-Net's Primus, so encoder weights
+pretrained with nnU-Net or nnssl load directly with `--pretrained-weights`. If
+the pretrained patch size differs, MIST resizes the learned position embedding
+to the new token grid (for cubic pretraining patches).
 
 ### MedNeXt kernel size
 
@@ -953,14 +1020,13 @@ Or set it directly in `config.json`:
 Setting `training.amp` to `true` in `config.json` enables automatic mixed
 precision (AMP) using bfloat16 (BF16). BF16 has the same exponent range as
 float32, so it never requires gradient loss scaling and is numerically more
-stable than float16. It is hardware-accelerated on NVIDIA Ampere and later
-GPUs (A100, RTX 30 series, and newer) and on AMD GPUs with matrix-acceleration
+stable than float16. It is hardware-accelerated on NVIDIA Ampere and later GPUs
+(A100, RTX 30 series, and newer) and on AMD GPUs with matrix-acceleration
 hardware — CDNA (MI100/200/300 series) and RDNA3 and newer (RX 7000 series and
 newer). Older AMD RDNA1/2 GPUs (RX 5000/6000 series, Radeon PRO W6000 series)
-report BF16 as available but have no matrix hardware for it, so MIST treats
-them the same as pre-Ampere NVIDIA GPUs and downgrades to FP32. CPU-only
-hardware has no BF16 acceleration and always trains in float32 regardless of
-this setting.
+report BF16 as available but have no matrix hardware for it, so MIST treats them
+the same as pre-Ampere NVIDIA GPUs and downgrades to FP32. CPU-only hardware has
+no BF16 acceleration and always trains in float32 regardless of this setting.
 
 AMP applies to the full training loop and is also propagated to inference:
 
@@ -972,9 +1038,9 @@ AMP applies to the full training loop and is also propagated to inference:
   skipped if no GPU is available (CPU-only inference always runs in float32).
 
 `training.amp` is set to `true` by default. If BF16 isn't supported on the
-detected hardware, MIST downgrades to float32 automatically and prints a
-warning explaining why, rather than requiring you to set this by hand. To
-disable AMP explicitly, set it to `false` in `config.json`:
+detected hardware, MIST downgrades to float32 automatically and prints a warning
+explaining why, rather than requiring you to set this by hand. To disable AMP
+explicitly, set it to `false` in `config.json`:
 
 ```json
 "training": {
@@ -992,12 +1058,6 @@ disable AMP explicitly, set it to `false` in `config.json`:
     disable AMP by hand.
 
 ## Transfer learning
-
-!!! warning "Experimental feature"
-
-    Transfer learning is still under active development. You are welcome to
-    try it, but you may encounter rough edges. If you run into problems,
-    please [open an issue on GitHub](https://github.com/mist-medical/MIST/issues).
 
 MIST supports initializing the encoder from a pretrained checkpoint before
 training. This is useful for:
@@ -1057,15 +1117,66 @@ loading weights. If the input channels differ between source and target, the
 
 !!! note
 
-    `--pretrained-config` is required when `--pretrained-weights` is set.
-    MIST uses it to verify that the source and target architectures are
-    compatible before loading any weights.
+    `--pretrained-config` is optional but recommended. When given, MIST uses
+    it to verify that the source and target architectures are compatible
+    before loading any weights. Without it, MIST warns, skips that check, and
+    loads whatever encoder weights match; it still raises an error if none do.
 
 !!! tip
 
     Combine transfer learning with `--warmup-epochs` (e.g. 5–10 epochs) to
     avoid damaging the pretrained encoder features with a large initial LR
     update. See [Linear warmup](#linear-warmup) for details.
+
+### Checkpoints from other frameworks
+
+`--pretrained-weights` also accepts checkpoints saved by other training
+frameworks, as long as they hold weights for the same architecture with the same
+parameter names. MIST unwraps state dicts nested under `state_dict`,
+`model_state_dict`, `network_weights`, or `model`, and reads every checkpoint
+with PyTorch's weights-only loader, so the file cannot execute code.
+
+For example, the public
+[nnFoundationCNN](https://huggingface.co/MIC-DKFZ/nnFoundationCNN) checkpoint (a
+ResEnc-L encoder pretrained with [nnssl](https://github.com/MIC-DKFZ/nnssl))
+loads directly into `resenc`:
+
+```console
+mist_train --numpy /path/to/preprocessed/data \
+           --results /path/to/results \
+           --model resenc \
+           --pretrained-weights /path/to/checkpoint_final.pth
+```
+
+nnFoundationCNN was pretrained on single-channel `192 × 192 × 192` patches at 1
+mm spacing. A different patch size or spacing is fine for `resenc`: each stage's
+parameter shapes do not depend on the patch size, so every stage the two
+networks share transfers exactly. A patch smaller than 128 voxels per axis has
+fewer than six stages, so the deepest pretrained stage is unused, and
+anisotropic spacing can change some kernels, which keep their random
+initialization. If you write a `--pretrained-config` for such a checkpoint, a
+patch size or spacing mismatch produces a warning rather than an error for
+`resenc`.
+
+Likewise, [nnFoundationViT](https://huggingface.co/MIC-DKFZ/nnFoundationViT), a
+40-layer transformer encoder pretrained the same way, loads in full into
+`primus-x`. Loading it into a smaller Primus variant uses only part of the
+encoder, and MIST warns when that happens. Its learned position embedding is
+resized automatically if your patch size differs from the pretraining patch
+size.
+
+!!! tip
+
+    The [nnFoundation fine-tuning notebook](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_nnfoundation_spleen_demo.ipynb)
+    walks through fine-tuning nnFoundationCNN on spleen CT on a free Colab GPU,
+    including the spacing and patch size settings that transfer the whole
+    encoder, and compares the result with training from scratch.
+
+MIST raises an error if no encoder weights transfer and warns if fewer than half
+do, so a checkpoint for the wrong architecture cannot silently train from random
+initialization. The transfer summary printed at the start of training reports
+exactly what loaded. Check each checkpoint's license before use;
+nnFoundationCNN's weights are licensed under CC BY-SA 4.0.
 
 ## Docker
 
@@ -1203,56 +1314,53 @@ from background.
 ## Accelerator support (NVIDIA, AMD ROCm, CPU)
 
 MIST auto-detects the accelerator it's running on — NVIDIA CUDA, AMD ROCm, or
-CPU-only — and configures itself accordingly. You don't need to set anything
-for this to work; it's resolved once, the first time you run `mist_train`,
-and the resolved values are written back to `config.json` so every later
-run and all downstream inference read the same settings.
+CPU-only — and configures itself accordingly. You don't need to set anything for
+this to work; it's resolved once, the first time you run `mist_train`, and the
+resolved values are written back to `config.json` so every later run and all
+downstream inference read the same settings.
 
 Two things get resolved this way:
 
 - **`training.hardware.data_loader`** — which data-loading backend to use.
-  `"dali"` (NVIDIA's GPU-accelerated data loading library) is used
-  automatically on CUDA hardware where it's installed; everywhere else — AMD
-  ROCm, CPU-only machines, or a CUDA machine that skipped installing DALI —
-  MIST falls back to its own generic, pure-PyTorch data loader
-  automatically. The generic loader implements the same augmentations
-  (flips, zoom, noise, blur, brightness, contrast) but runs them on CPU
-  instead of as part of a GPU pipeline, so it's slower per batch than DALI
-  but requires no NVIDIA-specific dependencies. If your hardware is CUDA but
-  DALI isn't installed, MIST warns and falls back to the generic loader
-  rather than failing outright — install
+  `"dali"` (NVIDIA's GPU-accelerated data loading library) is used automatically
+  on CUDA hardware where it's installed; everywhere else — AMD ROCm, CPU-only
+  machines, or a CUDA machine that skipped installing DALI — MIST falls back to
+  its own generic, pure-PyTorch data loader automatically. The generic loader
+  implements the same augmentations (flips, zoom, noise, blur, brightness,
+  contrast) but runs them on CPU instead of as part of a GPU pipeline, so it's
+  slower per batch than DALI but requires no NVIDIA-specific dependencies. If
+  your hardware is CUDA but DALI isn't installed, MIST warns and falls back to
+  the generic loader rather than failing outright — install
   `pip install "mist-medical[dali]"` to get DALI's acceleration back
   (recommended whenever training on an NVIDIA GPU).
 - **`training.hardware.communication_backend`** — the `torch.distributed`
-  backend used for multi-GPU coordination. Resolves to `"nccl"` on both
-  NVIDIA CUDA and AMD ROCm (on ROCm, the `"nccl"` backend name transparently
-  routes to RCCL, AMD's NCCL-compatible collective communications library —
-  no code or config change needed), and to `"gloo"` on CPU-only hardware.
+  backend used for multi-GPU coordination. Resolves to `"nccl"` on both NVIDIA
+  CUDA and AMD ROCm (on ROCm, the `"nccl"` backend name transparently routes to
+  RCCL, AMD's NCCL-compatible collective communications library — no code or
+  config change needed), and to `"gloo"` on CPU-only hardware.
 
 Both fields default to `"auto"` in a freshly analyzed `config.json` and are
-resolved the first time you run `mist_train`. If you set either one
-explicitly instead (e.g. `"data_loader": "generic"` to force the generic
-loader even on a CUDA machine), MIST respects that choice and never
-overrides it automatically. Because resolution happens once and is
-persisted, moving an already-resolved `config.json` to a different kind of
-machine (say, from a CUDA analyze node to a CPU-only training node) means
-you'll need to edit these two fields by hand, or restore the `"auto"`
-sentinel, to get them to re-resolve for the new hardware.
+resolved the first time you run `mist_train`. If you set either one explicitly
+instead (e.g. `"data_loader": "generic"` to force the generic loader even on a
+CUDA machine), MIST respects that choice and never overrides it automatically.
+Because resolution happens once and is persisted, moving an already-resolved
+`config.json` to a different kind of machine (say, from a CUDA analyze node to a
+CPU-only training node) means you'll need to edit these two fields by hand, or
+restore the `"auto"` sentinel, to get them to re-resolve for the new hardware.
 
-CPU-only training is single-process — MIST does not (yet) support
-distributed training across multiple CPU processes, only across multiple
-GPUs (see [Multi-GPU training](#multi-gpu-training) below, which applies
-identically to AMD ROCm GPUs as it does to NVIDIA ones).
+CPU-only training is single-process — MIST does not (yet) support distributed
+training across multiple CPU processes, only across multiple GPUs (see
+[Multi-GPU training](#multi-gpu-training) below, which applies identically to
+AMD ROCm GPUs as it does to NVIDIA ones).
 
 ## Multi-GPU training
 
 MIST uses PyTorch's DistributedDataParallel (DDP) for multi-GPU data
 parallelism, on both NVIDIA CUDA and AMD ROCm GPUs. MIST will use all GPUs
 visible to the process. On HPC clusters (SLURM, LSF, PBS), the job scheduler
-controls which GPUs are visible via `CUDA_VISIBLE_DEVICES` — MIST respects
-that assignment automatically. On shared workstations, set
-`CUDA_VISIBLE_DEVICES` yourself before running MIST to restrict which GPUs
-are used.
+controls which GPUs are visible via `CUDA_VISIBLE_DEVICES` — MIST respects that
+assignment automatically. On shared workstations, set `CUDA_VISIBLE_DEVICES`
+yourself before running MIST to restrict which GPUs are used.
 
 !!! note
 
@@ -1285,17 +1393,17 @@ mist_train --numpy /shared/numpy --results /shared/results --folds 1
 # ...and so on for the rest of nfolds.
 ```
 
-Each node's job still uses DDP across that node's own GPUs exactly as
-described above — one fold per node and multi-GPU per fold are independent
-and compose normally.
+Each node's job still uses DDP across that node's own GPUs exactly as described
+above — one fold per node and multi-GPU per fold are independent and compose
+normally.
 
 Because each of these jobs only trains a subset of the configured folds,
 `mist_train` skips its usual automatic finalization step (aggregating
 out-of-fold predictions into `results.csv`, and running held-out test-set
-inference if configured) rather than have every node race to overwrite the
-same shared files. Instead, each job prints a reminder and exits once its own
-fold(s) are done. Once every per-fold job has finished, run the finalize step
-once, yourself:
+inference if configured) rather than have every node race to overwrite the same
+shared files. Instead, each job prints a reminder and exits once its own fold(s)
+are done. Once every per-fold job has finished, run the finalize step once,
+yourself:
 
 ```bash
 mist_finalize --results /shared/results
@@ -1303,10 +1411,10 @@ mist_finalize --results /shared/results
 
 `mist_finalize` is safe to re-run — each run recomputes `results.csv` (and
 test-set predictions, if configured) from whatever is currently in the results
-directory, so re-running it after a straggler fold finishes late just
-refreshes both. If you run it before every fold has finished, it prints a
-warning naming the folds still missing a saved model, rather than silently
-producing partial results.
+directory, so re-running it after a straggler fold finishes late just refreshes
+both. If you run it before every fold has finished, it prints a warning naming
+the folds still missing a saved model, rather than silently producing partial
+results.
 
 ## Parallelism
 
@@ -1318,21 +1426,22 @@ Analysis, preprocessing, evaluation, and postprocessing all operate
 patient-by-patient. Each stage exposes a `--num-workers-*` flag that controls
 how many patients are processed in parallel using a Python thread pool:
 
-| Command                                | Flag                        | Default |
-| -------------------------------------- | --------------------------- | ------- |
-| `mist_analyze`, `mist_run_all`         | `--num-workers-analyze`     | `1`     |
-| `mist_preprocess`, `mist_run_all`      | `--num-workers-preprocess`  | `1`     |
-| `mist_train`, `mist_run_all`, `mist_finalize` | `--num-workers-evaluate` | `1`     |
-| `mist_evaluate`                        | `--num-workers-evaluate`    | `1`     |
-| `mist_postprocess`                     | `--num-workers-postprocess` | `1`     |
-| `mist_postprocess`                     | `--num-workers-evaluate`    | `1`     |
-| `mist_convert_msd`, `mist_convert_csv` | `--num-workers-conversion`  | `1`     |
+| Command                                       | Flag                        | Default |
+| --------------------------------------------- | --------------------------- | ------- |
+| `mist_analyze`, `mist_run_all`                | `--num-workers-analyze`     | `1`     |
+| `mist_preprocess`, `mist_run_all`             | `--num-workers-preprocess`  | `1`     |
+| `mist_train`, `mist_run_all`, `mist_finalize` | `--num-workers-evaluate`    | `1`     |
+| `mist_evaluate`                               | `--num-workers-evaluate`    | `1`     |
+| `mist_postprocess`                            | `--num-workers-postprocess` | `1`     |
+| `mist_postprocess`                            | `--num-workers-evaluate`    | `1`     |
+| `mist_convert_msd`, `mist_convert_csv`        | `--num-workers-conversion`  | `1`     |
 
 `mist_train` exposes `--num-workers-evaluate` because, once every configured
 fold has finished training, it automatically aggregates the held-out fold
 predictions into `results.csv`. The flag controls the parallelism for that
-built-in evaluation step. When folds are trained across separate per-node
-jobs (see [Distributed training across nodes](#distributed-training-across-nodes-one-fold-per-node)
+built-in evaluation step. When folds are trained across separate per-node jobs
+(see
+[Distributed training across nodes](#distributed-training-across-nodes-one-fold-per-node)
 above), each job trains only its own fold(s) and this step runs later, via
 `mist_finalize`, which takes the same flag.
 
@@ -1354,26 +1463,26 @@ number of patients in the dataset.
 
 ### Training data-loading parallelism
 
-Training uses a different mechanism from analysis/preprocessing/evaluation,
-and it depends on which data loader backend was resolved (see
+Training uses a different mechanism from analysis/preprocessing/evaluation, and
+it depends on which data loader backend was resolved (see
 [Accelerator support](#accelerator-support-nvidia-amd-rocm-cpu) above).
 
-On NVIDIA GPUs with DALI installed, MIST builds a GPU-accelerated data
-pipeline that reads, augments, and assembles batches while the GPU is busy
-computing gradients. DALI's parallelism is controlled by CPU threads
-_within_ the pipeline, not by Python worker processes.
+On NVIDIA GPUs with DALI installed, MIST builds a GPU-accelerated data pipeline
+that reads, augments, and assembles batches while the GPU is busy computing
+gradients. DALI's parallelism is controlled by CPU threads _within_ the
+pipeline, not by Python worker processes.
 
-On AMD ROCm, CPU-only hardware, or a CUDA machine without DALI installed,
-MIST uses its generic data loader instead — a plain
-`torch.utils.data.DataLoader` running the same augmentations on CPU, in
-separate worker processes rather than pipeline threads.
+On AMD ROCm, CPU-only hardware, or a CUDA machine without DALI installed, MIST
+uses its generic data loader instead — a plain `torch.utils.data.DataLoader`
+running the same augmentations on CPU, in separate worker processes rather than
+pipeline threads.
 
 Either way, the number of workers/threads is set via
-`training.hardware.num_cpu_workers` in `config.json` (default: `8`). There is
-no CLI flag for this — it is a hardware-tuning setting that belongs in the
-configuration file alongside the rest of the training hardware parameters.
-Edit it directly if your machine has significantly more or fewer CPU cores
-than the default assumes:
+`training.hardware.num_cpu_workers` in `config.json` (default: `8`). There is no
+CLI flag for this — it is a hardware-tuning setting that belongs in the
+configuration file alongside the rest of the training hardware parameters. Edit
+it directly if your machine has significantly more or fewer CPU cores than the
+default assumes:
 
 ```json
 "hardware": {

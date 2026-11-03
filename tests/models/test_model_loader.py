@@ -541,13 +541,17 @@ def test_validate_missing_spatial_config_subkey(valid_mist_config):
 
 
 def test_load_pretrained_encoder_target_key_absent_from_source_is_skipped(
-    source_checkpoint,
+    nnunet_source, source_checkpoint
 ):
     """A target encoder key not present in the source checkpoint is skipped."""
+    matching_key, matching_weight = next(iter(nnunet_source.get_encoder_state_dict().items()))
 
     class _ExtraKeyModel(torch.nn.Module):
         def get_encoder_state_dict(self):
-            return {"nonexistent_key": torch.randn(4, 1, 3, 3, 3)}
+            return {
+                matching_key: torch.zeros_like(matching_weight),
+                "nonexistent_key": torch.randn(4, 1, 3, 3, 3),
+            }
 
         def load_state_dict(self, sd, strict=False):
             pass
@@ -555,15 +559,17 @@ def test_load_pretrained_encoder_target_key_absent_from_source_is_skipped(
         def forward(self, x):
             return x
 
-    _, summary = load_pretrained_encoder(_ExtraKeyModel(), source_checkpoint)
-    assert "nonexistent_key" in summary["skipped"]
-    assert len(summary["loaded"]) == 0
+    # The toy model exposes only part of the checkpoint's encoder.
+    with pytest.warns(UserWarning, match="no counterpart"):
+        _, summary = load_pretrained_encoder(_ExtraKeyModel(), source_checkpoint)
+    assert summary["skipped"] == ["nonexistent_key"]
+    assert summary["loaded"] == [matching_key]
 
 
 def test_load_pretrained_encoder_incompatible_shape_is_skipped(nnunet_source, source_checkpoint):
     """A key whose shape[0] differs between source and target is skipped."""
     source_enc = nnunet_source.get_encoder_state_dict()
-    first_key = next(iter(source_enc))
+    first_key, second_key = list(source_enc)[:2]
     source_shape = source_enc[first_key].shape
 
     # Different shape[0] (output filters): neither direct-load nor channel
@@ -572,7 +578,8 @@ def test_load_pretrained_encoder_incompatible_shape_is_skipped(nnunet_source, so
 
     class _IncompatibleModel(torch.nn.Module):
         def get_encoder_state_dict(self):
-            return {first_key: incompatible}
+            # The second key matches so that some weights transfer.
+            return {first_key: incompatible, second_key: source_enc[second_key]}
 
         def load_state_dict(self, sd, strict=False):
             pass
@@ -580,5 +587,163 @@ def test_load_pretrained_encoder_incompatible_shape_is_skipped(nnunet_source, so
         def forward(self, x):
             return x
 
-    _, summary = load_pretrained_encoder(_IncompatibleModel(), source_checkpoint)
+    # The toy model exposes only part of the checkpoint's encoder.
+    with pytest.warns(UserWarning, match="no counterpart"):
+        _, summary = load_pretrained_encoder(_IncompatibleModel(), source_checkpoint)
     assert first_key in summary["skipped"]
+
+
+# ---------------------------------------------------------------------------
+# Wrapped checkpoints and transfer guards
+# ---------------------------------------------------------------------------
+
+
+def _pocket_nnunet():
+    """Build a target with the same architecture as the nnunet_source fixture."""
+    return NNUNet(
+        in_channels=1,
+        out_channels=2,
+        patch_size=[32, 32, 32],
+        target_spacing=[1.0, 1.0, 1.0],
+        use_residual_blocks=False,
+        use_deep_supervision=False,
+        use_pocket_model=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "container_key", ["state_dict", "model_state_dict", "network_weights", "model"]
+)
+def test_load_pretrained_encoder_unwraps_framework_checkpoints(
+    nnunet_source, tmp_path, container_key
+):
+    """State dicts nested by other frameworks are unwrapped before loading."""
+    path = tmp_path / "wrapped.pth"
+    torch.save({container_key: nnunet_source.state_dict(), "epoch": 3}, path)
+    target = _pocket_nnunet()
+    _, summary = load_pretrained_encoder(target, str(path))
+    assert summary["skipped"] == []
+    assert len(summary["loaded"]) == len(nnunet_source.get_encoder_state_dict())
+
+
+def test_load_pretrained_encoder_nothing_transferred_raises(tmp_path):
+    """A checkpoint with no matching weights raises and names its keys."""
+    path = tmp_path / "unknown.pth"
+    torch.save({"weights": {"a": 1}, "epoch": 3}, path)
+    target = _pocket_nnunet()
+    with pytest.raises(ValueError, match=r"No encoder weights .*\['weights', 'epoch'\]"):
+        load_pretrained_encoder(target, str(path))
+
+
+def test_load_pretrained_encoder_partial_transfer_warns(nnunet_source, tmp_path):
+    """Transferring under half of the encoder's tensors warns."""
+    encoder_sd = nnunet_source.get_encoder_state_dict()
+    one_key = next(iter(encoder_sd))
+    path = tmp_path / "partial.pt"
+    torch.save({one_key: encoder_sd[one_key]}, path)
+    target = _pocket_nnunet()
+    with pytest.warns(UserWarning, match=f"Only 1 of {len(encoder_sd)} encoder tensors"):
+        load_pretrained_encoder(target, str(path))
+
+
+def _saved_resenc(tmp_path, patch):
+    from mist.models.resenc.mist_resenc import ResEncUNet
+
+    model = ResEncUNet(1, 2, patch, [1.0, 1.0, 1.0], use_deep_supervision=False)
+    path = tmp_path / f"resenc_{patch[0]}.pt"
+    torch.save(model.state_dict(), path)
+    return path
+
+
+def test_load_pretrained_encoder_larger_source_warns(tmp_path):
+    """Encoder tensors with no place in the model (a deeper source) warn."""
+    from mist.models.resenc.mist_resenc import ResEncUNet
+
+    path = _saved_resenc(tmp_path, [64, 64, 64])  # five stages
+    target = ResEncUNet(1, 2, [32, 32, 32], [1.0, 1.0, 1.0], use_deep_supervision=False)
+    with pytest.warns(UserWarning, match=r"encoder tensors .* have no counterpart.*larger"):
+        _, summary = load_pretrained_encoder(target, str(path))
+    assert summary["skipped"] == []  # every target tensor still loads
+
+
+def test_load_pretrained_encoder_matching_source_does_not_warn(tmp_path):
+    """A source of the same size loads without the larger-source warning."""
+    import warnings
+
+    from mist.models.resenc.mist_resenc import ResEncUNet
+
+    path = _saved_resenc(tmp_path, [32, 32, 32])
+    target = ResEncUNet(1, 2, [32, 32, 32], [1.0, 1.0, 1.0], use_deep_supervision=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        load_pretrained_encoder(target, str(path))
+
+
+def test_validate_encoder_compatibility_resenc_spatial_mismatch_warns():
+    """For resenc, patch_size and spacing mismatches warn instead of raising."""
+    source = {
+        "model": {"architecture": "resenc"},
+        "spatial_config": {"patch_size": [192, 192, 192], "target_spacing": [1, 1, 1]},
+    }
+    target = {
+        "model": {"architecture": "resenc"},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": [0.5, 0.5, 0.5]},
+    }
+    with pytest.warns(UserWarning, match="matching stages still transfer") as record:
+        validate_encoder_compatibility(source, target)
+    assert len(record) == 2
+
+
+def test_validate_encoder_compatibility_null_source_spacing_warns():
+    """A MISFIT config pretrained without resampling has target_spacing null."""
+    source = {
+        "model": {"architecture": "resenc", "patch_size": [96, 96, 96]},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": None},
+    }
+    target = {
+        "model": {"architecture": "resenc"},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": [1, 1, 1]},
+    }
+    with pytest.warns(UserWarning, match="spacing compatibility cannot be checked") as record:
+        validate_encoder_compatibility(source, target)
+    assert len(record) == 1  # patch sizes match, so only the spacing warning
+
+
+def test_validate_encoder_compatibility_null_source_spacing_does_not_raise_for_nnunet():
+    """Unknown spacing is not a mismatch, even for non-stagewise architectures."""
+    source = {
+        "model": {"architecture": "nnunet"},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": None},
+    }
+    target = {
+        "model": {"architecture": "nnunet"},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": [1, 1, 1]},
+    }
+    with pytest.warns(UserWarning, match="spacing compatibility cannot be checked"):
+        validate_encoder_compatibility(source, target)
+
+
+def test_validate_encoder_compatibility_legacy_source_without_spatial_config():
+    """Older MISFIT configs have no spatial_config; patch_size is under model."""
+    source = {"model": {"architecture": "resenc", "patch_size": [128, 128, 128]}}
+    target = {
+        "model": {"architecture": "resenc"},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": [1, 1, 1]},
+    }
+    with pytest.warns(UserWarning) as record:
+        validate_encoder_compatibility(source, target)
+    messages = [str(w.message) for w in record]
+    assert any("patch_size mismatch" in m for m in messages)
+    assert any("spacing compatibility cannot be checked" in m for m in messages)
+
+
+def test_validate_encoder_compatibility_source_without_any_patch_size():
+    """No patch size anywhere in the source: only the spacing warning."""
+    source = {"model": {"architecture": "resenc"}}
+    target = {
+        "model": {"architecture": "resenc"},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": [1, 1, 1]},
+    }
+    with pytest.warns(UserWarning, match="spacing compatibility") as record:
+        validate_encoder_compatibility(source, target)
+    assert len(record) == 1

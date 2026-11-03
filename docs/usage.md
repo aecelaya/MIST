@@ -63,8 +63,6 @@ results/
     test_paths.csv              (only if test-data is set in dataset JSON)
     evaluation_paths.csv
     results.csv
-    data_dump.json              (only with --data-dump)
-    data_dump.md                (only with --data-dump)
 ```
 
 ### Breakdown of outputs
@@ -81,8 +79,6 @@ results/
 | `test_paths.csv`       | Paths to test images/masks. Only produced when `test-data` is set in the dataset JSON.                                           |
 | `evaluation_paths.csv` | Ground truth and prediction paths used for cross-validation evaluation.                                                          |
 | `results.csv`          | Per-patient and aggregate evaluation metrics from cross-validation.                                                              |
-| `data_dump.json`       | Structured dataset statistics (machine-readable). Only produced with `--data-dump`.                                              |
-| `data_dump.md`         | Narrative dataset summary. Only produced with `--data-dump`.                                                                     |
 
 ## Analysis
 
@@ -104,8 +100,6 @@ following arguments:
   _(default: 1)_
 - `--verify`: Verify dataset integrity before analysis (checks headers,
   dimensions, and that all declared files are present).
-- `--data-dump`: Save extended dataset statistics alongside `config.json`
-  (`data_dump.json` and `data_dump.md`). See [Data Dump](#data-dump) below.
 - `--overwrite`: Overwrite previous results/configuration.
 
 !!! note
@@ -124,52 +118,6 @@ Run the MIST analysis pipeline.
 mist_analyze --data /path/to/dataset.json \
              --results /path/to/analysis/results
 ```
-
-### Data Dump
-
-!!! warning "Experimental feature"
-
-    The data dump is still under active development. The statistics and
-    shape descriptors it reports are useful today, but the format of
-    `data_dump.json`/`data_dump.md` and the set of fields they contain may
-    still change. You are welcome to try it, but you may encounter rough
-    edges. If you run into problems, please
-    [open an issue on GitHub](https://github.com/mist-medical/MIST/issues).
-
-When the `--data-dump` flag is passed, the analysis step produces two additional
-files alongside `config.json`: `data_dump.json` and `data_dump.md`.
-
-`data_dump.json` contains a full structured summary of the dataset statistics,
-including:
-
-- **Spacing and anisotropy** – per-axis voxel spacing statistics and anisotropy
-  ratio.
-- **Image dimensions** – original and estimated resampled dimensions.
-- **Intensity distributions** – per-channel foreground intensity statistics
-  (mean, std, and key percentiles).
-- **Label statistics** – per-label voxel counts, presence rates, volume
-  fractions (relative to both foreground and the effective image region), and
-  shape descriptors:
-  - **PCA-based descriptors** — three shape metrics derived from the
-    eigenvalues of the label's spatial covariance matrix:
-    - _Linearity_: how much the shape extends along a single axis (high for
-      elongated structures such as vessels).
-    - _Planarity_: how much the shape lies in a plane (high for disc-like
-      structures).
-    - _Sphericity_: how uniformly the shape extends in all directions (high for
-      compact, roughly spherical structures).
-  - **Isoperimetric Quotient (IQ)** measuring compactness relative to a sphere.
-  - **Skeleton ratio** — the fraction of label voxels on the morphological
-    medial axis, which is the primary signal for thin, branching structures
-    such as vessels or airways.
-- **Observations** – auto-generated notes flagging anisotropy, sparse labels,
-  thin/branching structures, and other dataset characteristics that may
-  influence architecture or loss function choices.
-
-`data_dump.md` is a human-readable Markdown version of the same statistics,
-pre-filled with metric definitions and auto-generated observations. It is
-intended to be reviewed and annotated by the user before being passed to an LLM
-for architecture and training configuration advice.
 
 ## Preprocessing
 
@@ -269,21 +217,15 @@ the following arguments:
 - `--resume`: Resume training from the latest checkpoint. See
   [Resuming training](#resuming-training) for details.
 
-**Transfer learning** _(experimental)_:
-
-!!! warning "Experimental feature"
-
-    Transfer learning is still under active development. You are welcome to
-    try it, but you may encounter rough edges. If you run into problems,
-    please [open an issue on GitHub](https://github.com/mist-medical/MIST/issues).
+**Transfer learning**:
 
 - `--pretrained-weights`: Path to a pretrained checkpoint to initialize the
   encoder from. Accepts a single fold checkpoint or the output of
   `mist_average_weights`. See
   [Transfer learning](advanced_topics.md#transfer-learning) for details.
-- `--pretrained-config`: Path to the source model's `config.json`. Required when
-  `--pretrained-weights` is set — used to validate encoder compatibility between
-  source and target models.
+- `--pretrained-config`: Path to the source model's `config.json`, used to
+  validate encoder compatibility between source and target models. Optional but
+  recommended; without it, MIST warns and skips the compatibility check.
 - `--input-channel-strategy`: How to handle an input-channel mismatch between
   the source and target encoder. Choices: `average` (mean over source channels),
   `first` (use first source channel only), `skip` (keep random initialization).
@@ -313,12 +255,11 @@ mist_train --numpy /path/to/preprocessed/data \
 At the end of the training loop, MIST will run inference on the held out fold
 and write the predictions to `./results/predictions/train/raw`. If this
 invocation trained every configured fold (the default, and the case in the
-example above), it then evaluates the results with the metrics specified in
-the `evaluation` entry of the configuration file, saving the computed metrics
-to `./results/results.csv`. If `--folds` was used to train only a subset of
-the folds (e.g. one fold per node on an HPC cluster), this step is skipped
-instead — see [Finalizing a distributed run](#finalizing-a-distributed-run)
-below.
+example above), it then evaluates the results with the metrics specified in the
+`evaluation` entry of the configuration file, saving the computed metrics to
+`./results/results.csv`. If `--folds` was used to train only a subset of the
+folds (e.g. one fold per node on an HPC cluster), this step is skipped instead —
+see [Finalizing a distributed run](#finalizing-a-distributed-run) below.
 
 ### Resuming training
 
@@ -360,25 +301,25 @@ On resume:
 
 ## Finalizing a distributed run
 
-When each fold is trained as its own job — one fold (or a few) per node,
-sharing a `--results` directory, e.g. `mist_train --folds 0 --results
-/shared/results` on one node and `--folds 1` on another — `mist_train` skips
-its usual automatic finalization step in each of those jobs, to avoid every
-node racing to overwrite the same shared `results.csv` and test-set
-predictions. Instead, run `mist_finalize` once yourself, after every per-fold
-job has finished, to aggregate out-of-fold predictions into `results.csv` and
-run held-out test-set inference (if a test set is configured). See
+When each fold is trained as its own job — one fold (or a few) per node, sharing
+a `--results` directory, e.g. `mist_train --folds 0 --results /shared/results`
+on one node and `--folds 1` on another — `mist_train` skips its usual automatic
+finalization step in each of those jobs, to avoid every node racing to overwrite
+the same shared `results.csv` and test-set predictions. Instead, run
+`mist_finalize` once yourself, after every per-fold job has finished, to
+aggregate out-of-fold predictions into `results.csv` and run held-out test-set
+inference (if a test set is configured). See
 [Distributed training across nodes](advanced_topics.md#distributed-training-across-nodes-one-fold-per-node)
 for the full workflow.
 
 The `mist_finalize` command takes the following arguments:
 
-- `--results`: Path to the MIST results directory shared by every per-fold
-  job. _(default: `./results`)_
+- `--results`: Path to the MIST results directory shared by every per-fold job.
+  _(default: `./results`)_
 - `--num-workers-evaluate`: Number of parallel workers for evaluation.
   _(default: `1`)_
-- `--device`: Device for held-out test-set inference (ignored if no test set
-  is configured): `cpu`, `cuda`, or a CUDA index like `0`. _(default: `cuda`)_
+- `--device`: Device for held-out test-set inference (ignored if no test set is
+  configured): `cpu`, `cuda`, or a CUDA index like `0`. _(default: `cuda`)_
 
 ### Example
 
@@ -387,11 +328,10 @@ mist_finalize --results /shared/results --num-workers-evaluate 4
 ```
 
 `mist_finalize` is safe to re-run: each run recomputes `results.csv` (and
-test-set predictions, if configured) from whatever is currently in the
-results directory, rather than depending on state from a previous run. If any
-configured fold is still missing a saved model when it runs, it prints a
-warning naming the missing fold(s) rather than silently producing partial
-results.
+test-set predictions, if configured) from whatever is currently in the results
+directory, rather than depending on state from a previous run. If any configured
+fold is still missing a saved model when it runs, it prints a warning naming the
+missing fold(s) rather than silently producing partial results.
 
 ## Averaging Model Weights
 

@@ -21,7 +21,6 @@ import pandas as pd
 
 from mist.analyze_data import analyzer_utils
 from mist.analyze_data.analyzer_constants import AnalyzeConstants as constants
-from mist.analyze_data.data_dumper import DataDumper
 from mist.preprocessing import preprocessing_utils
 
 # MIST imports.
@@ -667,9 +666,6 @@ class Analyzer:
         # Check if cropping to the foreground bounding box is beneficial.
         crop_to_fg, cropped_dims = self.check_crop_fg()
         self.config["preprocessing"]["crop_to_foreground"] = bool(crop_to_fg)
-        # Store cropped dims so run() can pass them to DataDumper for accurate
-        # vol-fraction-of-image computation when crop_to_foreground is True.
-        self.cropped_dims = cropped_dims
 
         # Get the resampled and possible cropped dimensions of the images.
         median_dims = self.check_resampled_dims(cropped_dims)
@@ -827,20 +823,7 @@ class Analyzer:
         self.paths_df.to_csv(self.paths_csv, index=False)
         io.write_json_file(self.config_json, self.config)
 
-        # Step 5: Optionally build and save the rich data dump (data_dump.json
-        # and data_dump.md) alongside the configuration file. Skipped by
-        # default; enabled with --data-dump.
-        if getattr(self.mist_arguments, "data_dump", False):
-            data_dumper = DataDumper(
-                paths_df=self.paths_df,
-                dataset_info=self.dataset_info,
-                config=self.config,
-                results_dir=self.results_dir,
-                cropped_dims=self.cropped_dims,
-            )
-            data_dumper.run()
-
-        # Step 6: If the user specified test data in the dataset JSON file,
+        # Step 5: If the user specified test data in the dataset JSON file,
         # create a test paths dataframe and save it as CSV.
         if self.dataset_info.get("test-data"):
             test_data_dir = (

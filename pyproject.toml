@@ -1,6 +1,6 @@
 [project]
 name = "mist-medical"
-version = "2.3.0"
+version = "2.4.0"
 requires-python = ">= 3.10"
 description = "MIST is a simple and scalable end-to-end framework for medical imaging segmentation."
 readme = "README.md"
@@ -88,6 +88,11 @@ mist_convert_msd = "mist.cli.convert_msd_entrypoint:convert_msd_entry"
 mist_convert_csv = "mist.cli.convert_csv_entrypoint:convert_csv_entry"
 mist_average_weights = "mist.cli.average_weights_entrypoint:average_weights_entry"
 mist_ensemble = "mist.cli.ensemble_entrypoint:ensemble_entry"
+
+[tool.setuptools.packages.find]
+# Ship only the mist package. Automatic discovery fails when other top-level
+# directories (e.g., a local node_modules/ from the Prettier tooling) exist.
+include = ["mist*"]
 
 [tool.ruff]
 line-length = 100

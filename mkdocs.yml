@@ -4,6 +4,7 @@ nav:
   - Getting Started: getting_started.md
   - Usage: usage.md
   - Advanced Topics: advanced_topics.md
+  - Changelog: changelog.md
 theme:
   name: readthedocs
   highlightjs: true
