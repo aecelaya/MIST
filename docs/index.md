@@ -86,7 +86,8 @@ for details and how to pick the right `rocmX.Y` version for your machine.
 - November 2026 — **MIST 2.4.0** — new ResEnc UNet (`resenc`), Primus, and
   PrimusV2 architectures, and fine-tuning from the openly available
   nnFoundationCNN and nnFoundationViT pretrained encoders with
-  `--pretrained-weights`.
+  `--pretrained-weights`. Try it in the
+  [fine-tuning notebook](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_nnfoundation_spleen_demo.ipynb).
 - October 2026 — **MIST 2.3.0, the first stable release** — CPU and AMD ROCm
   training, `mist_finalize` for per-fold distributed training, probability-level
   and parallel ensembling, and no more ANTs dependency.

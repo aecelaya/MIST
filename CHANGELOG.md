@@ -21,6 +21,11 @@ All notable changes to MIST are listed here, newest first. MIST follows
   `model`, so checkpoints from PyTorch Lightning, nnU-Net, and nnssl load
   directly.
 
+- **Fine-tuning notebook** — the
+  [nnFoundation fine-tuning notebook](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_nnfoundation_spleen_demo.ipynb)
+  fine-tunes nnFoundationCNN on spleen CT on a free Colab GPU and compares it
+  with training from scratch.
+
 ### Changed
 
 - Transfer learning now raises an error if no encoder weights transfer, and

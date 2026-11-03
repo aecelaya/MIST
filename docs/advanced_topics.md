@@ -1164,6 +1164,20 @@ initialization. If you write a `--pretrained-config` for such a checkpoint, a
 patch size or spacing mismatch produces a warning rather than an error for
 `resenc`.
 
+Likewise, [nnFoundationViT](https://huggingface.co/MIC-DKFZ/nnFoundationViT), a
+40-layer transformer encoder pretrained the same way, loads in full into
+`primus-x`. Loading it into a smaller Primus variant uses only part of the
+encoder, and MIST warns when that happens. Its learned position embedding is
+resized automatically if your patch size differs from the pretraining patch
+size.
+
+!!! tip
+
+    The [nnFoundation fine-tuning notebook](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_nnfoundation_spleen_demo.ipynb)
+    walks through fine-tuning nnFoundationCNN on spleen CT on a free Colab GPU,
+    including the spacing and patch size settings that transfer the whole
+    encoder, and compares the result with training from scratch.
+
 MIST raises an error if no encoder weights transfer and warns if fewer than half
 do, so a checkpoint for the wrong architecture cannot silently train from random
 initialization. The transfer summary printed at the start of training reports
