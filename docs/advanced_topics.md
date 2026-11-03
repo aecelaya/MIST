@@ -392,10 +392,10 @@ The paper recommends `medium` as the default. PrimusV2 is available in the
 paper's four sizes; Primus is available as `primus-medium`, `primus-large`, and
 `primus-x`. `primus-x` (PrimusX) is not in the paper: it is the encoder of
 [nnFoundationViT](https://huggingface.co/MIC-DKFZ/nnFoundationViT), an openly
-released nnssl model pretrained at 192³ and 1 mm, whose checkpoint loads into it
-in full with `--pretrained-weights`. Use PrimusV2 to train from scratch. Use
-Primus for masked-autoencoder pretraining, where its non-overlapping tokens let
-masked tokens be dropped without leaking their content, and to load nnssl ViT
+released nnssl model, whose checkpoint loads into it in full with
+`--pretrained-weights`. Use PrimusV2 to train from scratch. Use Primus for
+masked-autoencoder pretraining, where its non-overlapping tokens let masked
+tokens be dropped without leaking their content, and to load nnssl ViT
 checkpoints, which use its tokenizer. Primus has no deep supervision. Its
 learned position embedding is sized for the patch size, so the model only
 accepts inputs of exactly that size; MIST's patch-based training and sliding
@@ -1137,9 +1137,12 @@ parameter names. MIST unwraps state dicts nested under `state_dict`,
 with PyTorch's weights-only loader, so the file cannot execute code.
 
 For example, the public
-[nnFoundationCNN](https://huggingface.co/MIC-DKFZ/nnFoundationCNN) checkpoint (a
-ResEnc-L encoder pretrained with [nnssl](https://github.com/MIC-DKFZ/nnssl))
-loads directly into `resenc`:
+[nnFoundationCNN](https://huggingface.co/MIC-DKFZ/nnFoundationCNN) checkpoint
+loads directly into `resenc`. nnFoundationCNN and nnFoundationViT are 3D
+foundation models pretrained with [nnssl](https://github.com/MIC-DKFZ/nnssl) as
+masked autoencoders on 2.1 million CT, MRI, and PET volumes from 125 datasets
+([Harsy et al., 2026](https://arxiv.org/abs/2609.26924)). nnFoundationCNN is a
+ResEnc-L network:
 
 ```console
 mist_train --numpy /path/to/preprocessed/data \
@@ -1148,29 +1151,31 @@ mist_train --numpy /path/to/preprocessed/data \
            --pretrained-weights /path/to/checkpoint_final.pth
 ```
 
-nnFoundationCNN was pretrained on single-channel `192 × 192 × 192` patches at 1
-mm spacing. A different patch size or spacing is fine for `resenc`: each stage's
-parameter shapes do not depend on the patch size, so every stage the two
-networks share transfers exactly. A patch smaller than 128 voxels per axis has
-fewer than six stages, so the deepest pretrained stage is unused, and
-anisotropic spacing can change some kernels, which keep their random
-initialization. If you write a `--pretrained-config` for such a checkpoint, a
-patch size or spacing mismatch produces a warning rather than an error for
-`resenc`.
+Both models were pretrained on single-channel `192 × 192 × 192` patches of
+z-score normalized volumes at their native resolution (no resampling; the median
+spacing of the pretraining data is 1 mm isotropic). Resampling to 1 mm isotropic
+and using a patch of at least 128 voxels per axis gives `resenc` the same six
+stages and kernel shapes as nnFoundationCNN, so the whole encoder transfers. A
+different patch size or spacing still works for `resenc`: each stage's parameter
+shapes do not depend on the patch size, so every stage the two networks share
+transfers exactly. A patch smaller than 128 voxels per axis has fewer than six
+stages, so the deepest pretrained stage is unused, and anisotropic spacing can
+change some kernels, which keep their random initialization. If you write a
+`--pretrained-config` for such a checkpoint, a patch size or spacing mismatch
+produces a warning rather than an error for `resenc`.
 
 Likewise, [nnFoundationViT](https://huggingface.co/MIC-DKFZ/nnFoundationViT), a
-40-layer transformer encoder pretrained the same way, loads in full into
-`primus-x`. Loading it into a smaller Primus variant uses only part of the
-encoder, and MIST warns when that happens. Its learned position embedding is
-resized automatically if your patch size differs from the pretraining patch
-size.
+40-layer transformer encoder (PrimusX), loads in full into `primus-x`. Loading
+it into a smaller Primus variant uses only part of the encoder, and MIST warns
+when that happens. Its learned position embedding is resized automatically if
+your patch size differs from the pretraining patch size.
 
 !!! tip
 
     The [nnFoundation fine-tuning notebook](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_nnfoundation_spleen_demo.ipynb)
-    walks through fine-tuning nnFoundationCNN on spleen CT on a free Colab GPU,
-    including the spacing and patch size settings that transfer the whole
-    encoder, and compares the result with training from scratch.
+    walks through fine-tuning nnFoundationCNN on spleen CT in Colab, including
+    the spacing and patch size settings that transfer the whole encoder, and
+    compares the result with training from scratch.
 
 MIST raises an error if no encoder weights transfer and warns if fewer than half
 do, so a checkpoint for the wrong architecture cannot silently train from random
