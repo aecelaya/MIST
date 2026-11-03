@@ -1174,8 +1174,7 @@ your patch size differs from the pretraining patch size.
 
     The [nnFoundation fine-tuning notebook](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_nnfoundation_spleen_demo.ipynb)
     walks through fine-tuning nnFoundationCNN on spleen CT in Colab, including
-    the spacing and patch size settings that transfer the whole encoder, and
-    compares the result with training from scratch.
+    the spacing and patch size settings that transfer the whole encoder.
 
 MIST raises an error if no encoder weights transfer and warns if fewer than half
 do, so a checkpoint for the wrong architecture cannot silently train from random
