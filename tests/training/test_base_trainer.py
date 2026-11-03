@@ -1537,6 +1537,40 @@ def test_build_components_loads_pretrained_encoder(tmp_pipeline, mist_args, monk
     assert "2" in combined  # channel_strategy_applied count
 
 
+class _AliasedConvModel(nn.Module):
+    """Registers one convolution under two names, as ResEnc's ConvNormAct does."""
+
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv3d(1, 4, kernel_size=3)  # 108 weights + 4 biases
+        self.all_modules = nn.Sequential(self.conv)
+
+
+def test_build_components_counts_shared_tensors_once(tmp_pipeline, mist_args, monkeypatch):
+    """The transfer summary's parameter count counts aliased keys once."""
+    mist_args.pretrained_weights = "/fake/encoder.pt"
+    aliased = _AliasedConvModel()
+    keys = list(aliased.state_dict())  # Four keys, two distinct tensors.
+    assert len(keys) == 4
+
+    monkeypatch.setattr(
+        bt,
+        "load_pretrained_encoder",
+        lambda model, path, strategy: (
+            aliased,
+            {"loaded": keys, "channel_strategy_applied": [], "skipped": []},
+        ),
+    )
+    printed = []
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
+
+    trainer = DummyTrainer(mist_args)
+    trainer.build_components(rank=0, world_size=1)
+
+    combined = "\n".join(printed)
+    assert "4 tensors (112 scalar parameters)" in combined
+
+
 # =============================================
 # Coverage gap: build_components spacing-aware loss
 # =============================================
