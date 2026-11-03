@@ -5,7 +5,7 @@ from typing import Any
 import torch
 from monai.inferers import sliding_window_inference
 
-from mist.data_loading import data_loader_registry
+from mist.data_loading import augmentation, data_loader_registry
 from mist.training.trainers.base_trainer import BaseTrainer
 from mist.training.trainers.trainer_constants import TrainerConstants as constants
 from mist.utils import hardware
@@ -49,9 +49,13 @@ class Patch3DTrainer(BaseTrainer):
                 - val_loader: Validation data loader. Yields full images for
                     validation, without random sampling.
         """
-        # Build training loader.
+        # Build training loader. The loader extracts patches, enlarged by a
+        # margin when rotation or scaling is on, and the augmenter applies
+        # every augmentation to each batch on the training device.
         training = self.config["training"]
         train_labels = self.config["dataset_info"]["labels"][1:]
+        patch_size = self.config["spatial_config"]["patch_size"]
+        settings = augmentation.settings_from_config(training["augmentation"])
         loader = data_loader_registry.get_data_loader_from_registry(
             training["hardware"]["data_loader"]
         )
@@ -63,19 +67,25 @@ class Patch3DTrainer(BaseTrainer):
             batch_size=training["batch_size_per_gpu"],
             oversampling=training["dali_foreground_prob"],
             labels=train_labels,
-            roi_size=self.config["spatial_config"]["patch_size"],
+            roi_size=patch_size,
             seed=training["seed"],
             num_workers=training["hardware"]["num_cpu_workers"],
-            use_augmentation=training["augmentation"]["enabled"],
-            use_flips=training["augmentation"]["transforms"]["flips"],
-            use_blur=training["augmentation"]["transforms"]["blur"],
-            use_noise=training["augmentation"]["transforms"]["noise"],
-            use_brightness=training["augmentation"]["transforms"]["brightness"],
-            use_contrast=training["augmentation"]["transforms"]["contrast"],
-            use_zoom=training["augmentation"]["transforms"]["zoom"],
+            patch_margin=augmentation.spatial_margin(patch_size, settings),
             rank=rank,
             world_size=world_size,
         )
+        if settings.any_enabled:
+            train_loader = augmentation.AugmentedIterator(
+                train_loader,
+                augmentation.BatchAugmenter(
+                    patch_size=patch_size,
+                    settings=settings,
+                    seed=training["seed"] + rank,
+                    normalized_dtms=self.config.get("preprocessing", {}).get(
+                        "normalize_dtms", True
+                    ),
+                ),
+            )
 
         # Build validation loader.
         val_loader = loader.get_validation_dataset(

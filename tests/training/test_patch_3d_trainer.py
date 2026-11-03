@@ -12,6 +12,7 @@ import pytest
 import torch
 from torch import nn
 
+from mist.data_loading import augmentation
 from mist.data_loading import dali_loader as dl
 
 # MIST imports.
@@ -221,19 +222,52 @@ def test_build_dataloaders_passes_expected_args(tmp_pipeline, mist_args, monkeyp
     }
 
     train_loader, val_loader = t.build_dataloaders(fold_data, rank=0, world_size=1)
-    assert isinstance(train_loader, DummyIter)
+    # The training loader is wrapped so batches are augmented on the device.
+    assert isinstance(train_loader, augmentation.AugmentedIterator)
     assert isinstance(val_loader, DummyIter)
 
     # Check a few key args.
     tr = captured["train"]
+    patch_size = t.config["spatial_config"]["patch_size"]
     assert tr["extract_patches"] is True
     assert tr["batch_size"] == t.config["training"]["batch_size_per_gpu"]
-    assert tr["roi_size"] == t.config["spatial_config"]["patch_size"]
+    assert tr["roi_size"] == patch_size
     assert tr["rank"] == 0 and tr["world_size"] == 1
+    assert tr["patch_margin"] == augmentation.spatial_margin(
+        patch_size, augmentation.AugmentationSettings()
+    )
+    assert not any(key.startswith("use_") for key in tr)
 
     vl = captured["val"]
     assert vl["rank"] == 0 and vl["world_size"] == 1
     assert "image_paths" in vl and "label_paths" in vl
+
+
+def test_build_dataloaders_without_augmentation_returns_plain_loader(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """With augmentation disabled, the loader is unwrapped and uncropped."""
+    captured = {}
+
+    def fake_get_training_dataset(**kwargs: Any) -> DummyIter:
+        captured["train"] = kwargs
+        return DummyIter({"image": torch.zeros(1, 4), "label": torch.zeros(1, 4)}, steps=2)
+
+    monkeypatch.setattr(dl, "get_training_dataset", fake_get_training_dataset)
+    monkeypatch.setattr(dl, "get_validation_dataset", lambda **kwargs: None)
+
+    t = Patch3DTrainer(mist_args)
+    t.config["training"]["augmentation"]["enabled"] = False
+    fold_data = {
+        "train_images": ["images/p0.npy"],
+        "train_labels": ["labels/p0.npy"],
+        "train_dtms": None,
+        "val_images": ["images/p1.npy"],
+        "val_labels": ["labels/p1.npy"],
+    }
+    train_loader, _ = t.build_dataloaders(fold_data, rank=0, world_size=1)
+    assert isinstance(train_loader, DummyIter)
+    assert captured["train"]["patch_margin"] == (0, 0, 0)
 
 
 @pytest.mark.parametrize("amp_enabled", [False, True])

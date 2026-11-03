@@ -25,13 +25,6 @@ def base_pipeline_args():
         "labels": [0, 1],
         "oversampling": 0.25,
         "extract_patches": True,
-        "use_augmentation": True,
-        "use_flips": True,
-        "use_zoom": True,
-        "use_noise": True,
-        "use_blur": True,
-        "use_brightness": True,
-        "use_contrast": True,
         "batch_size": 1,
         "num_threads": 1,
         "device_id": 0,
@@ -50,20 +43,16 @@ class TestTrainPipelineInit:
         args = {**base_pipeline_args, "dtm_paths": ["dtm.npy"] if dtm_present else None}
         pipeline = dali_loader.TrainPipeline(**args)
         assert pipeline.extract_patches is True
-        assert pipeline.use_augmentation is True
+        assert pipeline.patch_margin == (0, 0, 0)
 
-    def test_disables_all_augmentations_when_use_augmentation_false(self, base_pipeline_args):
-        """All augmentation flags are forced off when use_augmentation=False."""
-        pipeline = dali_loader.TrainPipeline(**{**base_pipeline_args, "use_augmentation": False})
-        for flag in (
-            "use_flips",
-            "use_zoom",
-            "use_noise",
-            "use_blur",
-            "use_brightness",
-            "use_contrast",
-        ):
-            assert not getattr(pipeline, flag)
+    @mock.patch("mist.data_loading.dali_loader.types.Constant")
+    def test_crop_shape_includes_margin(self, mock_constant, base_pipeline_args):
+        """The crop shape is the patch size plus the margin on both sides."""
+        dali_loader.TrainPipeline(**{**base_pipeline_args, "patch_margin": (5, 0, 3)})
+        crop_shape = mock_constant.call_args_list[0].args[0]
+        margin = mock_constant.call_args_list[1].args[0]
+        assert crop_shape.tolist() == [74, 64, 70]
+        assert margin.tolist() == [5, 0, 3]
 
     @pytest.mark.parametrize(
         "bad_arg,expected_message",
@@ -146,76 +135,34 @@ class TestBiasedCropFn:
         )
         assert out == expected
 
-
-class TestFlipsFn:
-    """Tests for TrainPipeline.flips_fn."""
-
-    @pytest.mark.parametrize("use_dtm", [False, True])
-    @mock.patch("mist.data_loading.dali_loader.fn.flip")
-    @mock.patch("mist.data_loading.dali_loader.fn.random.coin_flip")
-    def test_flips_all_inputs(
+    @mock.patch("mist.data_loading.dali_loader.fn.slice")
+    @mock.patch("mist.data_loading.dali_loader.fn.roi_random_crop")
+    @mock.patch("mist.data_loading.dali_loader.fn.segmentation.random_object_bbox")
+    @mock.patch("mist.data_loading.dali_loader.fn.pad")
+    def test_margin_shifts_anchor_and_enlarges_crop(
         self,
-        mock_coin_flip,
-        mock_flip,
-        base_pipeline_args,
-        use_dtm,
-    ):
-        """Flips are applied to every input tensor (image, label[, dtm])."""
-        mock_coin_flip.side_effect = ["flip_h", "flip_v", "flip_d"]
-        mock_flip.side_effect = lambda x, **kwargs: f"flipped_{x}"
-        args = {
-            **base_pipeline_args,
-            "dtm_paths": ["dtm.npy"] if use_dtm else None,
-            "use_zoom": False,
-            "use_noise": False,
-            "use_blur": False,
-            "use_brightness": False,
-            "use_contrast": False,
-        }
-        pipeline = dali_loader.TrainPipeline(**args)
-
-        inputs = ("img", "lbl", "dtm") if use_dtm else ("img", "lbl")
-        result = pipeline.flips_fn(*inputs)
-        assert result == tuple(f"flipped_{x}" for x in inputs)
-
-
-class TestZoomFn:
-    """Tests for TrainPipeline.zoom_fn."""
-
-    @mock.patch("mist.data_loading.dali_loader.fn.resize")
-    @mock.patch("mist.data_loading.dali_loader.fn.crop")
-    @mock.patch("mist.data_loading.dali_loader.fn.random.uniform")
-    @mock.patch("mist.data_loading.data_loading_utils.random_augmentation")
-    def test_crops_and_resizes_to_roi(
-        self,
-        mock_aug,
-        mock_uniform,
+        mock_pad,
+        mock_bbox,
         mock_crop,
-        mock_resize,
+        mock_slice,
         base_pipeline_args,
     ):
-        """Zoom scales down, crops to scaled dimensions, then resizes back to roi_size."""
-        mock_aug.return_value = 0.8
-        mock_crop.side_effect = lambda x, crop_h, crop_w, crop_d: f"cropped_{x}"
-        mock_resize.side_effect = lambda x, **kwargs: f"resized_{x}"
-        args = {
-            **base_pipeline_args,
-            "dtm_paths": None,
-            "labels": [1],
-            "use_flips": False,
-            "use_noise": False,
-            "use_blur": False,
-            "use_brightness": False,
-            "use_contrast": False,
-        }
+        """With a margin, the anchor moves back by it and the crop grows."""
+        args = {**base_pipeline_args, "dtm_paths": None, "patch_margin": (4, 4, 4)}
         pipeline = dali_loader.TrainPipeline(**args)
 
-        result = pipeline.zoom_fn("image", "label")
+        dummy = mock.MagicMock()
+        anchor = mock.MagicMock()
+        mock_pad.return_value = dummy
+        mock_bbox.return_value = ("roi_start", "roi_end")
+        mock_slice.side_effect = [anchor, (dummy, dummy)]
 
-        assert result == ("resized_cropped_image", "resized_cropped_label")
-        mock_crop.assert_any_call("image", crop_h=51.2, crop_w=51.2, crop_d=51.2)
-        mock_crop.assert_any_call("label", crop_h=51.2, crop_w=51.2, crop_d=51.2)
-        assert mock_resize.call_count == 2
+        pipeline.biased_crop_fn("image", "label")
+
+        anchor.__sub__.assert_called_once_with(pipeline.margin)
+        crop_call = mock_slice.call_args_list[1]
+        assert crop_call.args[1] is anchor.__sub__.return_value
+        assert crop_call.args[2] is pipeline.crop_shape
 
 
 class TestDefineGraph:
@@ -226,71 +173,36 @@ class TestDefineGraph:
         "mist.data_loading.dali_loader.fn.transpose",
         side_effect=lambda x, perm: f"transposed_{x}",
     )
-    @mock.patch.object(dali_loader.TrainPipeline, "flips_fn")
-    @mock.patch.object(
-        dali_loader.TrainPipeline,
-        "zoom_fn",
-        return_value=("zoomed_image", "zoomed_label"),
-    )
     @mock.patch.object(dali_loader.TrainPipeline, "biased_crop_fn")
     @mock.patch.object(dali_loader.TrainPipeline, "load_data")
-    @mock.patch(
-        "mist.data_loading.data_loading_utils.contrast_fn",
-        return_value="contrast_image",
-    )
-    @mock.patch(
-        "mist.data_loading.data_loading_utils.brightness_fn",
-        return_value="bright_image",
-    )
-    @mock.patch("mist.data_loading.data_loading_utils.blur_fn", return_value="blurred_image")
-    @mock.patch("mist.data_loading.data_loading_utils.noise_fn", return_value="noisy_image")
     def test_pipeline_output_with_and_without_dtm(
         self,
-        mock_noise,
-        mock_blur,
-        mock_brightness,
-        mock_contrast,
         mock_load_data,
         mock_biased_crop_fn,
-        mock_zoom_fn,
-        mock_flips_fn,
         mock_transpose,
         base_pipeline_args,
         use_dtm,
     ):
-        """define_graph returns the correct output tuple with and without DTM."""
+        """define_graph crops and transposes, with no augmentation in DALI."""
         args = {**base_pipeline_args, "dtm_paths": ["dtm.npy"] if use_dtm else None}
         if use_dtm:
             mock_load_data.return_value = ("image_raw", "label_raw", "dtm_raw")
-            mock_biased_crop_fn.return_value = (
-                "cropped_image",
-                "cropped_label",
-                "cropped_dtm",
-            )
-            mock_flips_fn.return_value = (
-                "flipped_image",
-                "flipped_label",
-                "flipped_dtm",
-            )
+            mock_biased_crop_fn.return_value = ("cropped_image", "cropped_label", "cropped_dtm")
         else:
             mock_load_data.return_value = ("image_raw", "label_raw")
             mock_biased_crop_fn.return_value = ("cropped_image", "cropped_label")
-            mock_flips_fn.return_value = ("flipped_image", "flipped_label")
 
         pipeline = dali_loader.TrainPipeline(**args)
         result = pipeline.define_graph()
 
         if use_dtm:
             assert result == (
-                "transposed_contrast_image",
-                "transposed_flipped_label",
-                "transposed_flipped_dtm",
+                "transposed_cropped_image",
+                "transposed_cropped_label",
+                "transposed_cropped_dtm",
             )
         else:
-            assert result == (
-                "transposed_contrast_image",
-                "transposed_flipped_label",
-            )
+            assert result == ("transposed_cropped_image", "transposed_cropped_label")
 
 
 class TestTestPipelineDefineGraph:
@@ -403,10 +315,12 @@ class TestGetTrainingDataset:
             num_workers=1,
             rank=0,
             world_size=1,
+            patch_margin=(2, 2, 2),
         )
         mock_validate.assert_called_once_with(["image.npy"], ["label.npy"], dtm_paths)
         mock_train_pipeline.assert_called_once()
         _, call_kwargs = mock_train_pipeline.call_args
+        assert call_kwargs["patch_margin"] == (2, 2, 2)
         assert "dimension" not in call_kwargs, (
             "dimension was removed from TrainPipeline; must not be passed at call site"
         )

@@ -92,11 +92,14 @@ Below is an example of a valid `config.json` file.
       "enabled": true,
       "transforms": {
         "flips": true,
-        "zoom": true,
+        "rotation": true,
+        "scaling": true,
         "noise": true,
         "blur": true,
         "brightness": true,
-        "contrast": true
+        "contrast": true,
+        "low_resolution": true,
+        "gamma": true
       }
     },
 
@@ -1267,24 +1270,52 @@ mist_train --numpy /path/to/preprocessed/npy/files \
 ## Data Augmentation
 
 Data augmentation is controlled through the `training.augmentation` section of
-the `config.json` file. By default, augmentation is enabled with a standard set
-of spatial and intensity transforms designed for medical imaging. The available
-augmentation transforms are:
+the `config.json` file. By default, augmentation is enabled and follows nnU-Net's
+default training transforms: the same transforms, order, probabilities, and
+ranges. Probabilities are per training patch.
 
-| Transform  | Description                                | Config key   |
-| ---------- | ------------------------------------------ | ------------ |
-| Flips      | Random spatial flips along x, y, or z axes | `flips`      |
-| Zoom       | Random zoom in/out with interpolation      | `zoom`       |
-| Noise      | Additive Gaussian noise to the image       | `noise`      |
-| Blurring   | Random Gaussian blurring                   | `blur`       |
-| Brightness | Random brightness scaling                  | `brightness` |
-| Contrast   | Random contrast adjustment                 | `contrast`   |
+| Transform               | What it does                                                                                     | Probability                       | Config key       |
+| ----------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------- | ---------------- |
+| Rotation                | Rotates up to ±30° about each axis (±180° in-plane only for quasi-2D patches)                    | 0.2                               | `rotation`       |
+| Scaling                 | Zooms in or out by a factor from 0.7 to 1.4                                                      | 0.2                               | `scaling`        |
+| Noise                   | Adds Gaussian noise with a standard deviation from 0 to 0.1                                      | 0.1                               | `noise`          |
+| Blurring                | Gaussian blur, sigma from 0.5 to 1.0 per axis                                                    | 0.2 (each channel 0.5)            | `blur`           |
+| Brightness              | Multiplies each channel by 0.75 to 1.25                                                          | 0.15                              | `brightness`     |
+| Contrast                | Scales each channel about its mean by 0.75 to 1.25, keeping its range                            | 0.15                              | `contrast`       |
+| Simulated low resolution | Downsamples by 0.5 to 1× and upsamples back                                                     | 0.25 (each channel 0.5)           | `low_resolution` |
+| Gamma                   | Gamma from 0.7 to 1.5 with mean and std restored; also applied to the inverted image             | 0.3 (inverted 0.1)                | `gamma`          |
+| Flips                   | Flips along each axis                                                                            | 0.5 per axis                      | `flips`          |
+
+Rotation and scaling apply to the image, label, and distance transform maps
+(DTMs) together; the other transforms change only the image. To keep real image
+content at the borders of a rotated or zoomed-out patch, the data loader crops a
+larger patch around the same center, and the transform resamples it to the
+patch size. Images and DTMs use linear interpolation and labels use
+nearest-neighbor.
+
+A patch whose largest dimension is more than three times its smallest (e.g.,
+`256 × 256 × 5`) is treated as quasi-2D: rotation and scaling happen only in
+the plane of its two larger dimensions, and simulated low resolution leaves its
+smallest dimension alone.
+
+DTMs hold distances to each label's boundary, so MIST keeps them valid under
+these transforms. Flips and rotations don't change distances. Scaling changes
+them by the scale factor: normalized DTMs (`preprocessing.normalize_dtms`, the
+default) need no correction, since their normalizing maximum distance changes
+by the same factor, and unnormalized DTMs are divided by the factor. Scaling
+only in-plane would not leave a valid distance map, so quasi-2D patches are not
+scaled when DTMs are used; they are still rotated.
+
+Augmentation runs in PyTorch on each training batch once it is on the training
+device, so the DALI and generic (CPU and ROCm) data loaders apply the same
+transforms.
 
 ### How to customize
 
 - To **disable all augmentation**, set `"enabled": false`.
 - To **toggle individual transforms**, set the corresponding key to `true` or
-  `false`.
+  `false`. Transforms missing from the configuration are enabled, and the
+  `zoom` key from MIST 2.4.0 and earlier is read as `scaling`.
 - Augmentation is applied only during training. Test-time augmentation is
   controlled in the `inference` section of the configuration file.
 
@@ -1297,11 +1328,14 @@ Disable noise and blur while keeping other augmentations active:
   "enabled": true,
   "transforms": {
     "flips": true,
-    "zoom": true,
+    "rotation": true,
+    "scaling": true,
     "noise": false,
     "blur": false,
     "brightness": true,
-    "contrast": true
+    "contrast": true,
+    "low_resolution": true,
+    "gamma": true
   }
 }
 ```
@@ -1361,10 +1395,10 @@ Two things get resolved this way:
   `"dali"` (NVIDIA's GPU-accelerated data loading library) is used automatically
   on CUDA hardware where it's installed; everywhere else — AMD ROCm, CPU-only
   machines, or a CUDA machine that skipped installing DALI — MIST falls back to
-  its own generic, pure-PyTorch data loader automatically. The generic loader
-  implements the same augmentations (flips, zoom, noise, blur, brightness,
-  contrast) but runs them on CPU instead of as part of a GPU pipeline, so it's
-  slower per batch than DALI but requires no NVIDIA-specific dependencies. If
+  its own generic, pure-PyTorch data loader automatically. Both loaders feed the
+  same augmentation, which runs on the training device; the generic loader
+  reads and crops patches on the CPU, so it's slower per batch than DALI but
+  requires no NVIDIA-specific dependencies. If
   your hardware is CUDA but DALI isn't installed, MIST warns and falls back to
   the generic loader rather than failing outright — install
   `pip install "mist-medical[dali]"` to get DALI's acceleration back

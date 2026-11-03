@@ -530,11 +530,14 @@ def build_base_config() -> dict[str, Any]:
                 "enabled": True,
                 "transforms": {
                     "flips": True,
-                    "zoom": True,
+                    "rotation": True,
+                    "scaling": True,
                     "noise": True,
                     "blur": True,
                     "brightness": True,
                     "contrast": True,
+                    "low_resolution": True,
+                    "gamma": True,
                 },
             },
             "hardware": {
