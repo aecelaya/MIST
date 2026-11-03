@@ -23,8 +23,7 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 - **Fine-tuning notebook** — the
   [nnFoundation fine-tuning notebook](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_nnfoundation_spleen_demo.ipynb)
-  fine-tunes nnFoundationCNN on spleen CT in Colab and compares it with training
-  from scratch.
+  fine-tunes nnFoundationCNN on spleen CT in Colab.
 
 ### Changed
 
