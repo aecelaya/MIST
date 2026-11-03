@@ -28,6 +28,7 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Changed
 
+- Transfer learning is no longer marked experimental in the documentation.
 - Transfer learning now raises an error if no encoder weights transfer, and
   warns if fewer than half do, instead of silently training from random
   initialization.

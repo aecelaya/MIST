@@ -1059,12 +1059,6 @@ explicitly, set it to `false` in `config.json`:
 
 ## Transfer learning
 
-!!! warning "Experimental feature"
-
-    Transfer learning is still under active development. You are welcome to
-    try it, but you may encounter rough edges. If you run into problems,
-    please [open an issue on GitHub](https://github.com/mist-medical/MIST/issues).
-
 MIST supports initializing the encoder from a pretrained checkpoint before
 training. This is useful for:
 
