@@ -89,6 +89,11 @@ mist_convert_csv = "mist.cli.convert_csv_entrypoint:convert_csv_entry"
 mist_average_weights = "mist.cli.average_weights_entrypoint:average_weights_entry"
 mist_ensemble = "mist.cli.ensemble_entrypoint:ensemble_entry"
 
+[tool.setuptools.packages.find]
+# Ship only the mist package. Automatic discovery fails when other top-level
+# directories (e.g., a local node_modules/ from the Prettier tooling) exist.
+include = ["mist*"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

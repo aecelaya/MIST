@@ -181,6 +181,10 @@ Full documentation, including configuration reference and advanced topics, is at
 
 ## What's New
 
+- November 2026 — **MIST 2.4.0** — new ResEnc UNet (`resenc`), Primus, and
+  PrimusV2 architectures, and fine-tuning from the openly available
+  nnFoundationCNN and nnFoundationViT pretrained encoders with
+  `--pretrained-weights`.
 - October 2026 — **MIST 2.3.0, the first stable release** — CPU and AMD ROCm
   training, `mist_finalize` for per-fold distributed training, probability-level
   and parallel ensembling, and no more ANTs dependency.

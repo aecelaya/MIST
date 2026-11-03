@@ -15,6 +15,7 @@ from mist.models.nnunet.nnunet_registry import create_nnunet, create_nnunet_pock
 from mist.models.primus.primus_registry import (  # noqa: F401
     create_primus_large,
     create_primus_medium,
+    create_primus_x,
     create_primusv2_base,
     create_primusv2_large,
     create_primusv2_medium,
