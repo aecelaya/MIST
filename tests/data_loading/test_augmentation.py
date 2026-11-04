@@ -368,3 +368,75 @@ def test_quasi_2d_patches_skip_scaling_with_dtms(monkeypatch):
     no_dtm = {"image": batch["image"], "label": batch["label"]}
     scaled = aug.BatchAugmenter((16, 16, 4), _only(scaling=True), seed=0)(no_dtm)
     assert not torch.allclose(scaled["image"], batch["image"][:, :, 2:18, 2:18, :])
+
+
+# Per-class label resampling.
+
+
+def _label_grid(augmenter, matrix, size):
+    return augmenter._sampling_grid(matrix, size, torch.device("cpu"))
+
+
+def test_resample_labels_identity_equals_center_crop():
+    """With no transform, labels come back unchanged."""
+    augmenter = aug.BatchAugmenter((8, 8, 8), aug.AugmentationSettings(), seed=0)
+    label = torch.randint(0, 4, (1, 12, 12, 12)).to(torch.uint8)
+    out = augmenter._resample_labels(label, _label_grid(augmenter, np.eye(3), (12, 12, 12)))
+    assert out.dtype == torch.uint8
+    assert torch.equal(out, label[:, 2:10, 2:10, 2:10])
+
+
+def test_resample_labels_matches_argmax_over_all_classes():
+    """The result equals an explicit argmax over every class, background included."""
+    augmenter = aug.BatchAugmenter((12, 12, 12), aug.AugmentationSettings(), seed=0)
+    label = torch.randint(0, 4, (1, 16, 16, 16)).to(torch.uint8)
+    matrix = aug._rotation_matrix(0, 0.4) @ aug._rotation_matrix(2, 0.3) * 0.9
+    grid = _label_grid(augmenter, matrix, (16, 16, 16))
+
+    # Outside the input counts as background, so sample (indicator - 1) and add 1.
+    scores = []
+    for value in range(4):
+        indicator = (label[0] == value).float()
+        offset = 1.0 if value == 0 else 0.0
+        scores.append(
+            torch.nn.functional.grid_sample(
+                (indicator - offset)[None, None], grid, mode="bilinear", align_corners=False
+            )[0, 0]
+            + offset
+        )
+    stacked = torch.stack(scores)
+    out = augmenter._resample_labels(label, grid)
+
+    # Compare by score, so a voxel with a tied top score may take either class.
+    own = stacked.gather(0, out.long())[0]
+    torch.testing.assert_close(own, stacked.max(0).values, atol=1e-5, rtol=0)
+
+
+def test_resample_labels_never_invents_a_class():
+    """Interpolation between classes 1 and 3 can't produce class 2."""
+    augmenter = aug.BatchAugmenter((16, 16, 16), aug.AugmentationSettings(), seed=0)
+    label = torch.ones(1, 16, 16, 16, dtype=torch.uint8)
+    label[:, :, 8:] = 3
+    out = augmenter._resample_labels(
+        label, _label_grid(augmenter, aug._rotation_matrix(0, 0.5), (16, 16, 16))
+    )
+    assert set(out.unique().tolist()) <= {0, 1, 3}
+
+
+def test_resample_labels_outside_the_input_is_background():
+    """Zooming far out pads the label with background."""
+    augmenter = aug.BatchAugmenter((8, 8, 8), aug.AugmentationSettings(), seed=0)
+    label = torch.ones(1, 8, 8, 8, dtype=torch.uint8)
+    out = augmenter._resample_labels(label, _label_grid(augmenter, np.eye(3) * 2.0, (8, 8, 8)))
+    assert out[0, 0, 0, 0] == 0
+    assert out[0, 4, 4, 4] == 1
+
+
+def test_resample_labels_all_background_stays_background():
+    """A patch with no foreground needs no interpolation."""
+    augmenter = aug.BatchAugmenter((8, 8, 8), aug.AugmentationSettings(), seed=0)
+    label = torch.zeros(1, 8, 8, 8, dtype=torch.uint8)
+    out = augmenter._resample_labels(
+        label, _label_grid(augmenter, aug._rotation_matrix(1, 0.3), (8, 8, 8))
+    )
+    assert out.sum() == 0

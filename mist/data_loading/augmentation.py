@@ -278,7 +278,7 @@ class BatchAugmenter:
 
         grid = self._sampling_grid(matrix, image.shape[1:], image.device)
         image = self._resample(image, grid, mode="bilinear", padding_mode="zeros")
-        label = self._resample(label, grid, mode="nearest", padding_mode="zeros")
+        label = self._resample_labels(label, grid)
         if dtm is not None:
             dtm = self._resample(dtm, grid, mode="bilinear", padding_mode="border")
             # One output voxel spans `factor` input voxels, so distances in
@@ -340,6 +340,48 @@ class BatchAugmenter:
             align_corners=False,
         )
         return resampled.squeeze(0).to(volume.dtype)
+
+    @staticmethod
+    def _resample_labels(label: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
+        """Resample a (C, D, H, W) label volume by per-class linear interpolation.
+
+        Each foreground class's indicator is resampled linearly and every voxel
+        takes the class with the highest score, as in nnU-Net's SpatialTransform.
+        Background needs no resampling of its own: the indicators sum to one and
+        interpolation is linear, so its score is one minus the foreground scores.
+        Outside the input, every foreground score falls to zero, so that region
+        becomes background. Ties go to background, then to the lower class.
+        """
+        channels = []
+        for channel in label:
+            indicator = torch.empty_like(channel, dtype=torch.float32)
+            result = torch.zeros(grid.shape[1:4], dtype=label.dtype, device=label.device)
+            best = None
+            total = None
+            for value in channel.unique():
+                if value == 0:
+                    continue
+                torch.eq(channel, value, out=indicator)
+                score = F.grid_sample(
+                    indicator[None, None],
+                    grid,
+                    mode="bilinear",
+                    padding_mode="zeros",
+                    align_corners=False,
+                )[0, 0]
+                if best is None:
+                    best = score.clone()
+                    total = score.clone()
+                    result[:] = value
+                else:
+                    better = score > best
+                    best[better] = score[better]
+                    result[better] = value
+                    total += score
+            if best is not None:
+                result[best <= 1.0 - total] = 0
+            channels.append(result)
+        return torch.stack(channels)
 
     def _center_crop(self, volume: torch.Tensor) -> torch.Tensor:
         """Crop the central patch_size region of one (C, D, H, W) volume."""

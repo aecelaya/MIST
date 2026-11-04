@@ -19,13 +19,19 @@ All notable changes to MIST are listed here, newest first. MIST follows
   resolution, and gamma (including on the inverted image). Noise, blur,
   brightness, and flips use nnU-Net's probabilities and ranges, and contrast now
   scales about the mean instead of acting as a second brightness. Rotation and
-  scaling resample a larger patch cropped around the same center, and apply to
+  scaling resample a larger patch cropped around the same center (images and
+  DTMs linearly, labels per class with an argmax, as in nnU-Net), and apply to
   DTMs too (previously zoom was skipped when DTMs were used). Scaling keeps DTM
   distances valid: unnormalized DTMs are divided by the scale factor, and
   quasi-2D patches, which scale only in-plane, skip scaling when DTMs are used.
 - Augmentation runs in PyTorch on each batch on the training device, so the
   DALI and generic loaders now apply identical transforms. The loaders only
   extract patches.
+- The generic loader's training workers now last the whole fold instead of
+  restarting at every pass over the data and every epoch, and each worker
+  remembers where each case's foreground is (up to 10,000 voxels per class)
+  after scanning its label once. Patches that run past the image edge no longer
+  read the whole case. DALI is unaffected.
 - New config keys under `training.augmentation.transforms`: `rotation`,
   `scaling`, `low_resolution`, and `gamma`. Missing keys mean enabled, so older
   configs get the new transforms; their `zoom` key is read as `scaling`.

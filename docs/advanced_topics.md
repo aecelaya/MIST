@@ -1290,8 +1290,9 @@ Rotation and scaling apply to the image, label, and distance transform maps
 (DTMs) together; the other transforms change only the image. To keep real image
 content at the borders of a rotated or zoomed-out patch, the data loader crops a
 larger patch around the same center, and the transform resamples it to the
-patch size. Images and DTMs use linear interpolation and labels use
-nearest-neighbor.
+patch size. Images and DTMs use linear interpolation. Labels are interpolated
+linearly one class at a time, and each voxel takes the class with the highest
+score, as in nnU-Net.
 
 A patch whose largest dimension is more than three times its smallest (e.g.,
 `256 × 256 × 5`) is treated as quasi-2D: rotation and scaling happen only in
@@ -1397,8 +1398,9 @@ Two things get resolved this way:
   machines, or a CUDA machine that skipped installing DALI — MIST falls back to
   its own generic, pure-PyTorch data loader automatically. Both loaders feed the
   same augmentation, which runs on the training device; the generic loader
-  reads and crops patches on the CPU, so it's slower per batch than DALI but
-  requires no NVIDIA-specific dependencies. If
+  reads and crops patches on the CPU in worker processes that last for the whole
+  fold, so it's slower per batch than DALI but requires no NVIDIA-specific
+  dependencies. If
   your hardware is CUDA but DALI isn't installed, MIST warns and falls back to
   the generic loader rather than failing outright — install
   `pip install "mist-medical[dali]"` to get DALI's acceleration back
