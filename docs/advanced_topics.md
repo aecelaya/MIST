@@ -209,6 +209,9 @@ What was planned for is recorded under `planning` in `config.json`. A later
 the network may not fit, or if the GPU has at least 1.5 times the memory it was
 planned for. To plan again, set both values back to `"auto"`.
 
+Training a different network with `--model` plans again automatically, since a
+patch that suits one network may not suit another. Values set by hand are kept.
+
 ### Inference batch size
 
 Validation and inference predict up to 4 patches at once, or fewer if the network

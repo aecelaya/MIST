@@ -409,10 +409,38 @@ class BaseTrainer(ABC):
         self.config["training"]["hardware"]["num_gpus"] = num_gpus
         io.write_json_file(self.config_json, self.config)
 
+    def _reset_plan_if_network_changed(self) -> None:
+        """Mark a saved plan for replanning if it was made for a different network.
+
+        A patch that suits one network may not suit another. Only values that came
+        from the plan are reset; anything set by hand, on the command line or in
+        config.json, is kept. An alias and the name it stands for are the same
+        network. --resume never gets here with a changed network, since
+        _check_resume_overrides rejects it.
+        """
+        planning = self.config.get("planning")
+        if not planning:
+            return
+        architecture = self.config["model"]["architecture"]
+        if canonical_architecture(planning["architecture"]) == canonical_architecture(architecture):
+            return
+
+        spatial = self.config["spatial_config"]
+        training = self.config["training"]
+        if spatial["patch_size"] == planning.get("patch_size"):
+            spatial["patch_size"] = patch_planning.AUTO
+        if training["batch_size_per_gpu"] == planning.get("batch_size_per_gpu"):
+            training["batch_size_per_gpu"] = patch_planning.AUTO
+        print_info(
+            f"The saved plan was made for {planning['architecture']}, so planning again for "
+            f"{architecture}. Values set by hand are kept."
+        )
+
     def _resolve_patch_and_batch(self) -> None:
         """Plan any "auto" patch or batch size and save the result to config.json."""
         spatial = self.config["spatial_config"]
         training = self.config["training"]
+        self._reset_plan_if_network_changed()
         if not (
             patch_planning.is_auto(spatial["patch_size"])
             or patch_planning.is_auto(training["batch_size_per_gpu"])
@@ -434,6 +462,8 @@ class BaseTrainer(ABC):
         )
         self.config["planning"] = {
             "architecture": self.config["model"]["architecture"],
+            "patch_size": plan.patch_size,
+            "batch_size_per_gpu": plan.batch_size_per_gpu,
             "gpu_memory_gb": round(planned_for / gib, 1),
             "amp": bool(training["amp"]),
             "estimated_gpu_memory_gb": round(plan.estimated_bytes / gib, 1),

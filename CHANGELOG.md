@@ -29,7 +29,8 @@ All notable changes to MIST are listed here, newest first. MIST follows
   the image size, and one global batch sees at most 5% of the dataset. New runs
   may get different patch and batch sizes than before; configs that already have
   values keep them.
-- Later `mist_train` runs warn if the saved plan doesn't suit their GPU.
+- Later `mist_train` runs warn if the saved plan doesn't suit their GPU, and plan
+  again if `--model` changes the network, keeping values set by hand.
 - **Validation and inference predict up to 4 patches at once,** or fewer if the
   network wouldn't fit, instead of `2 × batch_size_per_gpu`. This doesn't change
   predictions. Validation now honors `inference.inferer.params.sw_batch_size`.

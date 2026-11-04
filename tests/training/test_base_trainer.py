@@ -1946,3 +1946,110 @@ def test_configs_with_real_values_are_never_replanned(tmp_pipeline, mist_args, m
     trainer = DummyTrainer(mist_args)
     assert calls == []
     assert trainer.config["spatial_config"]["patch_size"] == [16, 16, 16]
+
+
+def _planned_run(tmp_pipeline, mist_args, monkeypatch):
+    """Run first-time planning with a fake plan; return the config path and calls."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto(results)
+    calls = []
+    _fake_plan(monkeypatch, calls)
+    DummyTrainer(mist_args)
+    assert len(calls) == 1
+    return cfg_path, calls
+
+
+def test_changing_the_network_plans_again(tmp_pipeline, mist_args, monkeypatch):
+    """A saved plan for another network is replaced, with the new one recorded."""
+    cfg_path, calls = _planned_run(tmp_pipeline, mist_args, monkeypatch)
+    mist_args.model = "other"
+    printed = []
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
+    DummyTrainer(mist_args)
+    assert len(calls) == 2
+    assert json.loads(cfg_path.read_text())["planning"]["architecture"] == "other"
+    assert any("planning again for other" in message for message in printed)
+
+
+def test_same_network_keeps_the_saved_plan(tmp_pipeline, mist_args, monkeypatch):
+    """Naming the network the plan was made for doesn't replan."""
+    _, calls = _planned_run(tmp_pipeline, mist_args, monkeypatch)
+    mist_args.model = "dummy"
+    DummyTrainer(mist_args)
+    assert len(calls) == 1
+
+
+def test_an_alias_of_the_planned_network_keeps_the_saved_plan(tmp_pipeline, mist_args, monkeypatch):
+    """nnunet and nnunet-res are the same network."""
+    cfg_path, calls = _planned_run(tmp_pipeline, mist_args, monkeypatch)
+    cfg = json.loads(cfg_path.read_text())
+    cfg["model"]["architecture"] = "nnunet"
+    cfg["planning"]["architecture"] = "nnunet"
+    cfg_path.write_text(json.dumps(cfg))
+    mist_args.model = "nnunet-res"
+    DummyTrainer(mist_args)
+    assert len(calls) == 1
+
+
+def test_changing_the_network_keeps_a_patch_set_on_the_command_line(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """--patch-size with a new --model stays, and only the batch is planned again."""
+    cfg_path, calls = _planned_run(tmp_pipeline, mist_args, monkeypatch)
+    seen = []
+    real = bt.patch_planning.plan_for_config
+
+    def plan(config, num_cases, num_gpus):
+        seen.append(
+            (config["spatial_config"]["patch_size"], config["training"]["batch_size_per_gpu"])
+        )
+        return real(config, num_cases, num_gpus)
+
+    monkeypatch.setattr(bt.patch_planning, "plan_for_config", plan)
+    mist_args.model = "other"
+    mist_args.patch_size = [48, 48, 48]
+    DummyTrainer(mist_args)
+    assert seen == [([48, 48, 48], "auto")]
+
+
+def test_changing_the_network_keeps_a_batch_edited_in_config(tmp_pipeline, mist_args, monkeypatch):
+    """A batch edited after planning isn't the plan's, so it stays."""
+    cfg_path, calls = _planned_run(tmp_pipeline, mist_args, monkeypatch)
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["batch_size_per_gpu"] = 7
+    cfg_path.write_text(json.dumps(cfg))
+    seen = []
+    real = bt.patch_planning.plan_for_config
+
+    def plan(config, num_cases, num_gpus):
+        seen.append(
+            (config["spatial_config"]["patch_size"], config["training"]["batch_size_per_gpu"])
+        )
+        return real(config, num_cases, num_gpus)
+
+    monkeypatch.setattr(bt.patch_planning, "plan_for_config", plan)
+    mist_args.model = "other"
+    DummyTrainer(mist_args)
+    assert seen == [("auto", 7)]
+
+
+def test_config_without_a_plan_keeps_its_values_for_a_new_network(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """Configs from earlier versions have no plan to replace."""
+    calls = []
+    _fake_plan(monkeypatch, calls)
+    mist_args.model = "other"
+    trainer = DummyTrainer(mist_args)
+    assert calls == []
+    assert trainer.config["spatial_config"]["patch_size"] == [16, 16, 16]
+
+
+def test_resume_with_a_changed_network_still_raises(tmp_pipeline, mist_args, monkeypatch):
+    """--resume can't replan a running job; the architecture check stops it first."""
+    _, calls = _planned_run(tmp_pipeline, mist_args, monkeypatch)
+    mist_args.model = "other"
+    mist_args.resume = True
+    with pytest.raises(ValueError, match="incompatible with the saved checkpoint"):
+        DummyTrainer(mist_args)
+    assert len(calls) == 1
