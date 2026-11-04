@@ -24,7 +24,7 @@ from mist.inference.tta.strategies import get_strategy
 from mist.models import model_loader
 from mist.postprocessing.postprocessor import Postprocessor
 from mist.preprocessing import preprocess, preprocessing_utils
-from mist.training import training_utils
+from mist.training import patch_planning, training_utils
 from mist.utils import hardware, io, progress_bar, sitk_io
 from mist.utils.console import print_error, print_section_header, print_success
 
@@ -55,10 +55,10 @@ def _build_predictor(
 
     inferer_params["patch_size"] = mist_configuration["spatial_config"]["patch_size"]
     inferer_params["device"] = device
-    inferer_params.setdefault(
-        "sw_batch_size",
-        2 * mist_configuration["training"]["batch_size_per_gpu"],
-    )
+    if "sw_batch_size" not in inferer_params:
+        inferer_params["sw_batch_size"] = patch_planning.inference_batch_size(
+            mist_configuration, device or inference_utils.get_default_device()
+        )
     inferer = get_inferer(inferer_name)(**inferer_params)
     ensembler = get_ensembler(ensembler_strategy)
     tta_transforms = get_strategy(tta_strategy if tta_enabled else "none")()

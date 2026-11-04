@@ -3,9 +3,10 @@
 from typing import Any
 
 import torch
-from monai.inferers import sliding_window_inference
 
 from mist.data_loading import augmentation, data_loader_registry
+from mist.inference.inferers.sliding_window import predict_with_fallback
+from mist.training import patch_planning
 from mist.training.trainers.base_trainer import BaseTrainer
 from mist.training.trainers.trainer_constants import TrainerConstants as constants
 from mist.utils import hardware
@@ -13,6 +14,9 @@ from mist.utils import hardware
 
 class Patch3DTrainer(BaseTrainer):
     """Trainer for 3D patch-based training in MIST."""
+
+    # Chosen at the first validation step, when the model is on its GPU.
+    _validation_batch_size: int | None = None
 
     def build_dataloaders(
         self,
@@ -188,17 +192,21 @@ class Patch3DTrainer(BaseTrainer):
         label = batch["label"]
 
         # Perform sliding window inference for validation.
-        sw_batch_size = 2 * self.config["training"]["batch_size_per_gpu"]
+        if self._validation_batch_size is None:
+            self._validation_batch_size = self.config["inference"]["inferer"]["params"].get(
+                "sw_batch_size"
+            ) or patch_planning.inference_batch_size(self.config, image.device)
         amp_context = hardware.autocast_context(self.config["training"]["amp"])
         with amp_context:
-            pred = sliding_window_inference(
+            pred = predict_with_fallback(
                 inputs=image,
                 roi_size=patch_size,
                 overlap=overlap,
-                sw_batch_size=sw_batch_size,
+                sw_batch_size=self._validation_batch_size,
                 predictor=model,
                 device=image.device,
             )
 
-        # Compute the loss using the criterion.
-        return self.validation_loss(label, pred)
+        # Compute the loss using the criterion. Running out of memory may have left
+        # the prediction on the CPU, but the loss goes back to the GPU for reducing.
+        return self.validation_loss(label.to(pred.device), pred).to(image.device)

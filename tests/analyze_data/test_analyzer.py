@@ -189,12 +189,6 @@ def _patch_env(monkeypatch, tmp_path):
         fake_get_float32_example_memory_size,
         raising=True,
     )
-    monkeypatch.setattr(
-        au,
-        "get_best_patch_size",
-        lambda _dims, _spacing, batch_size_per_gpu=2: [16, 16, 16],
-        raising=True,
-    )
 
     monkeypatch.setattr(sitk_io, "read_image", lambda _p: make_sitk_image(), raising=True)
     monkeypatch.setattr(
@@ -699,12 +693,6 @@ class TestAnalyzerAnalyzeDataset:
         """analyze_dataset populates all expected config fields."""
         monkeypatch.setattr(
             au,
-            "get_best_patch_size",
-            lambda _d, _s, batch_size_per_gpu=2: [24, 24, 24],
-            raising=True,
-        )
-        monkeypatch.setattr(
-            au,
             "get_resampled_image_dimensions",
             lambda *_: (10, 10, 10),
             raising=True,
@@ -760,7 +748,9 @@ class TestAnalyzerAnalyzeDataset:
         assert cfg["dataset_info"]["images"] == ["ct"]
         assert cfg["preprocessing"]["crop_to_foreground"] is True
         assert cfg["preprocessing"]["median_resampled_image_size"] == [10, 10, 10]
-        assert cfg["spatial_config"]["patch_size"] == [24, 24, 24]
+        # Planned at training, when the GPU and network are known.
+        assert cfg["spatial_config"]["patch_size"] == "auto"
+        assert cfg["training"]["batch_size_per_gpu"] == "auto"
         assert cfg["spatial_config"]["target_spacing"] is not None
         assert cfg["evaluation"] == {
             "background": {

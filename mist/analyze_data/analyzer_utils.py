@@ -6,12 +6,9 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import torch
 from sklearn.model_selection import KFold
 
 # MIST imports.
-from mist.analyze_data.analyzer_constants import AnalyzeConstants as constants
-from mist.models.nnunet.nnunet_utils import get_plain_unet_params, get_unet_params
 from mist.utils import io as io_utils
 
 
@@ -196,257 +193,6 @@ def add_folds_to_df(df: pd.DataFrame, n_splits: int = 5) -> pd.DataFrame:
     return df.sort_values("fold").reset_index(drop=True)
 
 
-def _get_voxel_budget(batch_size_per_gpu: int = 2) -> int:
-    """Return a per-patch voxel budget for patch size selection.
-
-    Queries the minimum total memory across all available CUDA devices and
-    scales linearly from a 16 GB / batch-size-2 reference (128^3 voxels per
-    patch). The budget scales inversely with batch_size_per_gpu so that total
-    memory per step (batch_size × patch_voxels × network overhead) stays
-    roughly constant. Falls back to the default constant when no GPU is
-    present.
-
-    Args:
-        batch_size_per_gpu: Number of samples per GPU per step. Defaults to 2,
-            matching the MIST default training configuration.
-
-    Returns:
-        Per-patch voxel budget as a positive integer.
-    """
-    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
-        min_mem = min(
-            torch.cuda.get_device_properties(i).total_memory
-            for i in range(torch.cuda.device_count())
-        )
-        return int(
-            min_mem
-            / constants.PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES
-            * constants.PATCH_BUDGET_REFERENCE_VOXELS
-            * constants.PATCH_BUDGET_REFERENCE_BATCH_SIZE
-            / batch_size_per_gpu
-        )
-    return constants.PATCH_BUDGET_DEFAULT_VOXELS
-
-
-def _largest_multiple_of_32_leq(value: float, minimum: int = 32) -> int:
-    """Return the largest multiple of 32 that is ≤ value, floored to minimum.
-
-    The nnUNet encoder downsamples each isotropic axis by stride 2 for up to
-    MAX_DEPTH=5 levels, so patch dimensions must be divisible by 2^5 = 32 for
-    exact decoder reconstruction.
-
-    Args:
-        value: Upper bound (inclusive, may be a float).
-        minimum: Smallest allowed return value. Defaults to 32.
-
-    Returns:
-        Largest multiple of 32 that does not exceed value, at least minimum.
-    """
-    snapped = int(value // 32) * 32
-    return max(snapped, minimum)
-
-
-def _snap_lr_to_nnunet_compatible(
-    lr_patch: int,
-    low_res_axis: int,
-    median_ip: int,
-    median_lr: int,
-    min_lr: int,
-    target_spacing: list[float],
-) -> int:
-    """Snap lr_patch to a value compatible with the nnUNet decoder.
-
-    ConvTranspose3d upsamples by the exact stride factor. If the encoder
-    halved a dimension from an odd value (e.g. 9 → 4), the decoder produces
-    8 rather than 9, causing a skip-connection size mismatch at runtime.
-
-    This function queries the nnUNet architecture planner with a trial patch
-    to find the cumulative stride on the low-res axis (z_divisor), then snaps
-    lr_patch up to the nearest compatible multiple ≤ median_lr. If snapping
-    up would exceed median_lr, it snaps down instead.
-
-    Args:
-        lr_patch: Initial low-res axis patch size (from budget calculation).
-        low_res_axis: Index of the low-resolution axis (0, 1, or 2).
-        median_ip: Median image size on the in-plane axes.
-        median_lr: Median image size on the low-res axis.
-        min_lr: Minimum allowed patch size on the low-res axis.
-        target_spacing: Target voxel spacing in mm, [x, y, z].
-
-    Returns:
-        Snapped lr_patch that is divisible by z_divisor.
-    """
-    trial = [median_ip, median_ip, median_ip]
-    trial[low_res_axis] = lr_patch
-    _, strides, _ = get_unet_params(trial, target_spacing)
-
-    # Compute the product of all strides > 1 on the low-res axis.
-    # strides[0] is always [1,1,1] (the input block); skip it.
-    z_divisor = 1
-    for s in strides[1:]:
-        if s[low_res_axis] > 1:
-            z_divisor *= s[low_res_axis]
-
-    if z_divisor <= 1:
-        return lr_patch
-
-    # Prefer snapping up (preserves more coverage along the low-res axis).
-    snapped_up = ((lr_patch + z_divisor - 1) // z_divisor) * z_divisor
-    if snapped_up <= median_lr:
-        return snapped_up
-
-    # Fall back to snapping down if snapping up would exceed the median.
-    snapped_down = (lr_patch // z_divisor) * z_divisor
-    return max(snapped_down, min_lr)
-
-
-def _snap_to_network_compatible(patch: list[int], target_spacing: list[float]) -> list[int]:
-    """Reduce a patch size until every UNet topology MIST plans fits it.
-
-    Each axis must be divisible by the total downsampling along it, or the
-    decoder can't match the encoder's skip connections. The planners can differ:
-    nnunet-plain has no depth limit, so a multiple of 32 like 288 is downsampled
-    six times and needs a multiple of 64, while the others stop at five. Reducing
-    an axis can change its depth, so this repeats until nothing changes.
-
-    Args:
-        patch: Patch size as a list of three integers.
-        target_spacing: Target voxel spacing in mm, [x, y, z].
-
-    Returns:
-        The patch size, reduced where needed.
-    """
-    patch = list(patch)
-    while True:
-        _, strides, _ = get_unet_params(patch, target_spacing)
-        _, _, plain_divisors = get_plain_unet_params(patch, target_spacing)
-        snapped = []
-        for axis, size in enumerate(patch):
-            divisor = max(plain_divisors[axis], int(np.prod([s[axis] for s in strides])))
-            snapped.append(max((size // divisor) * divisor, 1))
-        if snapped == patch:
-            return patch
-        patch = snapped
-
-
-def get_best_patch_size(
-    median_resampled_size: list[int],
-    target_spacing: list[float],
-    batch_size_per_gpu: int = 2,
-) -> list[int]:
-    """Select a patch size from the median resampled image size and spacing.
-
-    Uses a GPU-memory-derived voxel budget and the target spacing to choose
-    between two strategies:
-
-    **Quasi-2D mode** (triggered when the target spacing is still anisotropic
-    after analysis, i.e. max/min spacing > MAX_DIVIDED_BY_MIN_SPACING_THRESHOLD):
-    The low-resolution axis is identified as the axis with the largest spacing.
-    Its patch size is chosen as the largest value that leaves the full voxel
-    budget available for the in-plane axes (clamped to
-    MIN_LOW_RES_AXIS_PATCH_SIZE … median_lr), then snapped to the nearest
-    multiple of the nnUNet cumulative stride on that axis so the decoder can
-    reconstruct without skip-connection size mismatches. Both in-plane axes
-    receive the same patch size (largest multiple of 32 that fits within the
-    budget).
-
-    **3D isotropic mode** (all other cases):
-    A physically isotropic target patch extent in mm is computed from the
-    budget, then converted to per-axis voxel counts. Axes whose raw voxel
-    count would exceed the median image size are clamped and the remaining
-    budget is redistributed to the unclamped axes. Each axis is then snapped
-    down to the nearest multiple of 32 (minimum 32).
-
-    In both modes the result is finally reduced, if needed, to fit every UNet
-    topology MIST plans (see _snap_to_network_compatible).
-
-    Args:
-        median_resampled_size: Median image size after resampling, [x, y, z].
-        target_spacing: Target voxel spacing in mm, [x, y, z].
-        batch_size_per_gpu: Number of samples per GPU per step. The voxel
-            budget scales inversely with this value so that total memory per
-            step stays constant. Defaults to 2 (the MIST default).
-
-    Returns:
-        Patch size as a list of three integers.
-    """
-    budget = _get_voxel_budget(batch_size_per_gpu)
-
-    anisotropy_ratio = max(target_spacing) / min(target_spacing)
-    low_res_axis = int(np.argmax(target_spacing))
-    in_plane_axes = [i for i in range(3) if i != low_res_axis]
-
-    if anisotropy_ratio > constants.MAX_DIVIDED_BY_MIN_SPACING_THRESHOLD:
-        # Quasi-2D: maximize in-plane resolution; keep low-res axis small.
-        # Use min() so the square in-plane patch fits both in-plane axes without
-        # requiring padding on the smaller one (using max() could select a patch
-        # larger than one of the axes).
-        median_lr = median_resampled_size[low_res_axis]
-        median_ip = min(median_resampled_size[i] for i in in_plane_axes)
-
-        # Largest low-res patch that leaves the full budget for in-plane.
-        # Enforce MIN_LOW_RES_AXIS_PATCH_SIZE unless the image itself is
-        # smaller, and never exceed the median image depth.
-        min_lr = min(constants.MIN_LOW_RES_AXIS_PATCH_SIZE, median_lr)
-        lr_patch = int(np.clip(budget / (median_ip**2), min_lr, median_lr))
-
-        # Snap to the nearest multiple of the nnUNet cumulative low-res stride
-        # so the decoder skip connections always match in spatial size.
-        lr_patch = _snap_lr_to_nnunet_compatible(
-            lr_patch, low_res_axis, median_ip, median_lr, min_lr, target_spacing
-        )
-
-        # In-plane: both axes get the same patch (largest multiple of 32).
-        # Clamp to median_ip before snapping so the snap-to-32 always operates
-        # on a value ≤ median_ip, guaranteeing the result is a valid multiple
-        # of 32 (min(512, 491) = 491 is not a multiple of 32).
-        ip_raw = min(int(round(np.sqrt(budget / lr_patch))), median_ip)
-        ip_patch = _largest_multiple_of_32_leq(ip_raw)
-
-        patch = [ip_patch, ip_patch, ip_patch]
-        patch[low_res_axis] = lr_patch
-        return _snap_to_network_compatible(patch, target_spacing)
-
-    # 3D isotropic mode: distribute budget proportionally in physical space,
-    # iteratively clamping axes that would exceed the median image size and
-    # redistributing the freed budget to the remaining axes.
-    free_axes = list(range(3))
-    fixed: dict[int, int] = {}
-
-    while free_axes:
-        free_spacings = [target_spacing[i] for i in free_axes]
-        remaining_budget = float(budget)
-        for v in fixed.values():
-            remaining_budget /= v
-
-        n = len(free_axes)
-        target_mm = (remaining_budget * float(np.prod(free_spacings))) ** (1.0 / n)
-
-        new_fixed = [
-            i for i in free_axes if (target_mm / target_spacing[i]) >= median_resampled_size[i]
-        ]
-        if not new_fixed:
-            break
-
-        for i in new_fixed:
-            # Store the snapped value so budget redistribution reflects what
-            # will actually be placed in the patch, not the raw median.
-            fixed[i] = _largest_multiple_of_32_leq(median_resampled_size[i])
-            free_axes.remove(i)
-
-    patch = []
-    for i in range(3):
-        if i in fixed:
-            raw = float(fixed[i])
-        else:
-            raw = target_mm / target_spacing[i]
-        # Round to nearest int before snapping to avoid floating-point
-        # precision causing e.g. 127.9999 to snap to 96 instead of 128.
-        clamped = min(int(round(raw)), median_resampled_size[i])
-        patch.append(_largest_multiple_of_32_leq(clamped))
-    return _snap_to_network_compatible(patch, target_spacing)
-
-
 def build_evaluation_config(dataset: dict[str, Any]) -> dict[str, Any]:
     """Build evaluation field for the MIST configuration.
 
@@ -513,7 +259,7 @@ def build_base_config() -> dict[str, Any]:
             "labels": None,
         },
         "spatial_config": {
-            "patch_size": None,
+            "patch_size": "auto",
             "target_spacing": None,
         },
         "preprocessing": {
@@ -545,7 +291,7 @@ def build_base_config() -> dict[str, Any]:
             "validate_every": 1,
             "epochs": 1000,
             "min_steps_per_epoch": 250,
-            "batch_size_per_gpu": 2,
+            "batch_size_per_gpu": "auto",
             "dali_foreground_prob": 0.6,
             "loss": {
                 "name": "dice_ce",

@@ -34,9 +34,10 @@ from mist.models.model_loader import (
     validate_encoder_compatibility,
 )
 from mist.models.model_registry import canonical_architecture, get_model_from_registry
-from mist.training import training_utils
+from mist.training import patch_planning, training_utils
 from mist.training.lr_schedulers.lr_scheduler_registry import get_lr_scheduler
 from mist.training.optimizers.optimizer_registry import get_optimizer
+from mist.training.planning_constants import PlanningConstants
 from mist.training.trainers.trainer_constants import TrainerConstants
 from mist.utils import hardware, io, progress_bar
 from mist.utils.console import (
@@ -83,6 +84,10 @@ class BaseTrainer(ABC):
 
         # Resolve hardware configuration.
         self._update_num_gpus_in_config()
+
+        # Plan the patch and batch size the first time training runs; later runs
+        # reuse them, with a warning if they don't suit this machine's GPU.
+        self._resolve_patch_and_batch()
 
         # Set up batch size based on the number of GPUs.
         self.batch_size = self.config["training"]["batch_size_per_gpu"] * max(
@@ -403,6 +408,46 @@ class BaseTrainer(ABC):
 
         self.config["training"]["hardware"]["num_gpus"] = num_gpus
         io.write_json_file(self.config_json, self.config)
+
+    def _resolve_patch_and_batch(self) -> None:
+        """Plan any "auto" patch or batch size and save the result to config.json."""
+        spatial = self.config["spatial_config"]
+        training = self.config["training"]
+        if not (
+            patch_planning.is_auto(spatial["patch_size"])
+            or patch_planning.is_auto(training["batch_size_per_gpu"])
+        ):
+            patch_planning.check_plan_fits(
+                self.config, patch_was_set=getattr(self.mist_args, "patch_size", None) is not None
+            )
+            return
+
+        num_gpus = max(1, training["hardware"]["num_gpus"])
+        plan = patch_planning.plan_for_config(self.config, len(self.paths), num_gpus)
+        spatial["patch_size"] = plan.patch_size
+        training["batch_size_per_gpu"] = plan.batch_size_per_gpu
+
+        memory = patch_planning.detect_gpu_memory_bytes()[0]
+        gib = 1024**3
+        planned_for = (
+            memory if memory is not None else (PlanningConstants.DEFAULT_GPU_MEMORY_GB * gib)
+        )
+        self.config["planning"] = {
+            "architecture": self.config["model"]["architecture"],
+            "gpu_memory_gb": round(planned_for / gib, 1),
+            "amp": bool(training["amp"]),
+            "estimated_gpu_memory_gb": round(plan.estimated_bytes / gib, 1),
+        }
+        io.write_json_file(self.config_json, self.config)
+        print_info(
+            f"Planned {self.config['model']['architecture']}: patch {plan.patch_size}, batch "
+            f"size {plan.batch_size_per_gpu} per GPU, about {plan.estimated_bytes / gib:.1f} of "
+            f"{planned_for / gib:.1f} GiB ({'BF16' if training['amp'] else 'FP32'})."
+        )
+        if plan.estimated_bytes > planned_for:
+            print_warning(
+                f"This may not fit in {planned_for / gib:.1f} GiB, even at the smallest patch."
+            )
 
     def _validate_pretrained_config(self) -> None:
         """Validate pretrained encoder compatibility if --pretrained-weights set.

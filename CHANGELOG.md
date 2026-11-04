@@ -20,14 +20,22 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Changed
 
-- **`nnunet-plain` is the new default architecture for new `mist_analyze`
-  runs.** The name `nnunet` still builds the same residual network as before and
-  is interchangeable with `nnunet-res`, so existing configs, checkpoints, and
-  `--model nnunet` behave as they did. To compare against earlier results when
-  rerunning a pipeline from scratch, pass `--model nnunet`.
-- `mist_analyze` now picks patch sizes that fit every UNet topology, reducing an
-  axis if `nnunet-plain` would need a higher multiple. For example, an in-plane
-  size of 288 becomes 256, since a size that large is downsampled six times.
+- **The patch and batch size are now chosen at the start of training,** from an
+  estimate of the network's GPU memory, instead of at analysis from a fixed voxel
+  budget. `mist_analyze` leaves both as `"auto"`, and the first `mist_train` plans
+  them for its own GPU, network, and precision, then saves them to `config.json`.
+  The search shrinks the axis taking up the most of the image until the network
+  fits, as nnU-Net does. The batch size stays at 2 unless the patch has reached
+  the image size, and one global batch sees at most 5% of the dataset. New runs
+  may get different patch and batch sizes than before; configs that already have
+  values keep them.
+- Later `mist_train` runs warn if the saved plan doesn't suit their GPU.
+- **Validation and inference predict up to 4 patches at once,** or fewer if the
+  network wouldn't fit, instead of `2 × batch_size_per_gpu`. This doesn't change
+  predictions. Validation now honors `inference.inferer.params.sw_batch_size`.
+- **Inference recovers from running out of GPU memory** by halving its batch, then
+  stitching on the CPU, and holds results for each test-time flip on the CPU until
+  they're averaged.
 - **Training augmentation now follows nnU-Net's default transforms.** New
   transforms: rotation (±30° per axis, or ±180° in-plane for quasi-2D patches),
   scaling from 0.7 to 1.4 (replacing zoom, which only zoomed in), simulated low

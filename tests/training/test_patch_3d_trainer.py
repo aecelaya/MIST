@@ -378,7 +378,7 @@ def test_training_step_parameters_updated_after_step(tmp_pipeline, mist_args):
     ), "Model parameters should change after a training step"
 
 
-@patch("mist.training.trainers.patch_3d_trainer.sliding_window_inference")
+@patch("mist.training.trainers.patch_3d_trainer.predict_with_fallback")
 def test_validation_step_calls_sliding_window_and_validation_loss(
     mock_swi,
     tmp_pipeline,
@@ -387,7 +387,7 @@ def test_validation_step_calls_sliding_window_and_validation_loss(
     """Validate sliding-window inference wiring and validation loss usage.
 
     Ensures:
-      - `sliding_window_inference` is called with expected keyword arguments.
+      - Sliding window inference is called with expected keyword arguments.
       - The model instance is passed as the `predictor`.
       - The ROI size and overlap come from the trainer config.
       - The trainer's `validation_loss` is called with the prediction.
@@ -439,7 +439,7 @@ def test_validation_step_calls_sliding_window_and_validation_loss(
     assert captured["y_pred"] is not None
 
 
-@patch("mist.training.trainers.patch_3d_trainer.sliding_window_inference")
+@patch("mist.training.trainers.patch_3d_trainer.predict_with_fallback")
 def test_validation_step_uses_autocast_when_amp_enabled(
     mock_swi, tmp_pipeline, mist_args, monkeypatch
 ):
@@ -479,7 +479,7 @@ def test_validation_step_uses_autocast_when_amp_enabled(
     assert autocast_entered[0]["dtype"] == torch.bfloat16
 
 
-@patch("mist.training.trainers.patch_3d_trainer.sliding_window_inference")
+@patch("mist.training.trainers.patch_3d_trainer.predict_with_fallback")
 def test_validation_step_no_autocast_when_amp_disabled(
     mock_swi, tmp_pipeline, mist_args, monkeypatch
 ):

@@ -957,10 +957,12 @@ def test_build_predictor_use_amp_false_when_amp_missing(mock_mist_config, monkey
     assert observed.get("use_amp") is False
 
 
-def test_build_predictor_sw_batch_size_is_2x_batch_size_per_gpu(mock_mist_config, monkeypatch):
-    """_build_predictor passes sw_batch_size = 2 * batch_size_per_gpu."""
+def test_build_predictor_sw_batch_size_is_capped_regardless_of_training_batch(
+    mock_mist_config, monkeypatch
+):
+    """A large training batch doesn't set the inference batch."""
     cfg = copy.deepcopy(mock_mist_config)
-    cfg["training"]["batch_size_per_gpu"] = 3
+    cfg["training"]["batch_size_per_gpu"] = 10
 
     captured_inferer_kwargs = {}
 
@@ -975,7 +977,7 @@ def test_build_predictor_sw_batch_size_is_2x_batch_size_per_gpu(mock_mist_config
 
     ir._build_predictor(cfg, models=[], device="cpu")
 
-    assert captured_inferer_kwargs.get("sw_batch_size") == 6
+    assert captured_inferer_kwargs.get("sw_batch_size") == 4
 
 
 def test_build_predictor_respects_user_sw_batch_size(mock_mist_config, monkeypatch):

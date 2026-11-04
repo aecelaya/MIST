@@ -24,6 +24,8 @@ import SimpleITK as sitk
 import torch
 
 from mist.data_loading import augmentation, data_loader_registry
+from mist.training import patch_planning
+from mist.utils import hardware
 
 
 def _paths(numpy_dir: Path, subdir: str, ids: list[str]) -> list[str]:
@@ -52,9 +54,12 @@ def main() -> None:
 
     config = json.loads((args.results / "config.json").read_text())
     training = config["training"]
-    patch_size = tuple(config["spatial_config"]["patch_size"])
-    labels = config["dataset_info"]["labels"]
     ids = list(pd.read_csv(args.results / "train_paths.csv")["id"])
+    # Before training, the patch and batch size may still be "auto".
+    training["amp"] = hardware.resolve_amp(training["amp"], warn=False)
+    plan = patch_planning.plan_for_config(config, len(ids), max(1, torch.cuda.device_count()))
+    patch_size = tuple(plan.patch_size)
+    labels = config["dataset_info"]["labels"]
     settings = augmentation.settings_from_config(training["augmentation"])
     margin = augmentation.spatial_margin(patch_size, settings)
     print(f"Patch size {patch_size}, margin {margin}, settings {settings}")
@@ -63,7 +68,7 @@ def main() -> None:
         "image_paths": _paths(args.numpy, "images", ids),
         "label_paths": _paths(args.numpy, "labels", ids),
         "dtm_paths": _paths(args.numpy, "dtms", ids) if args.dtms else None,
-        "batch_size": training["batch_size_per_gpu"],
+        "batch_size": plan.batch_size_per_gpu,
         "roi_size": patch_size,
         "labels": labels[1:],
         "oversampling": training["dali_foreground_prob"],

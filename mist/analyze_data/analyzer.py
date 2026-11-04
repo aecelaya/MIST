@@ -690,16 +690,6 @@ class Analyzer:
         self.config["model"]["params"]["in_channels"] = len(self.config["dataset_info"]["images"])
         self.config["model"]["params"]["out_channels"] = len(self.config["dataset_info"]["labels"])
 
-        # Set a default patch size based on the median resampled image size.
-        # The patch size can be overridden by the user in the config file or in
-        # the command line arguments for the training pipeline.
-        patch_size = analyzer_utils.get_best_patch_size(
-            median_dims,
-            target_spacing,
-            batch_size_per_gpu=self.config["training"]["batch_size_per_gpu"],
-        )
-        self.config["spatial_config"]["patch_size"] = [int(size) for size in patch_size]
-
         # Build and add the evaluation metrics to the evaluation section of the
         # configuration.
         evaluation_config = analyzer_utils.build_evaluation_config(self.dataset_info)

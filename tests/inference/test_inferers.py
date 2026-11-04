@@ -13,7 +13,7 @@ from mist.inference.inferers.inferer_registry import (
     list_inferers,
     register_inferer,
 )
-from mist.inference.inferers.sliding_window import SlidingWindowInferer
+from mist.inference.inferers.sliding_window import SlidingWindowInferer, predict_with_fallback
 
 
 class DummyInferer(AbstractInferer):
@@ -143,3 +143,86 @@ def test_registry_rejects_duplicate_name():
         class DuplicateInferer(AbstractInferer):
             def infer(self, image, model):
                 return model(image)
+
+
+# Recovering from running out of memory.
+
+
+def _oom_until(max_batch=None, stitch_on_cpu=False):
+    """Fake MONAI inference that runs out of memory above some limit."""
+    calls = []
+
+    def fake(inputs, sw_batch_size, device, **_):
+        calls.append((sw_batch_size, torch.device(device).type))
+        too_large = max_batch is not None and sw_batch_size > max_batch
+        needs_cpu = stitch_on_cpu and torch.device(device).type != "cpu"
+        if too_large or needs_cpu:
+            raise torch.cuda.OutOfMemoryError("out of memory")
+        return torch.zeros_like(inputs)
+
+    return fake, calls
+
+
+@pytest.fixture
+def fake_empty_cache(monkeypatch):
+    """Count cache clears; a CPU-only build has no real CUDA cache."""
+    cleared = []
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: cleared.append(1))
+    return cleared
+
+
+@patch("monai.inferers.sliding_window_inference")
+def test_fallback_is_silent_when_memory_suffices(mock_swi, fake_empty_cache):
+    """Normal runs make one call and clear nothing."""
+    mock_swi.side_effect, calls = _oom_until()
+    predict_with_fallback(torch.zeros(1, 1, 4, 4, 4), 4, "cpu", roi_size=(2, 2, 2))
+    assert calls == [(4, "cpu")]
+    assert not fake_empty_cache
+
+
+@patch("monai.inferers.sliding_window_inference")
+def test_fallback_halves_the_batch_until_it_fits(mock_swi, fake_empty_cache):
+    """Running out of memory retries at half the batch, clearing the cache first."""
+    mock_swi.side_effect, calls = _oom_until(max_batch=1)
+    result = predict_with_fallback(torch.zeros(1, 1, 4, 4, 4), 4, "cpu", roi_size=(2, 2, 2))
+    assert [c[0] for c in calls] == [4, 2, 1]
+    assert len(fake_empty_cache) == 2
+    assert result.shape == (1, 1, 4, 4, 4)
+
+
+@patch("monai.inferers.sliding_window_inference")
+def test_fallback_stitches_on_cpu_as_a_last_resort(mock_swi, fake_empty_cache):
+    """At a batch of 1, the output moves off the GPU."""
+    mock_swi.side_effect, calls = _oom_until(stitch_on_cpu=True)
+    predict_with_fallback(torch.zeros(1, 1, 4, 4, 4), 2, "meta", roi_size=(2, 2, 2))
+    assert calls == [(2, "meta"), (1, "meta"), (1, "cpu")]
+
+
+@patch("monai.inferers.sliding_window_inference")
+def test_fallback_gives_up_when_nothing_is_left_to_try(mock_swi, fake_empty_cache):
+    """With nothing left to try, the error reaches the caller."""
+    mock_swi.side_effect = torch.cuda.OutOfMemoryError("out of memory")
+    with pytest.raises(torch.cuda.OutOfMemoryError):
+        predict_with_fallback(torch.zeros(1, 1, 4, 4, 4), 1, "cpu", roi_size=(2, 2, 2))
+
+
+def test_batch_size_does_not_change_predictions():
+    """Falling back to a smaller batch is safe because results stay identical."""
+    model = torch.nn.Sequential(
+        torch.nn.Conv3d(1, 2, 3, padding=1), torch.nn.InstanceNorm3d(2)
+    ).eval()
+    image = torch.randn(1, 1, 24, 24, 24)
+    with torch.no_grad():
+        results = [
+            predict_with_fallback(
+                image,
+                batch,
+                "cpu",
+                roi_size=(12, 12, 12),
+                predictor=model,
+                overlap=0.5,
+                mode="gaussian",
+            )
+            for batch in (1, 2, 4)
+        ]
+    assert torch.equal(results[0], results[1]) and torch.equal(results[0], results[2])

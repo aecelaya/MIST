@@ -72,7 +72,7 @@ Below is an example of a valid `config.json` file.
     "validate_every": 1,
     "epochs": 1000,
     "min_steps_per_epoch": 250,
-    "batch_size_per_gpu": 2,
+    "batch_size_per_gpu": "auto",
     "dali_foreground_prob": 0.6,
 
     "loss": {
@@ -168,94 +168,58 @@ controls a different part of the MIST pipeline:
 | `preprocessing`  | Defines how raw images are resampled, cropped, and normalized before training.                                                                                                                                                                                                                                                                        |
 | `model`          | Specifies the model architecture and its hyperparameters (`in_channels`, `out_channels`, and any architecture-specific params such as `kernel_size` for MedNeXt).                                                                                                                                                                                     |
 | `training`       | Controls training loop, cross-validation folds, loss function, optimizer, and augmentations.                                                                                                                                                                                                                                                          |
-| `inference`      | Settings for inference, including sliding-window parameters, ensembling, and test-time augmentation. `patch_overlap` must be in `[0, 1)` — a value of `1.0` is invalid. `sw_batch_size` controls how many patches are processed per forward pass during sliding-window inference; it defaults to `2 × batch_size_per_gpu` and can be overridden here. |
+| `inference`      | Settings for inference, including sliding-window parameters, ensembling, and test-time augmentation. `patch_overlap` must be in `[0, 1)` — a value of `1.0` is invalid. `sw_batch_size` controls how many patches are processed per forward pass during validation and inference; by default it's at most 4 and fits the GPU, and it can be set here. |
 | `evaluation`     | Metrics and class definitions for model evaluation.                                                                                                                                                                                                                                                                                                   |
 
-## Patch size selection
+## Patch and batch size selection
 
-The analysis step automatically selects a patch size and writes it to
-`spatial_config.patch_size` in `config.json`. The algorithm uses available GPU
-memory and the target spacing to choose the best patch for the data. The patch
-size can always be overridden by editing `config.json` or passing `--patch-size`
-to `mist_train`.
+`mist_analyze` leaves `spatial_config.patch_size` and `training.batch_size_per_gpu`
+as `"auto"`. The first `mist_train` run chooses them for the network it's about to
+train, on the GPU it's running on, prints the result, and saves it to
+`config.json`. Later runs, `--resume`, and inference reuse the saved values, so
+analysis and preprocessing can run on a different machine from training. MIST
+assumes all GPUs on the training machine are the same.
 
-### Voxel budget
+Either value can be set by hand in `config.json`, or with `--patch-size` and
+`--batch-size-per-gpu` in `mist_train`, and is then kept; the other is chosen
+around it.
 
-The per-patch voxel budget is derived from the minimum GPU memory across all
-available CUDA devices, scaled linearly from a 16 GB / batch-size-2 reference,
-and inversely proportional to the configured batch size per GPU:
+### How it's chosen
 
-```
-budget = (min_gpu_memory / 16 GB) × 128³ × (2 / batch_size_per_gpu)
-```
+1. **Start large.** The search starts from a large patch shaped by the target
+   spacing, clipped to the median resampled image size, and reduced to the nearest
+   size the network can use.
+2. **Shrink until it fits.** While the network doesn't fit in 90% of the GPU's
+   memory at a batch size of 2, the search shrinks the axis taking up the largest
+   share of the image, as nnU-Net's planner does.
+3. **Spend what's left on the batch.** The batch size stays at 2 if the patch had
+   to shrink. If the patch reached the image size with memory to spare, the batch
+   size grows to use it, up to a limit: one global batch sees at most 5% of the
+   dataset's voxels.
 
-This means an 8 GB GPU at batch size 2 yields a budget of `128³ / 2 ≈ 1 M`
-voxels, a 40 GB A100 at batch size 2 yields roughly `128³ × 2.5 ≈ 160³` voxels,
-and doubling the batch size to 4 halves the per-patch budget to keep total
-memory per step constant. If no GPU is detected at analysis time, the fallback
-budget is `128³`.
+The memory estimate counts the activations of the actual network, so it works for
+every architecture. It also accounts for BF16 or FP32, since FP32 takes roughly
+twice the activation memory. It's still an estimate: if training runs out of
+memory, use a smaller `--patch-size`.
 
-The `128³` reference is a **conservative heuristic** chosen to leave headroom
-for network activations, gradients, and optimizer state — it is not tuned to a
-specific architecture. Heavier models (e.g. MedNeXt-large, SwinUNETR) may
-require a smaller patch size than the one selected automatically. If training
-runs out of memory, reduce `patch_size` in `config.json` or via `--patch-size`.
-If there is memory headroom to spare, increasing the patch size may improve
-segmentation accuracy.
+### Training on a different GPU later
 
-!!! note
+What was planned for is recorded under `planning` in `config.json`. A later
+`mist_train` compares it with its own GPU and warns, without changing anything, if
+the network may not fit, or if the GPU has at least 1.5 times the memory it was
+planned for. To plan again, set both values back to `"auto"`.
 
-    The budget is only used during analysis to choose the initial patch size.
-    It is not stored in `config.json` and does not affect reproducibility —
-    only the resulting `patch_size` values matter for training.
+### Inference batch size
 
-### 3D isotropic mode
+Validation and inference predict up to 4 patches at once, or fewer if the network
+wouldn't fit. This is worked out on whichever GPU is running and isn't saved,
+because it doesn't change the predictions. To choose your own, set
+`inference.inferer.params.sw_batch_size` in `config.json`.
 
-Used when `max(target_spacing) / min(target_spacing) ≤ 3`. A physically
-isotropic patch extent is computed from the budget:
-
-```
-target_mm = (budget × prod(target_spacing))^(1/3)
-patch[i]  = target_mm / target_spacing[i]   for each axis i
-```
-
-Any axis whose raw patch would exceed the median resampled image size is clamped
-to that size; the freed voxels are redistributed to the remaining axes. Every
-axis is then snapped down to the **nearest multiple of 32 ≤ the clamped value**
-(minimum 32), so a clamped axis ends up at the largest multiple of 32 that fits
-within the median image size. This snapping is required because the nnUNet
-encoder applies up to 5 stride-2 downsampling steps (2⁵ = 32), and the decoder
-must reconstruct the output at the original resolution — any dimension not
-divisible by 32 would produce a size mismatch between encoder and decoder
-feature maps.
-
-### Quasi-2D mode
-
-Used when `max(target_spacing) / min(target_spacing) > 3`. In highly anisotropic
-data (e.g., thick-slice CT where the z-spacing is 5–10× the in-plane spacing),
-allocating equal voxels to every axis would waste most of the budget on the
-low-resolution axis while under-sampling the high-resolution in-plane axes.
-Quasi-2D mode instead maximises in-plane resolution by keeping the
-low-resolution axis thin.
-
-The **low-resolution axis** is whichever axis has the largest spacing (not
-assumed to be z). Its patch size is chosen as the largest value that still
-leaves the full budget available for the two in-plane axes:
-
-```
-lr_patch  = budget / max(in_plane_median)²
-            clamped to [MIN_LOW_RES_AXIS_PATCH_SIZE, median_lr]
-
-ip_patch  = sqrt(budget / lr_patch)
-            snapped to nearest multiple of 32, capped at median_ip
-```
-
-Both in-plane axes receive the same patch size (square patch). The
-low-resolution axis is not snapped to a multiple of 32 — the nnUNet uses
-stride-1 (no downsampling) in that direction, so feature map sizes are preserved
-and no divisibility constraint applies. Any size ≥ 1 is valid. The minimum
-low-resolution patch size is 5, ensuring a 3×3×3 convolution kernel has genuine
-(non-padded) context at every position along that axis.
+Memory also depends on the image, so MIST recovers if it runs out: it halves the
+batch and tries again, and at a batch of 1 it stitches that image's result on the
+CPU, which is slower but takes far less GPU memory. Results for each test-time flip
+are held on the CPU until they're averaged.
 
 ### Overriding the patch size
 

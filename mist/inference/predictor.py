@@ -91,7 +91,9 @@ class Predictor:
                     augmented_image = transform(image)
                     prediction = self.inferer(augmented_image, model)
                     restored = transform.inverse(prediction)
-                    model_predictions.append(restored)
+                    # Hold results on the CPU: every flip for every fold would
+                    # otherwise stay on the GPU until they're averaged.
+                    model_predictions.append(restored.cpu())
 
                 # Ensembling across TTA variants for this model.
                 combined_prediction = self.ensembler(model_predictions)

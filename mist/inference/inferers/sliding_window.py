@@ -1,6 +1,7 @@
 """Sliding window inferer implementation using MONAI."""
 
 from collections.abc import Callable
+from typing import Any
 
 import monai
 import torch
@@ -10,6 +11,48 @@ from mist.inference.inference_constants import InferenceConstants as ic
 from mist.inference.inference_utils import get_default_device
 from mist.inference.inferers.base import AbstractInferer
 from mist.inference.inferers.inferer_registry import register_inferer
+from mist.utils.console import print_warning
+
+
+def predict_with_fallback(
+    inputs: torch.Tensor,
+    sw_batch_size: int,
+    device: torch.device | str,
+    **kwargs: Any,
+) -> torch.Tensor:
+    """Run sliding window inference, recovering from running out of memory.
+
+    Memory depends on the image as well as the batch, so no plan can guarantee a
+    fit. On running out of memory this halves the batch and tries again, which
+    doesn't change the predictions. At a batch of 1 it stitches the result on the
+    CPU, as nnU-Net does for large images, which is slower but takes far less GPU
+    memory.
+
+    Args:
+        inputs: Image tensor of shape (1, C, D, H, W).
+        sw_batch_size: How many patches to predict at once.
+        device: Where to stitch the output.
+        **kwargs: Other arguments for MONAI's sliding_window_inference.
+
+    Returns:
+        The prediction, on `device` or, after falling back, on the CPU.
+    """
+    batch, stitch_device = sw_batch_size, torch.device(device)
+    while True:
+        try:
+            return monai.inferers.sliding_window_inference(  # type: ignore[attr-defined]
+                inputs=inputs, sw_batch_size=batch, device=stitch_device, **kwargs
+            )
+        except torch.cuda.OutOfMemoryError:
+            if batch == 1 and stitch_device.type == "cpu":
+                raise
+        if batch > 1:
+            batch //= 2
+            print_warning(f"Ran out of GPU memory; retrying with {batch} patches at once.")
+        else:
+            stitch_device = torch.device("cpu")
+            print_warning("Ran out of GPU memory; stitching this image on the CPU instead.")
+        torch.cuda.empty_cache()
 
 
 @register_inferer("sliding_window")
@@ -106,7 +149,7 @@ class SlidingWindowInferer(AbstractInferer):
         """
         # Run MONAI's sliding window inference.
         # MONAI stubs don't fully annotate sliding_window_inference.
-        prediction = monai.inferers.sliding_window_inference(  # type: ignore[attr-defined]
+        prediction = predict_with_fallback(
             inputs=image,
             roi_size=self.patch_size,
             sw_batch_size=self.sw_batch_size,

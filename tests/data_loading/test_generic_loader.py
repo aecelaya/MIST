@@ -586,7 +586,7 @@ def preprocessed(tmp_path_factory) -> dict:
 
 def test_get_training_dataset_yields_roi_shaped_batches_and_cycles(preprocessed):
     """.next() yields correctly-shaped batches, more times than there are cases."""
-    patch_size = tuple(preprocessed["config"]["spatial_config"]["patch_size"])
+    patch_size = (16, 16, 16)
     labels = preprocessed["config"]["dataset_info"]["labels"][1:]  # Foreground only.
     num_cases = len(preprocessed["image_paths"])
 
@@ -667,7 +667,7 @@ def test_training_dataset_shards_across_ranks_cover_all_cases(preprocessed):
             label_paths=preprocessed["label_paths"],
             dtm_paths=None,
             batch_size=1,
-            roi_size=tuple(preprocessed["config"]["spatial_config"]["patch_size"]),
+            roi_size=(16, 16, 16),
             labels=None,
             oversampling=0.0,
             seed=0,

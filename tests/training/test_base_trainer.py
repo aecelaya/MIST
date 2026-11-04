@@ -1862,3 +1862,87 @@ def test_load_pre_2_5_checkpoint_without_smoothed_loss(tmp_pipeline, mist_args, 
     fresh_state["smoothed_val_loss"] = 0.5
     trainer.load_checkpoint(fold=0, state=fresh_state)
     assert fresh_state["smoothed_val_loss"] is None
+
+
+# =============================================
+# Planning the patch and batch size at training
+# =============================================
+
+
+def _set_auto(results, **overrides):
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["spatial_config"]["patch_size"] = overrides.get("patch", "auto")
+    cfg["training"]["batch_size_per_gpu"] = overrides.get("batch", "auto")
+    cfg["preprocessing"]["median_resampled_image_size"] = [64, 64, 64]
+    cfg["model"]["params"] = {"in_channels": 1, "out_channels": 2}
+    cfg_path.write_text(json.dumps(cfg))
+    return cfg_path
+
+
+def _fake_plan(monkeypatch, calls):
+    def plan(config, num_cases, num_gpus):
+        calls.append((num_cases, num_gpus))
+        return bt.patch_planning.Plan([32, 32, 16], 3, 2 * 1024**3)
+
+    monkeypatch.setattr(bt.patch_planning, "plan_for_config", plan)
+    monkeypatch.setattr(bt.patch_planning, "detect_gpu_memory_bytes", lambda: (8.0 * 1024**3, 1))
+
+
+def test_first_training_run_plans_and_saves(tmp_pipeline, mist_args, monkeypatch):
+    """An "auto" config is planned once and written back to config.json."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto(results)
+    calls = []
+    _fake_plan(monkeypatch, calls)
+    trainer = DummyTrainer(mist_args)
+
+    assert len(calls) == 1 and calls[0][0] == 4  # All 4 cases in train_paths.csv.
+    saved = json.loads(cfg_path.read_text())
+    assert saved["spatial_config"]["patch_size"] == [32, 32, 16]
+    assert saved["training"]["batch_size_per_gpu"] == 3
+    assert saved["planning"]["gpu_memory_gb"] == 8.0
+    assert trainer.batch_size == 3
+
+
+def test_later_runs_reuse_the_saved_plan_and_only_warn(tmp_pipeline, mist_args, monkeypatch):
+    """A saved plan is kept, whichever GPU the later run has."""
+    results, _ = tmp_pipeline
+    _set_auto(results)
+    calls = []
+    _fake_plan(monkeypatch, calls)
+    DummyTrainer(mist_args)
+
+    checked = []
+    monkeypatch.setattr(
+        bt.patch_planning, "check_plan_fits", lambda config, patch_was_set: checked.append(1)
+    )
+    trainer = DummyTrainer(mist_args)
+    assert len(calls) == 1 and checked == [1]
+    assert trainer.config["spatial_config"]["patch_size"] == [32, 32, 16]
+
+
+def test_hand_set_values_reach_the_planner_unchanged(tmp_pipeline, mist_args, monkeypatch):
+    """--patch-size is in the config by the time planning reads it."""
+    results, _ = tmp_pipeline
+    _set_auto(results)
+    seen = []
+
+    def plan(config, num_cases, num_gpus):
+        seen.append(config["spatial_config"]["patch_size"])
+        return bt.patch_planning.Plan(config["spatial_config"]["patch_size"], 2, 1024**3)
+
+    monkeypatch.setattr(bt.patch_planning, "plan_for_config", plan)
+    monkeypatch.setattr(bt.patch_planning, "detect_gpu_memory_bytes", lambda: (8.0 * 1024**3, 1))
+    mist_args.patch_size = [48, 48, 48]
+    DummyTrainer(mist_args)
+    assert seen == [[48, 48, 48]]
+
+
+def test_configs_with_real_values_are_never_replanned(tmp_pipeline, mist_args, monkeypatch):
+    """Configs from earlier versions keep their patch and batch size."""
+    calls = []
+    _fake_plan(monkeypatch, calls)
+    trainer = DummyTrainer(mist_args)
+    assert calls == []
+    assert trainer.config["spatial_config"]["patch_size"] == [16, 16, 16]

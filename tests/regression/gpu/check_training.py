@@ -341,10 +341,7 @@ def main() -> int:
             f"analyzer chose the default architecture, {expected}",
             f"analyzer chose {config['model']['architecture']}, not {expected}",
         )
-    report.info(
-        f"patch size {config['spatial_config']['patch_size']}, "
-        f"spacing {config['spatial_config']['target_spacing']}"
-    )
+    report.info(f"spacing {config['spatial_config']['target_spacing']}")
     edit_config(config_path, args.steps_per_epoch)
 
     passed, seconds = run_step(
@@ -396,6 +393,12 @@ def main() -> int:
         return summarize(report)
 
     config = json.loads(config_path.read_text())
+    planning = config["planning"]
+    report.info(
+        f"planned patch {config['spatial_config']['patch_size']}, batch size "
+        f"{config['training']['batch_size_per_gpu']} per GPU, for "
+        f"{planning['gpu_memory_gb']} GiB; estimated {planning['estimated_gpu_memory_gb']} GiB"
+    )
     report.check(
         config["model"]["architecture"] == expected,
         f"trained {expected}",

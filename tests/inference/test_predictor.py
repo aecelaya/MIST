@@ -310,3 +310,27 @@ def test_predictor_use_amp_false_skips_autocast(monkeypatch):
     predictor(torch.ones(1, 1, 4, 4, 4))
 
     assert not autocast_entered, "torch.autocast should not be entered when use_amp=False"
+
+
+def test_predictor_holds_each_flip_on_the_cpu():
+    """Results leave the GPU as they finish, so flips and folds don't pile up there."""
+    seen = []
+
+    class RecordingEnsembler:
+        def __call__(self, predictions):
+            seen.extend(p.device.type for p in predictions)
+            return predictions[0]
+
+    class FakeInferer:
+        def __call__(self, image, model):
+            return torch.zeros_like(image)
+
+    predictor = Predictor(
+        models=[lambda x: x, lambda x: x],
+        inferer=FakeInferer(),
+        ensembler=RecordingEnsembler(),
+        tta_transforms=[IdentityTransform(), IdentityTransform()],
+        device="cpu",
+    )
+    predictor(torch.zeros(1, 1, 2, 2, 2))
+    assert seen and set(seen) == {"cpu"}
