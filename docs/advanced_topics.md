@@ -57,7 +57,7 @@ Below is an example of a valid `config.json` file.
   },
 
   "model": {
-    "architecture": "nnunet",
+    "architecture": "nnunet-plain",
     "params": {
       "in_channels": 4,
       "out_channels": 4
@@ -290,7 +290,8 @@ manually. The key distinction is between _adaptive_ and _fixed_ topology:
 
 | Architecture              | Constraint                          | Notes                                                                                                      |
 | ------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `nnunet`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: the low-res axis uses stride-1, so any value is valid there                                      |
+| `nnunet-plain`            | Depends on the planned depth        | No depth limit: an axis must be divisible by `2^(times it's downsampled)`; raises an error at model construction if violated. For example, 256 is downsampled six times and needs a multiple of 64 |
+| `nnunet-res`, `nnunet`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: the low-res axis uses stride-1, so any value is valid there                      |
 | `resenc`                  | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet                                                                           |
 | `fmgnet`, `wnet`          | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet                                                                           |
 | `mednext-*`               | All dimensions divisible by **16**  | Fixed 4-stage encoder (`2⁴ = 16`); no adaptation for anisotropic axes                                      |
@@ -307,13 +308,14 @@ All MIST models are **3D-only**. For highly anisotropic data (e.g., thick-slice
 CT), use a thin patch along the anisotropic axis (e.g., `256 256 5`) rather than
 a 2D patch — the analysis step will choose this automatically.
 
-MIST's default network architecture is the 3D nnUNet with a residual encoder and
-two deep supervision heads. However the following architectures are also
+MIST's default network architecture is `nnunet-plain`, nnU-Net's own 3D network
+with two deep supervision heads. However the following architectures are also
 available:
 
 | Architecture         | `model.architecture` |
 | -------------------- | -------------------- |
-| nnUNet (default)     | `nnunet`             |
+| nnUNet (default)     | `nnunet-plain`       |
+| nnUNet (residual)    | `nnunet-res`         |
 | nnUNet (pocket)      | `nnunet-pocket`      |
 | ResEnc UNet          | `resenc`             |
 | MedNeXt (small)      | `mednext-small`      |
@@ -335,6 +337,16 @@ available:
 
 The architecture can be specified with the `--model` flag in the `mist_run_all`
 or `mist_train` commands or directly edited in the `config.json` file.
+
+`nnunet-plain` matches nnU-Net's `PlainConvUNet`: two plain convolutions per
+stage, the same filter counts, and the same topology rules as nnU-Net's planner,
+including no limit on depth. Its parameter names and shapes match too, apart
+from the duplicate `decoder.encoder.` entries in nnU-Net checkpoints.
+
+`nnunet-res` is the network MIST used by default through version 2.4.0, with a
+residual block per stage and at most five downsamplings. The name `nnunet` still
+builds this same network, so existing configurations and checkpoints keep
+working, and either name can load weights saved under the other.
 
 A pocket version of nnUNet is available as a dedicated architecture. Rather than
 doubling the filter count at each depth level, `nnunet-pocket` uses a constant
@@ -358,9 +370,9 @@ mist_train --numpy /path/to/preprocessed/npy/files \
 `resenc` is the Residual Encoder UNet from _nnU-Net Revisited_ (Isensee et al.,
 MICCAI 2024). Its encoder stacks ResNet-D residual blocks, with more blocks in
 deeper stages (1, 3, 4, 6, 6, 6), and its decoder is a lightweight plain UNet
-decoder with one convolution per stage. MIST's default `nnunet`, by contrast,
-uses a single residual block per stage in both the encoder and the decoder.
-`resenc` uses the same adaptive topology as `nnunet`, so the number of stages,
+decoder with one convolution per stage. `nnunet-res`, by contrast, uses a single
+residual block per stage in both the encoder and the decoder. `resenc` uses the
+same adaptive topology as `nnunet-res`, so the number of stages,
 kernel sizes, and strides follow `patch_size` and `target_spacing`.
 
 nnU-Net's ResEnc M, L, and XL presets share this network and differ only in the

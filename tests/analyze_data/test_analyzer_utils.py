@@ -705,8 +705,45 @@ class TestGetBestPatchSize:
         result = au.get_best_patch_size([320, 320, 20], [0.625, 0.625, 3.6])
         # z must be snapped from 18 → 20 (divisible by 4, ≤ median_lr=20).
         assert result[2] == 20
-        # In-plane recomputed with lr_patch=20: snap(sqrt(18*320^2/20))=288.
-        assert result[0] == result[1] == 288
+        # In-plane recomputed with lr_patch=20: snap(sqrt(18*320^2/20))=288, which
+        # nnunet-plain downsamples six times, so it comes down to a multiple of 64.
+        assert result[0] == result[1] == 256
+
+    @pytest.mark.parametrize(
+        "patch, spacing, expected",
+        [
+            ([128, 128, 128], [1.0, 1.0, 1.0], [128, 128, 128]),
+            ([288, 288, 288], [1.0, 1.0, 1.0], [256, 256, 256]),
+            ([416, 416, 32], [0.6, 0.6, 3.6], [384, 384, 32]),
+            ([320, 320, 5], [0.6, 0.6, 3.6], [320, 320, 5]),
+        ],
+    )
+    def test_snap_to_network_compatible(self, patch, spacing, expected):
+        """Patches are reduced only as far as every planner needs."""
+        assert au._snap_to_network_compatible(patch, spacing) == expected
+
+    @pytest.mark.parametrize("budget", [32**3, 96**3, 128**3, 176**3, 256**3, 320**3])
+    @pytest.mark.parametrize(
+        "median, spacing",
+        [
+            ([512, 512, 400], [1.0, 1.0, 1.0]),
+            ([512, 512, 40], [0.6, 0.6, 3.6]),
+            ([320, 320, 20], [0.625, 0.625, 3.6]),
+            ([300, 200, 150], [1.0, 1.3, 2.5]),
+        ],
+    )
+    def test_every_planned_patch_builds_every_nnunet(self, monkeypatch, budget, median, spacing):
+        """Whatever analysis picks fits both nnunet-plain and nnunet-res."""
+        monkeypatch.setattr(au, "_get_voxel_budget", lambda batch_size_per_gpu=2: budget)
+        patch = au.get_best_patch_size(median, spacing)
+        _, _, divisors = au.get_plain_unet_params(patch, spacing)
+        _, strides, _ = au.get_unet_params(patch, spacing)
+        for axis, size in enumerate(patch):
+            assert size % divisors[axis] == 0
+            total = 1
+            for stride in strides:
+                total *= stride[axis]
+            assert size % total == 0
 
     def test_quasi_2d_snap_down_when_snap_up_exceeds_median_lr(self, monkeypatch):
         """When snapping up exceeds median_lr, the patch snaps down instead.
@@ -825,10 +862,10 @@ class TestBuildBaseConfig:
         cfg = au.build_base_config()
         assert not cfg["preprocessing"]["skip"]
 
-    def test_model_architecture_is_nnunet(self):
-        """model.architecture defaults to 'nnunet'."""
+    def test_model_architecture_is_nnunet_plain(self):
+        """model.architecture defaults to 'nnunet-plain'."""
         cfg = au.build_base_config()
-        assert cfg["model"]["architecture"] == "nnunet"
+        assert cfg["model"]["architecture"] == "nnunet-plain"
 
     def test_communication_backend_defaults_to_auto(self):
         """training.hardware.communication_backend defaults to "auto".

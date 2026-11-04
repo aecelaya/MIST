@@ -1100,6 +1100,20 @@ def test_resume_raises_on_incompatible_patch_size_override(tmp_pipeline, mist_ar
         DummyTrainer(mist_args)
 
 
+@pytest.mark.parametrize("saved, override", [("nnunet", "nnunet-res"), ("nnunet-res", "nnunet")])
+def test_resume_accepts_architecture_alias(tmp_pipeline, mist_args, monkeypatch, saved, override):
+    """--resume treats an alias and the name it stands for as the same network."""
+    results, _ = tmp_pipeline
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["model"]["architecture"] = saved
+    cfg_path.write_text(json.dumps(cfg))
+
+    mist_args.resume = True
+    mist_args.model = override
+    DummyTrainer(mist_args)
+
+
 def test_resume_warns_on_loss_override(tmp_pipeline, mist_args, monkeypatch):
     """--resume + --loss override prints a yellow warning."""
     mist_args.resume = True

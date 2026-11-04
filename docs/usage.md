@@ -190,7 +190,7 @@ the following arguments:
 
 **Model:**
 
-- `--model`: Network architecture. _(default: `nnunet`)_
+- `--model`: Network architecture. _(default: `nnunet-plain`)_
 - `--patch-size`: Patch size as three integers: `X Y Z`. This will overwrite the
   choice of patch size determined by the analysis pipeline.
 

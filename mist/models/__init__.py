@@ -11,7 +11,12 @@ from mist.models.mgnets.mgnets_registry import (  # noqa: F401
     create_fmgnet,
     create_wnet,
 )
-from mist.models.nnunet.nnunet_registry import create_nnunet, create_nnunet_pocket  # noqa: F401
+from mist.models.nnunet.nnunet_registry import (  # noqa: F401
+    create_nnunet,
+    create_nnunet_plain,
+    create_nnunet_pocket,
+    create_nnunet_res,
+)
 from mist.models.primus.primus_registry import (  # noqa: F401
     create_primus_large,
     create_primus_medium,

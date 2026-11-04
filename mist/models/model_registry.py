@@ -5,6 +5,22 @@ from collections.abc import Callable
 # Dictionary mapping model names to builder functions.
 MODEL_REGISTRY: dict[str, Callable] = {}
 
+# Names that build the same network as another registered name, so checkpoints
+# and configs written under either are interchangeable.
+_ARCHITECTURE_ALIASES = {"nnunet": "nnunet-res"}
+
+
+def canonical_architecture(name: str) -> str:
+    """Return the name to use when comparing architectures.
+
+    Args:
+        name: A registered model name.
+
+    Returns:
+        The name it's an alias of, or the name itself if it isn't an alias.
+    """
+    return _ARCHITECTURE_ALIASES.get(name, name)
+
 
 def register_model(name: str) -> Callable:
     """

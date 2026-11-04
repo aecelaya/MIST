@@ -11,7 +11,7 @@ from sklearn.model_selection import KFold
 
 # MIST imports.
 from mist.analyze_data.analyzer_constants import AnalyzeConstants as constants
-from mist.models.nnunet.nnunet_utils import get_unet_params
+from mist.models.nnunet.nnunet_utils import get_plain_unet_params, get_unet_params
 from mist.utils import io as io_utils
 
 
@@ -300,6 +300,35 @@ def _snap_lr_to_nnunet_compatible(
     return max(snapped_down, min_lr)
 
 
+def _snap_to_network_compatible(patch: list[int], target_spacing: list[float]) -> list[int]:
+    """Reduce a patch size until every UNet topology MIST plans fits it.
+
+    Each axis must be divisible by the total downsampling along it, or the
+    decoder can't match the encoder's skip connections. The planners can differ:
+    nnunet-plain has no depth limit, so a multiple of 32 like 288 is downsampled
+    six times and needs a multiple of 64, while the others stop at five. Reducing
+    an axis can change its depth, so this repeats until nothing changes.
+
+    Args:
+        patch: Patch size as a list of three integers.
+        target_spacing: Target voxel spacing in mm, [x, y, z].
+
+    Returns:
+        The patch size, reduced where needed.
+    """
+    patch = list(patch)
+    while True:
+        _, strides, _ = get_unet_params(patch, target_spacing)
+        _, _, plain_divisors = get_plain_unet_params(patch, target_spacing)
+        snapped = []
+        for axis, size in enumerate(patch):
+            divisor = max(plain_divisors[axis], int(np.prod([s[axis] for s in strides])))
+            snapped.append(max((size // divisor) * divisor, 1))
+        if snapped == patch:
+            return patch
+        patch = snapped
+
+
 def get_best_patch_size(
     median_resampled_size: list[int],
     target_spacing: list[float],
@@ -327,6 +356,9 @@ def get_best_patch_size(
     count would exceed the median image size are clamped and the remaining
     budget is redistributed to the unclamped axes. Each axis is then snapped
     down to the nearest multiple of 32 (minimum 32).
+
+    In both modes the result is finally reduced, if needed, to fit every UNet
+    topology MIST plans (see _snap_to_network_compatible).
 
     Args:
         median_resampled_size: Median image size after resampling, [x, y, z].
@@ -373,7 +405,7 @@ def get_best_patch_size(
 
         patch = [ip_patch, ip_patch, ip_patch]
         patch[low_res_axis] = lr_patch
-        return patch
+        return _snap_to_network_compatible(patch, target_spacing)
 
     # 3D isotropic mode: distribute budget proportionally in physical space,
     # iteratively clamping axes that would exceed the median image size and
@@ -412,7 +444,7 @@ def get_best_patch_size(
         # precision causing e.g. 127.9999 to snap to 96 instead of 128.
         clamped = min(int(round(raw)), median_resampled_size[i])
         patch.append(_largest_multiple_of_32_leq(clamped))
-    return patch
+    return _snap_to_network_compatible(patch, target_spacing)
 
 
 def build_evaluation_config(dataset: dict[str, Any]) -> dict[str, Any]:
@@ -499,7 +531,7 @@ def build_base_config() -> dict[str, Any]:
             "normalize_dtms": True,
         },
         "model": {
-            "architecture": "nnunet",
+            "architecture": "nnunet-plain",
             "params": {
                 "in_channels": None,
                 "out_channels": None,

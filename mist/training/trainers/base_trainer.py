@@ -33,7 +33,7 @@ from mist.models.model_loader import (
     load_pretrained_encoder,
     validate_encoder_compatibility,
 )
-from mist.models.model_registry import get_model_from_registry
+from mist.models.model_registry import canonical_architecture, get_model_from_registry
 from mist.training import training_utils
 from mist.training.lr_schedulers.lr_scheduler_registry import get_lr_scheduler
 from mist.training.optimizers.optimizer_registry import get_optimizer
@@ -293,8 +293,8 @@ class BaseTrainer(ABC):
 
         # --- Hard errors: checkpoint weights will not load ----------------
         incompatible = []
-        old_arch = old["model"]["architecture"]
-        new_arch = new["model"]["architecture"]
+        old_arch = canonical_architecture(old["model"]["architecture"])
+        new_arch = canonical_architecture(new["model"]["architecture"])
         if old_arch != new_arch:
             incompatible.append(
                 f"  --model: '{old_arch}' → '{new_arch}' (checkpoint weights are incompatible)"

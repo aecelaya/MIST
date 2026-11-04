@@ -7,12 +7,27 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Added
 
+- **`nnunet-plain`** — nnU-Net's own default network, `PlainConvUNet`, with its
+  topology rules: no depth limit, and downsampling an axis only when its spacing
+  is under twice the finest spacing among axes that can still be downsampled.
+  Its parameter names match nnU-Net's.
+- **`nnunet-res`** — a clearer name for the residual network MIST has called
+  `nnunet`.
+
 - `training.validate_every` (and `--validate-every`) runs validation every N
   epochs instead of every epoch. Validation always runs on the last epoch.
   Defaults to `1`, the previous behavior.
 
 ### Changed
 
+- **`nnunet-plain` is the new default architecture for new `mist_analyze`
+  runs.** The name `nnunet` still builds the same residual network as before and
+  is interchangeable with `nnunet-res`, so existing configs, checkpoints, and
+  `--model nnunet` behave as they did. To compare against earlier results when
+  rerunning a pipeline from scratch, pass `--model nnunet`.
+- `mist_analyze` now picks patch sizes that fit every UNet topology, reducing an
+  axis if `nnunet-plain` would need a higher multiple. For example, an in-plane
+  size of 288 becomes 256, since a size that large is downsampled six times.
 - **Training augmentation now follows nnU-Net's default transforms.** New
   transforms: rotation (±30° per axis, or ±180° in-plane for quasi-2D patches),
   scaling from 0.7 to 1.4 (replacing zoom, which only zoomed in), simulated low
