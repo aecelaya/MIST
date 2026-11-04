@@ -75,6 +75,10 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Fixed
 
+- Multi-GPU training with `resenc` no longer crashes on the second step with
+  "Expected to have finished reduction in the prior iteration" when the network
+  has more decoder stages than it uses for deep supervision. Those segmentation
+  layers are now frozen; they stay in the state dict, so checkpoints still load.
 - The transfer summary printed at the start of training no longer double-counts
   parameters registered under two names (e.g., `resenc`'s convolutions), which
   made nnFoundationCNN report about 180.6M loaded parameters instead of about
