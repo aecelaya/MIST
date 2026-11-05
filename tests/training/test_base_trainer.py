@@ -2053,3 +2053,57 @@ def test_resume_with_a_changed_network_still_raises(tmp_pipeline, mist_args, mon
     with pytest.raises(ValueError, match="incompatible with the saved checkpoint"):
         DummyTrainer(mist_args)
     assert len(calls) == 1
+
+
+# =============================================
+# What planning prints
+# =============================================
+
+
+@pytest.fixture
+def printed(monkeypatch):
+    """Capture everything printed through the shared console."""
+    messages = []
+    monkeypatch.setattr(console_mod.console, "print", lambda msg="": messages.append(str(msg)))
+    return messages
+
+
+def test_first_run_announces_planning_then_the_result(
+    tmp_pipeline, mist_args, monkeypatch, printed
+):
+    """Planning shows a header, what it's planning for, and what it chose, in order."""
+    results, _ = tmp_pipeline
+    _set_auto(results)
+    _fake_plan(monkeypatch, [])
+    DummyTrainer(mist_args)
+
+    combined = "\n".join(printed)
+    header = combined.index("Planning patch and batch size")
+    target = combined.index("Planning dummy for 8.0 GiB")
+    result = combined.index("Patch [32, 32, 16], batch size 3 per GPU")
+    assert header < target < result
+    assert "Saved to config.json" in combined
+
+
+def test_first_run_without_a_gpu_says_so(tmp_pipeline, mist_args, monkeypatch, printed):
+    """The default memory isn't presented as if it were a real GPU."""
+    results, _ = tmp_pipeline
+    _set_auto(results)
+    _fake_plan(monkeypatch, [])
+    monkeypatch.setattr(bt.patch_planning, "detect_gpu_memory_bytes", lambda: (None, 0))
+    DummyTrainer(mist_args)
+    assert any("No GPU found, so planning dummy" in message for message in printed)
+
+
+def test_later_runs_say_they_reuse_the_saved_values(tmp_pipeline, mist_args, monkeypatch, printed):
+    """Reusing a plan prints the values, with no planning header."""
+    results, _ = tmp_pipeline
+    _set_auto(results)
+    _fake_plan(monkeypatch, [])
+    DummyTrainer(mist_args)
+    printed.clear()
+
+    DummyTrainer(mist_args)
+    combined = "\n".join(printed)
+    assert "Using patch [32, 32, 16] and batch size 3 per GPU from config.json" in combined
+    assert "Planning patch and batch size" not in combined

@@ -41,6 +41,7 @@ from mist.training.planning_constants import PlanningConstants
 from mist.training.trainers.trainer_constants import TrainerConstants
 from mist.utils import hardware, io, progress_bar
 from mist.utils.console import (
+    console,
     print_error,
     print_info,
     print_section_header,
@@ -445,23 +446,39 @@ class BaseTrainer(ABC):
             patch_planning.is_auto(spatial["patch_size"])
             or patch_planning.is_auto(training["batch_size_per_gpu"])
         ):
+            print_info(
+                f"Using patch {spatial['patch_size']} and batch size "
+                f"{training['batch_size_per_gpu']} per GPU from config.json."
+            )
             patch_planning.check_plan_fits(
                 self.config, patch_was_set=getattr(self.mist_args, "patch_size", None) is not None
             )
             return
 
+        architecture = self.config["model"]["architecture"]
         num_gpus = max(1, training["hardware"]["num_gpus"])
-        plan = patch_planning.plan_for_config(self.config, len(self.paths), num_gpus)
-        spatial["patch_size"] = plan.patch_size
-        training["batch_size_per_gpu"] = plan.batch_size_per_gpu
-
         memory = patch_planning.detect_gpu_memory_bytes()[0]
         gib = 1024**3
         planned_for = (
             memory if memory is not None else (PlanningConstants.DEFAULT_GPU_MEMORY_GB * gib)
         )
+        precision = "BF16" if training["amp"] else "FP32"
+
+        print_section_header("Planning patch and batch size")
+        if memory is not None:
+            print_info(f"Planning {architecture} for {planned_for / gib:.1f} GiB, {precision}.")
+        else:
+            print_info(
+                f"No GPU found, so planning {architecture} for "
+                f"{planned_for / gib:.1f} GiB, {precision}."
+            )
+        with console.status("Estimating GPU memory..."):
+            plan = patch_planning.plan_for_config(self.config, len(self.paths), num_gpus)
+        spatial["patch_size"] = plan.patch_size
+        training["batch_size_per_gpu"] = plan.batch_size_per_gpu
+
         self.config["planning"] = {
-            "architecture": self.config["model"]["architecture"],
+            "architecture": architecture,
             "patch_size": plan.patch_size,
             "batch_size_per_gpu": plan.batch_size_per_gpu,
             "gpu_memory_gb": round(planned_for / gib, 1),
@@ -469,10 +486,9 @@ class BaseTrainer(ABC):
             "estimated_gpu_memory_gb": round(plan.estimated_bytes / gib, 1),
         }
         io.write_json_file(self.config_json, self.config)
-        print_info(
-            f"Planned {self.config['model']['architecture']}: patch {plan.patch_size}, batch "
-            f"size {plan.batch_size_per_gpu} per GPU, about {plan.estimated_bytes / gib:.1f} of "
-            f"{planned_for / gib:.1f} GiB ({'BF16' if training['amp'] else 'FP32'})."
+        print_success(
+            f"Patch {plan.patch_size}, batch size {plan.batch_size_per_gpu} per GPU, about "
+            f"{plan.estimated_bytes / gib:.1f} of {planned_for / gib:.1f} GiB. Saved to config.json."
         )
         if plan.estimated_bytes > planned_for:
             print_warning(
