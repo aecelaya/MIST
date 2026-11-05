@@ -96,6 +96,53 @@ class TestIsImage3D:
 # ---------------------------------------------------------------------------
 
 
+class TestComputeTargetSpacing:
+    """Tests for compute_target_spacing, nnU-Net's target spacing rule."""
+
+    @staticmethod
+    def _spacing(in_plane, coarse, size):
+        """Return the target for images whose coarse axis spacing varies."""
+        spacings = np.array([[*in_plane, value] for value in coarse], dtype=float)
+        sizes = np.tile(np.array(size, dtype=float), (len(coarse), 1))
+        return au.compute_target_spacing(spacings, sizes)
+
+    def test_isotropic_uses_the_median(self):
+        """Without anisotropy each axis is its median."""
+        spacings = np.array([[1.0, 1.0, 1.0], [2.0, 2.0, 2.0], [3.0, 3.0, 3.0]])
+        sizes = np.full((3, 3), 100.0)
+        assert au.compute_target_spacing(spacings, sizes) == [2.0, 2.0, 2.0]
+
+    def test_anisotropic_uses_the_percentile(self):
+        """Coarse axis with few voxels moves to its 10th percentile."""
+        coarse = [5.0, 10.0, 10.0, 10.0, 10.0]
+        expected = float(np.percentile(coarse, 10))
+        assert self._spacing((1.5, 1.5), coarse, (200, 200, 10)) == [1.5, 1.5, expected]
+
+    def test_enough_voxels_keeps_the_median(self):
+        """Coarse spacing alone doesn't trigger the percentile."""
+        coarse = [1.5, 5.0, 5.0, 5.0, 5.0]
+        assert self._spacing((1.0, 1.0), coarse, (300, 300, 150)) == [1.0, 1.0, 5.0]
+
+    def test_spacing_compares_with_the_next_coarsest_axis(self):
+        """Four times the finest axis but twice the next axis isn't anisotropic."""
+        spacings = np.array([[0.5, 1.0, value] for value in (1.5, 2.0, 2.0, 2.0, 2.0)])
+        sizes = np.tile(np.array([300.0, 300.0, 10.0]), (5, 1))
+        assert au.compute_target_spacing(spacings, sizes) == [0.5, 1.0, 2.0]
+
+    def test_percentile_stays_coarser_than_the_other_axes(self):
+        """A percentile below the other axes is replaced by their spacing plus a margin."""
+        coarse = [0.5, 0.5, 5.0, 5.0, 5.0]
+        target = self._spacing((1.0, 1.0), coarse, (300, 300, 30))
+        assert target == [1.0, 1.0, 1.0 + 1e-5]
+
+    def test_coarsest_axis_need_not_be_last(self):
+        """The rule follows the coarsest axis wherever it is."""
+        spacings = np.array([[value, 1.0, 1.0] for value in (4.0, 8.0, 8.0, 8.0, 8.0)])
+        sizes = np.tile(np.array([10.0, 200.0, 200.0]), (5, 1))
+        expected = float(np.percentile(spacings[:, 0], 10))
+        assert au.compute_target_spacing(spacings, sizes) == [expected, 1.0, 1.0]
+
+
 class TestGetResampledImageDimensions:
     """Tests for analyzer_utils.get_resampled_image_dimensions."""
 

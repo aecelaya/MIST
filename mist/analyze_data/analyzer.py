@@ -325,6 +325,12 @@ class Analyzer:
         `get_fg_mask_bbox`, which uses an Otsu threshold method to find the
         foreground mask and then computes the bounding box around the
         non-zero voxels of the foreground mask.
+
+        Returns:
+            Whether to crop, and each image's size after cropping in RAI axis
+            order, which is the order of the target spacing. The bounding boxes
+            in the CSV stay in the image's stored axis order, because
+            preprocessing crops before it reorients.
         """
 
         def _process(patient):
@@ -332,11 +338,8 @@ class Analyzer:
                 image_list = list(patient.values())[3:]
                 image = sitk_io.read_image(image_list[0])
                 fg_bbox = preprocessing_utils.get_fg_mask_bbox(image)
-                cropped_dims_i = [
-                    fg_bbox["x_end"] - fg_bbox["x_start"] + 1,
-                    fg_bbox["y_end"] - fg_bbox["y_start"] + 1,
-                    fg_bbox["z_end"] - fg_bbox["z_start"] + 1,
-                ]
+                cropped = preprocessing_utils.crop_to_fg(image, fg_bbox)
+                cropped_dims_i = sitk_io.reorient_image(cropped, "RAI").GetSize()
                 # GetSize() is (x, y, z), matching ants' .shape convention.
                 vol_reduction_i = 1.0 - (np.prod(cropped_dims_i) / np.prod(image.GetSize()))
                 fg_bbox["id"] = patient["id"]
@@ -399,59 +402,43 @@ class Analyzer:
     def get_target_spacing(self) -> list[float]:
         """Get target spacing for preprocessing.
 
-        Compute the target spacing for the dataset based on the median
-        spacing along each axis for the images in the dataset. If this
-        median-based spacing is anisotropic (i.e., the ratio of the maximum
-        to minimum spacing is greater than a threshold), then adjust the
-        coarsest resolution to bring the ratio down. This is done to ensure
-        that we still have a reasonable resolution when we preprocess the
-        data.
+        Use the median spacing along each axis, adjusting the coarsest axis of
+        anisotropic datasets. See `analyzer_utils.compute_target_spacing`.
+        nnU-Net makes this decision with image sizes after its non-zero crop;
+        here they are the full image sizes, since MIST's foreground crop is a
+        different, more aggressive crop.
         """
 
         def _process(patient):
             try:
                 mask = sitk_io.read_image(patient["mask"])
-                # Reorient to RAI first so every patient's spacing tuple
-                # refers to the same physical axis before we take a
-                # cross-patient median below -- see get_target_spacing's
-                # docstring. (The historical mask.set_direction(np.eye(3))
+                # Reorient to RAI first so every patient's spacing and size
+                # refer to the same physical axes before we take
+                # cross-patient medians. (The historical mask.set_direction(np.eye(3))
                 # call after reorienting is not replicated here: verified
                 # empirically -- against real ants, across identity,
                 # anisotropic, oblique, and axis-aligned-non-RAI inputs --
                 # that it never affects the resulting spacing, so it was
                 # dead code even in the ants version.)
                 mask = sitk_io.reorient_image(mask, "RAI")
-                return tuple(mask.GetSpacing())
+                return tuple(mask.GetSpacing()), tuple(mask.GetSize())
             except Exception as e:
                 raise RuntimeError(f"Error processing patient '{patient['id']}': {e}") from e
 
         n_workers = self.n_workers
         patients = [self.paths_df.iloc[i].to_dict() for i in range(len(self.paths_df))]
-        spacings = [None] * len(patients)
+        spacings = np.zeros((len(patients), 3))
+        sizes = np.zeros((len(patients), 3))
 
         progress = progress_bar.get_progress_bar("Getting target spacing")
         with ThreadPoolExecutor(max_workers=n_workers) as executor:
             futures = {executor.submit(_process, p): i for i, p in enumerate(patients)}
             with progress as pb:
                 for future in pb.track(as_completed(futures), total=len(patients)):
-                    spacings[futures[future]] = future.result()
+                    i = futures[future]
+                    spacings[i, :], sizes[i, :] = future.result()
 
-        original_spacings = np.array(spacings, dtype=float)
-
-        # Initialize target spacing.
-        target_spacing = list(np.median(original_spacings, axis=0))
-
-        # If anisotropic, adjust the coarsest resolution to bring ratio down.
-        if (
-            np.max(target_spacing) / np.min(target_spacing)
-            > constants.MAX_DIVIDED_BY_MIN_SPACING_THRESHOLD
-        ):
-            low_res_axis = np.argmax(target_spacing)
-            target_spacing[low_res_axis] = np.percentile(
-                original_spacings[:, low_res_axis],
-                constants.ANISOTROPIC_LOW_RESOLUTION_AXIS_PERCENTILE,
-            )
-        return target_spacing
+        return analyzer_utils.compute_target_spacing(spacings, sizes)
 
     def check_resampled_dims(self, cropped_dims: np.ndarray) -> list[float]:
         """Determine dimensions of resampled data.
@@ -496,10 +483,11 @@ class Analyzer:
 
         def _process(patient, cropped_dims_i):
             try:
-                mask_header = sitk_io.read_image_header(patient["mask"])
+                # Reorient so the size and spacing match the target spacing's axes.
+                mask = sitk_io.reorient_image(sitk_io.read_image(patient["mask"]), "RAI")
                 image_list = list(patient.values())[3:]
-                current_dims = cropped_dims_i if crop_to_fg else mask_header["dimensions"]
-                current_spacing = mask_header["spacing"]
+                current_dims = cropped_dims_i if crop_to_fg else mask.GetSize()
+                current_spacing = mask.GetSpacing()
                 new_dims = analyzer_utils.get_resampled_image_dimensions(
                     current_dims, current_spacing, tgt_spacing
                 )

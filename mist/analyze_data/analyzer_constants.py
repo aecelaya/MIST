@@ -19,14 +19,18 @@ class AnalyzeConstants:
     # Minimum sparsity expressed as a fraction.
     MIN_SPARSITY_FRACTION = 0.2
 
-    # Maximum ratio of the maximum and minimum components of the target spacing
-    # for an image to be considered anisotropic.
-    MAX_DIVIDED_BY_MIN_SPACING_THRESHOLD = 3.0
+    # A dataset is anisotropic if its coarsest axis has more than this many times
+    # the spacing of the next coarsest axis, and fewer than one over this many
+    # times the voxels of the smallest other axis.
+    ANISOTROPY_THRESHOLD = 3.0
 
-    # If the median target spacing of a dataset is anisotropic, then we
-    # take this percentile of the coarsest axis and replace that value with
-    # the resulting percentile value.
+    # If a dataset is anisotropic, the target spacing of its coarsest axis is this
+    # percentile of that axis's spacings across the dataset.
     ANISOTROPIC_LOW_RESOLUTION_AXIS_PERCENTILE = 10
+
+    # If that percentile is finer than the next coarsest axis, the coarsest axis
+    # is set to the next coarsest axis's spacing plus this, so it stays coarsest.
+    ANISOTROPIC_SPACING_MARGIN = 1e-5
 
     # For CT images only. We gather every i-th voxel in the image where the
     # ground truth mask is non-zero. We use the resulting list of values

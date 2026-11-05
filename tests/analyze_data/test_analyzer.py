@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import SimpleITK as sitk
 
 from mist.analyze_data import analyzer_utils as au
 
@@ -472,16 +473,20 @@ class TestAnalyzerHelpers:
         )
         assert not bool(Analyzer(args).check_nz_ratio())
 
-    def test_get_target_spacing_handles_anisotropy(self, args, monkeypatch):
-        """Anisotropic images → target spacing max equals the percentile."""
+    @pytest.mark.parametrize(
+        "shape, expected",
+        [((40, 40, 4), [1.0, 1.0, 3.0]), ((40, 40, 20), [1.0, 1.0, 5.0])],
+    )
+    def test_get_target_spacing_uses_spacing_and_size(self, args, monkeypatch, shape, expected):
+        """Only images with few voxels on the coarse axis use the percentile."""
         monkeypatch.setattr(
             sitk_io,
             "read_image",
-            lambda _p: make_sitk_image(spacing=(1.0, 1.0, 5.0)),
+            lambda _p: make_sitk_image(shape=shape, spacing=(1.0, 1.0, 5.0)),
             raising=True,
         )
         monkeypatch.setattr(np, "percentile", lambda a, q: 3.0, raising=True)
-        assert max(Analyzer(args).get_target_spacing()) == 3.0
+        assert Analyzer(args).get_target_spacing() == expected
 
     def test_check_resampled_dims_warns_when_large(self, args, monkeypatch, capture_console):
         """check_resampled_dims logs a warning when exceeding memory limit."""
@@ -502,6 +507,33 @@ class TestAnalyzerHelpers:
             "Resampled example is larger than the recommended memory size" in m
             for m in capture_console
         )
+
+    @pytest.mark.parametrize(
+        "crop, expected",
+        [(False, [5, 30, 20]), (True, [4, 15, 10])],
+    )
+    def test_resampled_dims_follow_rai_axes(self, args, monkeypatch, crop, expected):
+        """Images stored with permuted axes get sizes in the target spacing's order."""
+        image = make_sitk_image(shape=(30, 20, 5), spacing=(1.0, 2.0, 5.0))
+        image.SetDirection((0, 0, 1, 1, 0, 0, 0, 1, 0))
+        monkeypatch.setattr(sitk_io, "read_image", lambda _p: image, raising=True)
+        monkeypatch.setattr(
+            sitk_io,
+            "reorient_image",
+            lambda img, code: sitk.DICOMOrient(img, sitk_io._flip_orientation_convention(code)),
+            raising=True,
+        )
+        bbox = {"x_start": 0, "x_end": 14, "y_start": 0, "y_end": 9, "z_start": 0, "z_end": 3}
+        monkeypatch.setattr(preprocessing_utils, "get_fg_mask_bbox", lambda _i: dict(bbox))
+
+        a = Analyzer(args)
+        _, cropped_dims = a.check_crop_fg()
+        assert cropped_dims[0].tolist() == [4, 15, 10]
+
+        # Preprocessing leaves each axis at its own spacing with this target.
+        a.config["preprocessing"]["crop_to_foreground"] = crop
+        a.config["spatial_config"]["target_spacing"] = [5.0, 1.0, 2.0]
+        assert a.check_resampled_dims(cropped_dims) == expected
 
     def test_check_crop_fg_raises_on_worker_error(self, args, monkeypatch):
         """An exception in the FG-crop worker propagates as RuntimeError."""
@@ -540,8 +572,8 @@ class TestAnalyzerHelpers:
         """An exception in the resampled-dims worker propagates as RuntimeError."""
         monkeypatch.setattr(
             sitk_io,
-            "read_image_header",
-            lambda _p: (_ for _ in ()).throw(RuntimeError("bad header")),
+            "read_image",
+            lambda _p: (_ for _ in ()).throw(RuntimeError("bad file")),
             raising=True,
         )
         with pytest.raises(RuntimeError):

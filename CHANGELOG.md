@@ -29,6 +29,16 @@ All notable changes to MIST are listed here, newest first. MIST follows
   the image size, and one global batch sees at most 5% of the dataset. New runs
   may get different patch and batch sizes than before; configs that already have
   values keep them.
+- **Target spacing now follows nnU-Net's anisotropy rule.** The coarsest axis moves
+  from its median to its 10th percentile only if its spacing is over 3 times the
+  next coarsest axis and its median voxel count is under a third of the smallest
+  other axis. It never goes finer than the next coarsest axis. Previously MIST
+  compared spacing with the finest axis, ignored voxel counts, and had no lower
+  limit. Some anisotropic datasets now get a coarser target spacing, and smaller
+  preprocessed images, from `mist_analyze`; existing configs keep their values.
+- `mist_analyze` now computes `median_resampled_image_size` and its memory warning
+  in RAI axis order. Images stored with their axes in a different order used to
+  get a wrong estimate, and that estimate sets the patch size.
 - Later `mist_train` runs warn if the saved plan doesn't suit their GPU, and plan
   again if `--model` changes the network, keeping values set by hand.
 - **Validation and inference predict up to 4 patches at once,** or fewer if the

@@ -9,6 +9,7 @@ import pandas as pd
 from sklearn.model_selection import KFold
 
 # MIST imports.
+from mist.analyze_data.analyzer_constants import AnalyzeConstants as constants
 from mist.utils import io as io_utils
 
 
@@ -50,6 +51,43 @@ def is_image_3d(header: dict[str, Any]) -> bool:
         True if the image is 3D.
     """
     return len(header["dimensions"]) == 3
+
+
+def compute_target_spacing(spacings: np.ndarray, sizes: np.ndarray) -> list[float]:
+    """Choose a dataset's target spacing with nnU-Net's rule.
+
+    The target is the median spacing of each axis. If the coarsest axis has both
+    much larger spacing and many fewer voxels than the other axes, its median
+    would interpolate the thinner-sliced cases heavily, so that axis uses a low
+    percentile of its spacings instead, but stays coarser than the other axes.
+
+    Args:
+        spacings: Spacing of each image, with shape (number of images, 3).
+        sizes: Size in voxels of each image, with the same shape and axis order.
+
+    Returns:
+        The target spacing of each axis.
+    """
+    target = np.median(spacings, axis=0)
+    median_sizes = np.median(sizes, axis=0)
+
+    coarsest = int(np.argmax(target))
+    others = [axis for axis in range(len(target)) if axis != coarsest]
+    next_coarsest_spacing = target[others].max()
+
+    threshold = constants.ANISOTROPY_THRESHOLD
+    has_anisotropic_spacing = target[coarsest] > threshold * next_coarsest_spacing
+    has_anisotropic_voxels = median_sizes[coarsest] * threshold < median_sizes[others].min()
+
+    if has_anisotropic_spacing and has_anisotropic_voxels:
+        percentile = np.percentile(
+            spacings[:, coarsest], constants.ANISOTROPIC_LOW_RESOLUTION_AXIS_PERCENTILE
+        )
+        if percentile < next_coarsest_spacing:
+            percentile = next_coarsest_spacing + constants.ANISOTROPIC_SPACING_MARGIN
+        target[coarsest] = percentile
+
+    return [float(spacing) for spacing in target]
 
 
 def get_resampled_image_dimensions(
