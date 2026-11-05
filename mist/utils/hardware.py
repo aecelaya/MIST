@@ -189,22 +189,26 @@ def bf16_supported() -> bool:
     return major >= 8
 
 
-def resolve_amp(requested: bool, *, warn: bool = True) -> bool:
+def resolve_amp(requested: bool | str, *, warn: bool = True) -> bool:
     """Resolve a requested AMP setting against the current hardware.
 
     Returns ``True`` only when AMP was requested *and* BF16 is hardware
-    supported. When a request is downgraded — because there is no CUDA device
+    supported. ``"auto"`` leaves the choice to MIST, so it never warns; training
+    goes on to time BF16 against FP32 (see ``mist.training.precision_test``).
+    When a request is downgraded — because there is no CUDA device
     or the GPU is pre-Ampere — a warning is emitted (per the ``warnings.warn``
     convention documented in ``mist.utils.console``) so callers know FP32 will
     be used instead.
 
     Args:
-        requested: The AMP setting requested via config (``training.amp``).
+        requested: The AMP setting from config (``training.amp``): a bool or "auto".
         warn: Whether to warn when the request is downgraded to FP32.
 
     Returns:
         The effective AMP setting for the current hardware.
     """
+    if requested == "auto":
+        return bf16_supported()
     if not requested:
         return False
     if bf16_supported():
@@ -219,6 +223,25 @@ def resolve_amp(requested: bool, *, warn: bool = True) -> bool:
             stacklevel=2,
         )
     return False
+
+
+def tune_gpu_math() -> None:
+    """Turn on the faster math that training uses, including TF32 convolutions.
+
+    These tune cuDNN (CUDA) or its MIOpen equivalent (ROCm, via the same
+    ``torch.backends.cudnn`` compatibility shim). They mean nothing on CPU-only
+    hardware, so they're skipped there.
+    """
+    if get_accelerator_type() == "cpu":
+        return
+    torch.set_float32_matmul_precision("high")
+    # torch.backends.cudnn.conv.fp32_precision was added in PyTorch 2.5; fall back
+    # to allow_tf32, which does the same on older builds.
+    if hasattr(torch.backends.cudnn, "conv"):
+        torch.backends.cudnn.conv.fp32_precision = "tf32"
+    else:
+        torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True
 
 
 def autocast_context(enabled: bool):

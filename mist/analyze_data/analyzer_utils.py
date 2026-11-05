@@ -303,7 +303,9 @@ def build_base_config() -> dict[str, Any]:
             "warmup_epochs": 20,
             "l2_penalty": 0.0001,
             "grad_clip_norm": 1.0,
-            "amp": True,
+            # BF16 or FP32, chosen by a speed test at the first mist_train. See
+            # mist.training.precision_test.
+            "amp": "auto",
             "augmentation": {
                 "enabled": True,
                 "transforms": {

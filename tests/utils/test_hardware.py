@@ -197,6 +197,15 @@ def test_resolve_amp_not_requested_returns_false() -> None:
         assert hardware.resolve_amp(False) is False
 
 
+@pytest.mark.parametrize("supported", [True, False])
+def test_resolve_amp_auto_follows_the_hardware_without_warning(monkeypatch, supported) -> None:
+    """ "auto" didn't ask for BF16, so getting FP32 isn't worth a warning."""
+    monkeypatch.setattr(hardware, "bf16_supported", lambda: supported)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert hardware.resolve_amp("auto") is supported
+
+
 def test_resolve_amp_supported_returns_true(monkeypatch) -> None:
     """A True request on Ampere+ hardware resolves to True."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)

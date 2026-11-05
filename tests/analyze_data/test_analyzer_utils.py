@@ -397,6 +397,11 @@ class TestBuildBaseConfig:
         cfg = au.build_base_config()
         assert cfg["model"]["architecture"] == "nnunet-plain"
 
+    def test_amp_defaults_to_auto(self):
+        """training.amp defaults to "auto", chosen by a speed test at training."""
+        cfg = au.build_base_config()
+        assert cfg["training"]["amp"] == "auto"
+
     def test_communication_backend_defaults_to_auto(self):
         """training.hardware.communication_backend defaults to "auto".
 

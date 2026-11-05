@@ -86,7 +86,7 @@ Below is an example of a valid `config.json` file.
     "warmup_epochs": 20,
     "l2_penalty": 1e-4,
     "grad_clip_norm": 1.0,
-    "amp": true,
+    "amp": "auto",
 
     "augmentation": {
       "enabled": true,
@@ -1020,10 +1020,17 @@ AMP applies to the full training loop and is also propagated to inference:
   `Predictor` enters `torch.autocast` for all forward passes. AMP is silently
   skipped if no GPU is available (CPU-only inference always runs in float32).
 
-`training.amp` is set to `true` by default. If BF16 isn't supported on the
-detected hardware, MIST downgrades to float32 automatically and prints a warning
-explaining why, rather than requiring you to set this by hand. To disable AMP
-explicitly, set it to `false` in `config.json`:
+`training.amp` is set to `"auto"` by default. If the GPU has no BF16 hardware,
+MIST trains in float32. If it does, the first `mist_train` runs a few training steps
+in each precision and saves the choice to `config.json`, since float32 with TF32
+convolutions can be faster on the same GPU. This adds about a minute. It keeps BF16
+unless float32 is at least 10% faster in samples per second and needs no smaller a
+patch; float32 may use a smaller batch. Training a different network with `--model`
+tests again.
+
+Setting `true` skips the test and uses BF16 where the hardware supports it, or
+float32 with a warning where it doesn't. To disable AMP explicitly, set it to
+`false` in `config.json`:
 
 ```json
 "training": {

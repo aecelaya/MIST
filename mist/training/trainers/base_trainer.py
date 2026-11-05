@@ -34,7 +34,7 @@ from mist.models.model_loader import (
     validate_encoder_compatibility,
 )
 from mist.models.model_registry import canonical_architecture, get_model_from_registry
-from mist.training import patch_planning, training_utils
+from mist.training import patch_planning, precision_test, training_utils
 from mist.training.lr_schedulers.lr_scheduler_registry import get_lr_scheduler
 from mist.training.optimizers.optimizer_registry import get_optimizer
 from mist.training.planning_constants import PlanningConstants
@@ -257,8 +257,10 @@ class BaseTrainer(ABC):
         # hardware-accelerated on Ampere or newer GPUs; downgrade to FP32 on
         # pre-Ampere/CPU. Resolving here (once, in the parent process) persists
         # the effective value to config.json so every training step and all
-        # downstream inference read a hardware-appropriate setting.
-        self.config["training"]["amp"] = hardware.resolve_amp(self.config["training"]["amp"])
+        # downstream inference read a hardware-appropriate setting. "auto" waits
+        # for _resolve_patch_and_batch, which needs the plan to choose.
+        if self.config["training"]["amp"] != "auto":
+            self.config["training"]["amp"] = hardware.resolve_amp(self.config["training"]["amp"])
 
         # Resolve the communication backend against the current hardware, the
         # same way: "auto" becomes "nccl" on CUDA/ROCm (ROCm routes "nccl"
@@ -417,7 +419,8 @@ class BaseTrainer(ABC):
         from the plan are reset; anything set by hand, on the command line or in
         config.json, is kept. An alias and the name it stands for are the same
         network. --resume never gets here with a changed network, since
-        _check_resume_overrides rejects it.
+        _check_resume_overrides rejects it. A precision that MIST chose is chosen
+        again, since which is faster can depend on the network.
         """
         planning = self.config.get("planning")
         if not planning:
@@ -432,24 +435,35 @@ class BaseTrainer(ABC):
             spatial["patch_size"] = patch_planning.AUTO
         if training["batch_size_per_gpu"] == planning.get("batch_size_per_gpu"):
             training["batch_size_per_gpu"] = patch_planning.AUTO
+        if planning.get("amp_auto"):
+            training["amp"] = "auto"
         print_info(
             f"The saved plan was made for {planning['architecture']}, so planning again for "
             f"{architecture}. Values set by hand are kept."
         )
 
     def _resolve_patch_and_batch(self) -> None:
-        """Plan any "auto" patch or batch size and save the result to config.json."""
+        """Plan any "auto" patch, batch size, or precision and save them to config.json."""
         spatial = self.config["spatial_config"]
         training = self.config["training"]
         self._reset_plan_if_network_changed()
-        if not (
-            patch_planning.is_auto(spatial["patch_size"])
-            or patch_planning.is_auto(training["batch_size_per_gpu"])
-        ):
+
+        # Only a GPU with BF16 hardware has a choice to make.
+        amp_auto = training["amp"] == "auto"
+        test_precision = amp_auto and hardware.resolve_amp("auto")
+        if amp_auto:
+            training["amp"] = test_precision
+
+        plan_needed = patch_planning.is_auto(spatial["patch_size"]) or patch_planning.is_auto(
+            training["batch_size_per_gpu"]
+        )
+        if not (plan_needed or test_precision):
             print_info(
                 f"Using patch {spatial['patch_size']} and batch size "
                 f"{training['batch_size_per_gpu']} per GPU from config.json."
             )
+            if amp_auto:
+                io.write_json_file(self.config_json, self.config)
             patch_planning.check_plan_fits(
                 self.config, patch_was_set=getattr(self.mist_args, "patch_size", None) is not None
             )
@@ -462,7 +476,10 @@ class BaseTrainer(ABC):
         planned_for = (
             memory if memory is not None else (PlanningConstants.DEFAULT_GPU_MEMORY_GB * gib)
         )
-        precision = "BF16" if training["amp"] else "FP32"
+        if test_precision:
+            precision = "BF16 or FP32"
+        else:
+            precision = "BF16" if training["amp"] else "FP32"
 
         print_section_header("Planning patch and batch size")
         if memory is not None:
@@ -474,6 +491,8 @@ class BaseTrainer(ABC):
             )
         with console.status("Estimating GPU memory..."):
             plan = patch_planning.plan_for_config(self.config, len(self.paths), num_gpus)
+        if test_precision:
+            plan = self._choose_precision(plan, planned_for, num_gpus)
         spatial["patch_size"] = plan.patch_size
         training["batch_size_per_gpu"] = plan.batch_size_per_gpu
 
@@ -483,6 +502,7 @@ class BaseTrainer(ABC):
             "batch_size_per_gpu": plan.batch_size_per_gpu,
             "gpu_memory_gb": round(planned_for / gib, 1),
             "amp": bool(training["amp"]),
+            "amp_auto": amp_auto,
             "estimated_gpu_memory_gb": round(plan.estimated_bytes / gib, 1),
         }
         io.write_json_file(self.config_json, self.config)
@@ -494,6 +514,25 @@ class BaseTrainer(ABC):
             print_warning(
                 f"This may not fit in {planned_for / gib:.1f} GiB, even at the smallest patch."
             )
+
+    def _choose_precision(
+        self, bf16_plan: patch_planning.Plan, memory: float, num_gpus: int
+    ) -> patch_planning.Plan:
+        """Time BF16 and FP32, set training.amp, and return the plan for the winner."""
+        training = self.config["training"]
+        fp32_config = {**self.config, "training": {**training, "amp": False}}
+        fp32_plan = patch_planning.plan_for_config(fp32_config, len(self.paths), num_gpus)
+        with console.status("Timing BF16 and FP32..."):
+            choice = precision_test.choose_precision(
+                self.config["model"]["architecture"],
+                {**self.config["model"]["params"], **self.config["spatial_config"]},
+                bf16_plan,
+                fp32_plan,
+                memory,
+            )
+        print_info(choice.reason)
+        training["amp"] = choice.amp
+        return bf16_plan if choice.amp else fp32_plan
 
     def _validate_pretrained_config(self) -> None:
         """Validate pretrained encoder compatibility if --pretrained-weights set.
@@ -1215,21 +1254,7 @@ class BaseTrainer(ABC):
         """
         accelerator = hardware.get_accelerator_type()
 
-        # Enable some performance optimizations. These tune cuDNN (CUDA) /
-        # its MIOpen equivalent (ROCm, via the same torch.backends.cudnn
-        # compatibility shim) and are meaningless on CPU-only hardware --
-        # empirically confirmed harmless no-ops there today, but skipped
-        # explicitly rather than relying on that continuing to hold.
-        if accelerator != "cpu":
-            torch.set_float32_matmul_precision("high")
-            # torch.backends.cudnn.conv.fp32_precision was added in PyTorch
-            # 2.5; fall back to allow_tf32 which achieves the same effect on
-            # older builds.
-            if hasattr(torch.backends.cudnn, "conv"):
-                torch.backends.cudnn.conv.fp32_precision = "tf32"
-            else:
-                torch.backends.cudnn.allow_tf32 = True
-            torch.backends.cudnn.benchmark = True
+        hardware.tune_gpu_math()
 
         # Train model. torch.cuda.device_count() is 0 on CPU-only hardware
         # (there are no CUDA/ROCm devices to count), so it can't be used

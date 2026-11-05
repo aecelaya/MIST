@@ -4,6 +4,7 @@ import json
 import math
 import os
 import pickle
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -2107,3 +2108,165 @@ def test_later_runs_say_they_reuse_the_saved_values(tmp_pipeline, mist_args, mon
     combined = "\n".join(printed)
     assert "Using patch [32, 32, 16] and batch size 3 per GPU from config.json" in combined
     assert "Planning patch and batch size" not in combined
+
+
+# =============================================
+# Choosing the precision
+# =============================================
+
+
+def _set_auto_amp(results, **overrides):
+    cfg_path = _set_auto(results, **overrides)
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["amp"] = "auto"
+    cfg_path.write_text(json.dumps(cfg))
+    return cfg_path
+
+
+def _fake_precision(monkeypatch, amp, bf16_supported=True):
+    """Fake the BF16 check, the two plans, and the speed test; record what's tested."""
+    tested = []
+
+    def plan(config, num_cases, num_gpus):
+        batch = 8 if config["training"]["amp"] else 4
+        return bt.patch_planning.Plan([32, 32, 16], batch, 2 * 1024**3)
+
+    def choose(architecture, model_kwargs, bf16_plan, fp32_plan, memory):
+        tested.append((architecture, bf16_plan.batch_size_per_gpu, fp32_plan.batch_size_per_gpu))
+        return bt.precision_test.Choice(amp, "Speeds were measured.")
+
+    monkeypatch.setattr(bt.patch_planning, "plan_for_config", plan)
+    monkeypatch.setattr(bt.patch_planning, "detect_gpu_memory_bytes", lambda: (8.0 * 1024**3, 1))
+    monkeypatch.setattr(bt.hardware, "bf16_supported", lambda: bf16_supported)
+    monkeypatch.setattr(bt.precision_test, "choose_precision", choose)
+    return tested
+
+
+def test_auto_amp_uses_the_winning_precision_and_its_plan(
+    tmp_pipeline, mist_args, monkeypatch, printed
+):
+    """FP32 winning saves amp false with the FP32 plan's batch size."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto_amp(results)
+    tested = _fake_precision(monkeypatch, amp=False)
+    trainer = DummyTrainer(mist_args)
+
+    assert tested == [("dummy", 8, 4)]
+    assert trainer.config["training"]["amp"] is False
+    assert trainer.config["training"]["batch_size_per_gpu"] == 4
+    saved = json.loads(cfg_path.read_text())
+    assert saved["training"]["amp"] is False
+    assert saved["planning"]["amp"] is False
+    assert saved["planning"]["amp_auto"] is True
+
+    combined = "\n".join(printed)
+    assert "BF16 or FP32" in combined
+    assert combined.index("Speeds were measured") < combined.index("batch size 4 per GPU")
+
+
+def test_auto_amp_keeps_the_bf16_plan_when_bf16_wins(tmp_pipeline, mist_args, monkeypatch):
+    """BF16 winning saves amp true with the BF16 plan's batch size."""
+    results, _ = tmp_pipeline
+    _set_auto_amp(results)
+    _fake_precision(monkeypatch, amp=True)
+    trainer = DummyTrainer(mist_args)
+    assert trainer.config["training"]["amp"] is True
+    assert trainer.config["training"]["batch_size_per_gpu"] == 8
+
+
+def test_auto_amp_runs_the_speed_test_once(tmp_pipeline, mist_args, monkeypatch):
+    """Later runs reuse the saved choice."""
+    results, _ = tmp_pipeline
+    _set_auto_amp(results)
+    tested = _fake_precision(monkeypatch, amp=False)
+    DummyTrainer(mist_args)
+    trainer = DummyTrainer(mist_args)
+    assert len(tested) == 1
+    assert trainer.config["training"]["amp"] is False
+
+
+def test_auto_amp_without_bf16_hardware_is_fp32_without_a_test_or_warning(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """A pre-Ampere GPU has nothing to compare, and "auto" didn't ask for BF16."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto_amp(results)
+    tested = _fake_precision(monkeypatch, amp=True, bf16_supported=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        DummyTrainer(mist_args)
+    assert tested == []
+    assert json.loads(cfg_path.read_text())["training"]["amp"] is False
+
+
+def test_auto_amp_without_bf16_hardware_is_saved_with_a_hand_set_plan(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """With nothing to plan, the resolved precision still reaches config.json."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto_amp(results, patch=[16, 16, 16], batch=2)
+    _fake_precision(monkeypatch, amp=True, bf16_supported=False)
+    DummyTrainer(mist_args)
+    assert json.loads(cfg_path.read_text())["training"]["amp"] is False
+
+
+def test_auto_amp_is_tested_even_with_a_hand_set_plan(tmp_pipeline, mist_args, monkeypatch):
+    """A hand-set patch and batch stay, and the precision is still chosen."""
+    results, _ = tmp_pipeline
+    _set_auto_amp(results, patch=[16, 16, 16], batch=2)
+    tested = _fake_precision(monkeypatch, amp=False)
+
+    def keep(config, num_cases, num_gpus):
+        return bt.patch_planning.Plan(
+            config["spatial_config"]["patch_size"],
+            config["training"]["batch_size_per_gpu"],
+            1024**3,
+        )
+
+    monkeypatch.setattr(bt.patch_planning, "plan_for_config", keep)
+    trainer = DummyTrainer(mist_args)
+    assert len(tested) == 1
+    assert trainer.config["training"]["amp"] is False
+    assert trainer.config["spatial_config"]["patch_size"] == [16, 16, 16]
+    assert trainer.config["training"]["batch_size_per_gpu"] == 2
+
+
+@pytest.mark.parametrize("amp", [True, False])
+def test_amp_set_by_hand_skips_the_speed_test(tmp_pipeline, mist_args, monkeypatch, amp):
+    """true and false are kept as they are, including in configs from earlier versions."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto(results)
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["amp"] = amp
+    cfg_path.write_text(json.dumps(cfg))
+    tested = _fake_precision(monkeypatch, amp=not amp)
+    trainer = DummyTrainer(mist_args)
+    assert tested == []
+    assert trainer.config["training"]["amp"] is amp
+    assert json.loads(cfg_path.read_text())["planning"]["amp_auto"] is False
+
+
+def test_changing_the_network_tests_a_chosen_precision_again(tmp_pipeline, mist_args, monkeypatch):
+    """Which precision is faster can depend on the network."""
+    results, _ = tmp_pipeline
+    _set_auto_amp(results)
+    tested = _fake_precision(monkeypatch, amp=False)
+    DummyTrainer(mist_args)
+    mist_args.model = "other"
+    DummyTrainer(mist_args)
+    assert [entry[0] for entry in tested] == ["dummy", "other"]
+
+
+def test_changing_the_network_keeps_a_precision_set_by_hand(tmp_pipeline, mist_args, monkeypatch):
+    """A hand-set amp survives replanning for another network."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto(results)
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["amp"] = True
+    cfg_path.write_text(json.dumps(cfg))
+    tested = _fake_precision(monkeypatch, amp=False)
+    DummyTrainer(mist_args)
+    mist_args.model = "other"
+    trainer = DummyTrainer(mist_args)
+    assert tested == []
+    assert trainer.config["training"]["amp"] is True

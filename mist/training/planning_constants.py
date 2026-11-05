@@ -54,6 +54,20 @@ class PlanningConstants:
     # Warn at training if the GPU has at least this many times the planned memory.
     UNDERUSED_RATIO = 1.5
 
+    # FP32 replaces BF16 only if the speed test finds it this many times faster,
+    # since the test leaves out data loading and a few steps are noisy.
+    FP32_MIN_SPEEDUP = 1.10
+
+    # Training steps the speed test runs for each precision: some to warm up, then
+    # some to time, stopping early on a slow network once it has the minimum.
+    SPEED_TEST_WARMUP_STEPS = 3
+    SPEED_TEST_STEPS = 15
+    SPEED_TEST_MIN_STEPS = 5
+    SPEED_TEST_MAX_SECONDS = 60
+
+    # Give up on a speed test that takes this long, and keep BF16.
+    SPEED_TEST_TIMEOUT_SECONDS = 600
+
     # Smallest patch along any axis. With a 3 x 3 x 3 kernel, at least 5 voxels
     # give the kernel genuine (non-padded) context at every position.
     MIN_AXIS_SIZE = 5

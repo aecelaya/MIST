@@ -64,6 +64,7 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=5)
     args = parser.parse_args()
 
+    hardware.tune_gpu_math()  # As in MIST's training.
     memory = float(torch.cuda.get_device_properties(0).total_memory)
     amp = hardware.resolve_amp(True, warn=False)
     print(f"{torch.cuda.get_device_name(0)}, {memory / GIB:.1f} GiB, {'BF16' if amp else 'FP32'}")
