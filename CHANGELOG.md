@@ -19,6 +19,9 @@ All notable changes to MIST are listed here, newest first. MIST follows
   they work with or without it, and older configs train as they did. Inference
   doesn't use it. `examples/mist_compile_benchmark.ipynb` measures its effect on a
   GPU.
+- `mist_train` warns about mistakes in `config.json`: keys MIST doesn't use, with
+  the likely spelling, and values of the wrong type or range, such as
+  `"compile": "false"`. These are only warnings, so existing configs still train.
 - `training.validate_every` (and `--validate-every`) runs validation every N
   epochs instead of every epoch. Validation always runs on the last epoch.
   Defaults to `1`, the previous behavior.
@@ -34,6 +37,11 @@ All notable changes to MIST are listed here, newest first. MIST follows
   the image size, and one global batch sees at most 5% of the dataset. New runs
   may get different patch and batch sizes than before; configs that already have
   values keep them.
+- The planner's memory estimate is refitted to steady training memory measured on
+  four GPUs, with separate values for SwinUNETR and Primus. Plans for U-Net and
+  MedNeXt networks use up to about 1.4 times the voxels they did. Configs that
+  already have a plan keep it. PrimusV2 with `amp` off can still exceed the estimate
+  on the A100, L4, and RTX PRO 6000.
 - **Target spacing now follows nnU-Net's anisotropy rule.** The coarsest axis moves
   from its median to its 10th percentile only if its spacing is over 3 times the
   next coarsest axis and its median voxel count is under a third of the smallest
@@ -99,6 +107,10 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Fixed
 
+- Multi-GPU training now applies MIST's GPU math settings (cuDNN benchmark mode,
+  fast matmul, and TF32 convolutions). They were only set in the parent process,
+  so the spawned training processes ran with PyTorch's defaults. Multi-GPU speed
+  and first-step memory may change.
 - Multi-GPU training with `resenc` no longer crashes on the second step with
   "Expected to have finished reduction in the prior iteration" when the network
   has more decoder stages than it uses for deep supervision. Those segmentation

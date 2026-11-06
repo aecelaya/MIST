@@ -773,28 +773,70 @@ def test_fit_multi_gpu_uses_spawn(tmp_pipeline, mist_args, monkeypatch):
     assert spawned["count"] == 1
 
 
-def test_fit_sets_cudnn_conv_fp32_precision_when_available(tmp_pipeline, mist_args, monkeypatch):
-    """fit() sets cudnn.conv.fp32_precision='tf32' on PyTorch >= 2.5."""
+def test_run_cross_validation_sets_cudnn_conv_fp32_precision_when_available(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """run_cross_validation sets cudnn.conv.fp32_precision='tf32' on PyTorch >= 2.5."""
     fake_conv = SimpleNamespace(fp32_precision=None)
     monkeypatch.setattr(torch.backends.cudnn, "conv", fake_conv, raising=False)
-    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1, raising=False)
     trainer = DummyTrainer(mist_args)
-    trainer.run_cross_validation = lambda rank, world_size: None
-    trainer.fit()
+    monkeypatch.setattr(trainer, "train_fold", lambda **_: None)
+    trainer.run_cross_validation(rank=0, world_size=1)
     assert fake_conv.fp32_precision == "tf32"
 
 
-def test_fit_skips_cudnn_tuning_on_cpu(tmp_pipeline, mist_args, monkeypatch):
-    """fit() must not touch cudnn/TF32 settings on CPU-only hardware."""
+def test_run_cross_validation_skips_cudnn_tuning_on_cpu(tmp_pipeline, mist_args, monkeypatch):
+    """run_cross_validation must not touch cudnn/TF32 settings on CPU-only hardware."""
     monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
     fake_conv = SimpleNamespace(fp32_precision=None)
     monkeypatch.setattr(torch.backends.cudnn, "conv", fake_conv, raising=False)
     monkeypatch.setattr(torch.backends.cudnn, "benchmark", False, raising=False)
     trainer = DummyTrainer(mist_args)
-    trainer.run_cross_validation = lambda rank, world_size: None
-    trainer.fit()
+    monkeypatch.setattr(trainer, "train_fold", lambda **_: None)
+    trainer.run_cross_validation(rank=0, world_size=1)
     assert fake_conv.fp32_precision is None
     assert torch.backends.cudnn.benchmark is False
+
+
+def test_init_warns_about_mistakes_in_config_file(tmp_pipeline, mist_args, monkeypatch):
+    """A misspelled key in config.json gets a warning, and training still starts."""
+    results, _ = tmp_pipeline
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["compil"] = True
+    cfg_path.write_text(json.dumps(cfg))
+    warnings = []
+    monkeypatch.setattr(bt, "print_warning", warnings.append)
+
+    DummyTrainer(mist_args)
+
+    assert any("training.compil'" in warning for warning in warnings)
+
+
+@pytest.mark.parametrize("rank", [0, 1])
+def test_run_cross_validation_tunes_gpu_math_before_training_on_every_rank(
+    tmp_pipeline, mist_args, monkeypatch, rank
+):
+    """Each process sets its own GPU math, since mp.spawn's don't inherit it."""
+    events = []
+    monkeypatch.setattr(bt.hardware, "tune_gpu_math", lambda: events.append("tune"))
+    trainer = DummyTrainer(mist_args)
+    monkeypatch.setattr(trainer, "train_fold", lambda **_: events.append("train"))
+    trainer.run_cross_validation(rank=rank, world_size=2)
+    assert events[0] == "tune"
+    assert events.count("tune") == 1
+    assert "train" in events
+
+
+def test_fit_does_not_tune_gpu_math_in_the_parent_process(tmp_pipeline, mist_args, monkeypatch):
+    """With spawn, the parent's settings wouldn't reach the training processes."""
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cuda")
+    monkeypatch.setattr(bt.mp, "spawn", lambda *args, **kwargs: None)
+    tuned = []
+    monkeypatch.setattr(bt.hardware, "tune_gpu_math", lambda: tuned.append(True))
+    DummyTrainer(mist_args).fit()
+    assert not tuned
 
 
 def test_fit_world_size_is_one_on_cpu_regardless_of_device_count(

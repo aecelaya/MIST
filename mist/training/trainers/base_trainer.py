@@ -34,7 +34,7 @@ from mist.models.model_loader import (
     validate_encoder_compatibility,
 )
 from mist.models.model_registry import canonical_architecture, get_model_from_registry
-from mist.training import patch_planning, precision_test, training_utils
+from mist.training import config_validation, patch_planning, precision_test, training_utils
 from mist.training.lr_schedulers.lr_scheduler_registry import get_lr_scheduler
 from mist.training.optimizers.optimizer_registry import get_optimizer
 from mist.training.planning_constants import PlanningConstants
@@ -69,6 +69,11 @@ class BaseTrainer(ABC):
 
         self.config_json = self.results_dir / "config.json"
         self.config = io.read_json_file(self.config_json)
+
+        # Point out mistakes from editing the file by hand. This runs once, since
+        # spawned training processes don't rerun __init__.
+        for problem in config_validation.find_config_problems(self.config):
+            print_warning(f"config.json: {problem}")
 
         # Snapshot config before CLI overrides so resume checks can compare.
         _original_config = copy.deepcopy(self.config)
@@ -749,13 +754,13 @@ class BaseTrainer(ABC):
         if hardware.resolve_compile(training.get("compile", False), warn=rank == 0):
             model.compile()
 
-        # Set up model for distributed data parallel training. device_ids
-        # only makes sense for a CUDA/ROCm rank; this is unreachable on
-        # CPU-only hardware today since fit() forces world_size (and so
-        # use_ddp) to False there -- multi-process CPU training is out of
-        # scope for now (cpu_rocm_support_plan.md Stage 1).
+        # Set up model for distributed data parallel training. device_ids only
+        # makes sense for a CUDA/ROCm rank. fit() always trains on one process on
+        # CPU-only hardware; the multi-process regression test reaches this
+        # on CPU by spawning run_cross_validation itself, so CI can run real DDP.
         if use_ddp:
-            model = DDP(model, device_ids=[rank])
+            on_cpu = hardware.get_accelerator_type() == "cpu"
+            model = DDP(model, device_ids=None if on_cpu else [rank])
 
         # Get loss function. First get the loss function from the registry.
         # We then wrap it in a DeepSupervisionLoss, which will handle
@@ -1227,6 +1232,10 @@ class BaseTrainer(ABC):
 
     def run_cross_validation(self, rank: int, world_size: int) -> None:
         """Run cross-validation for selected folds."""
+        # These settings belong to each process, and mp.spawn's processes don't
+        # inherit them, so every rank sets its own here.
+        hardware.tune_gpu_math()
+
         # Display the start of training message and a run summary.
         if rank == 0:
             print_section_header("Starting training")
@@ -1263,8 +1272,6 @@ class BaseTrainer(ABC):
         instances of the training function, each on a separate GPU.
         """
         accelerator = hardware.get_accelerator_type()
-
-        hardware.tune_gpu_math()
 
         # Train model. torch.cuda.device_count() is 0 on CPU-only hardware
         # (there are no CUDA/ROCm devices to count), so it can't be used

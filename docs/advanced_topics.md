@@ -13,7 +13,8 @@ inference, and evaluation).
 
 If you want to **customize training or inference**, you can edit this file
 directly. For example, you can safely change the network architecture, loss
-function, or optimizer.
+function, or optimizer. `mist_train` warns about keys it doesn't use and values
+of the wrong type, so a misspelled setting doesn't go unnoticed.
 
 Editing preprocessing is possible but usually not recommended unless you know
 your dataset requires different resampling or normalization. If, for example,

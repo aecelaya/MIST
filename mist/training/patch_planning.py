@@ -53,10 +53,14 @@ class NetworkEstimate:
     Attributes:
         activations: Activation values per sample.
         parameters: Number of parameters.
+        bytes_per_activation: Training memory per activation value in FP32.
+        bf16_factor: Share of that memory an activation value takes in BF16.
     """
 
     activations: float
     parameters: int
+    bytes_per_activation: float = constants.BYTES_PER_ACTIVATION
+    bf16_factor: float = constants.BF16_ACTIVATION_FACTOR
 
 
 @dataclasses.dataclass(frozen=True)
@@ -159,13 +163,20 @@ def estimate_network(
         ValueError: If the patch size isn't valid for the network.
     """
     try:
-        return _count_activations(
+        size = _count_activations(
             architecture, in_channels, out_channels, patch_size, target_spacing, "meta"
         )
     except (NotImplementedError, RuntimeError):
         measured = _measure_on_cpu(architecture, in_channels, out_channels, tuple(target_spacing))
         scale = float(np.prod(patch_size)) / float(np.prod(_MEASURING_PATCH))
-        return NetworkEstimate(measured.activations * scale, measured.parameters)
+        size = NetworkEstimate(measured.activations * scale, measured.parameters)
+
+    for prefix, (per_activation, factor) in constants.ACTIVATION_MEMORY_BY_PREFIX.items():
+        if architecture.startswith(prefix):
+            return dataclasses.replace(
+                size, bytes_per_activation=per_activation, bf16_factor=factor
+            )
+    return size
 
 
 def estimated_bytes(estimate: NetworkEstimate, batch_size: int, amp: bool) -> float:
@@ -179,9 +190,9 @@ def estimated_bytes(estimate: NetworkEstimate, batch_size: int, amp: bool) -> fl
     Returns:
         Estimated peak memory in bytes.
     """
-    per_activation = constants.BYTES_PER_ACTIVATION
+    per_activation = estimate.bytes_per_activation
     if amp:
-        per_activation *= constants.BF16_ACTIVATION_FACTOR
+        per_activation *= estimate.bf16_factor
     return (
         constants.OVERHEAD_BYTES
         + constants.BYTES_PER_PARAMETER * estimate.parameters

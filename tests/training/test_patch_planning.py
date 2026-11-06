@@ -75,10 +75,33 @@ def test_invalid_patch_raises_value_error():
         pp.estimate_network("nnunet-plain", 1, 3, [288, 288, 288], [1.0, 1.0, 1.0])
 
 
-def test_estimate_reproduces_the_measured_run():
-    """The constants reproduce the one run they were fitted to, within 5%."""
-    estimate = pp.estimate_network("nnunet-plain", 4, 5, [128, 128, 64], [1.0, 1.0, 2.0])
-    assert pp.estimated_bytes(estimate, 2, amp=False) / GIB == pytest.approx(10.1, rel=0.05)
+@pytest.mark.parametrize(
+    "architecture, patch, batch, amp, steady_gib",
+    [
+        ("nnunet-plain", [128, 128, 128], 4, False, 18.1),
+        ("swinunetr-small", [96, 96, 96], 4, False, 13.5),
+    ],
+)
+def test_estimate_covers_measured_steady_memory(architecture, patch, batch, amp, steady_gib):
+    """The estimate stays above steady memory measured on a GPU, with some margin."""
+    estimate = pp.estimate_network(architecture, 4, 5, patch, [1.0, 1.0, 1.0])
+    estimated_gib = pp.estimated_bytes(estimate, batch, amp) / GIB
+    assert steady_gib / estimated_gib == pytest.approx(0.8, abs=0.1)
+
+
+@pytest.mark.parametrize(
+    "architecture, expected",
+    [
+        ("nnunet-plain", (12.0, 0.55)),
+        ("swinunetr-small", (17.0, 0.9)),
+        ("primus-medium", (12.0, 0.7)),
+        ("primusv2-small", (12.0, 0.55)),
+    ],
+)
+def test_network_family_sets_memory_per_activation(architecture, expected):
+    """Each family gets its own values, and primusv2 isn't taken for primus."""
+    estimate = pp.estimate_network(architecture, 1, 5, [64, 64, 64], [1.0, 1.0, 1.0])
+    assert (estimate.bytes_per_activation, estimate.bf16_factor) == expected
 
 
 def test_bf16_lowers_the_estimate_and_batch_raises_it():

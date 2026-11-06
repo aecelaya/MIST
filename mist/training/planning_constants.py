@@ -16,15 +16,24 @@ class PlanningConstants:
     # CUDA context and allocator overhead.
     OVERHEAD_BYTES = 0.5 * (1024**3)
 
-    # Fitted to one run: nnunet-plain, patch 128 x 128 x 64, batch size 2, FP32,
-    # peak 10.1 GiB on a Quadro RTX 6000, including validation and prediction. It
-    # covers the layers between the convolutions counted as activations.
-    BYTES_PER_ACTIVATION = 17.2
+    # Fitted to steady training memory on four GPUs (Tesla T4, L4, A100, RTX PRO
+    # 6000): U-Net and MedNeXt networks take at most about 10 bytes in FP32. This
+    # adds a margin for the first steps, which can take more. The calibration runs
+    # used 5 classes. Known gap: primusv2 networks in FP32 grow faster than this on
+    # the A100, L4, and RTX PRO 6000, though not on the T4, and can run out of memory.
+    BYTES_PER_ACTIVATION = 12.0
 
-    # BF16 roughly halves activation memory. This is inferred, not measured: it's
-    # about what nnU-Net's half-precision reference (a 128^3 patch at batch size 2
-    # in 8 GB) implies against the FP32 run above.
+    # BF16 activation memory measured 0.50 to 0.60 of FP32's on the same networks.
     BF16_ACTIVATION_FACTOR = 0.55
+
+    # Networks whose memory differs from the values above, by name prefix: (bytes
+    # per activation in FP32, BF16 factor). These come from swinunetr-small and
+    # primus-medium only. Attention and other layers between the counted activations
+    # take more, and much of Swin's memory doesn't shrink with BF16.
+    ACTIVATION_MEMORY_BY_PREFIX = {
+        "swinunetr": (17.0, 0.9),
+        "primus-": (12.0, 0.7),
+    }
 
     # Share of GPU memory to plan for, leaving room for the estimate's error.
     MEMORY_FRACTION = 0.9
