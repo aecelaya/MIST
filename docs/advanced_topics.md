@@ -87,6 +87,7 @@ Below is an example of a valid `config.json` file.
     "l2_penalty": 1e-4,
     "grad_clip_norm": 1.0,
     "amp": "auto",
+    "compile": false,
 
     "augmentation": {
       "enabled": true,

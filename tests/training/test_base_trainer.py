@@ -542,6 +542,38 @@ def test_build_components_multi_gpu_wraps_with_ddp(tmp_pipeline, mist_args, monk
     assert "scaler" not in state
 
 
+def _is_compiled(model):
+    """Return whether a model was compiled in place."""
+    return getattr(model, "_compiled_call_impl", None) is not None
+
+
+def test_build_components_does_not_compile_by_default(tmp_pipeline, mist_args):
+    """Without training.compile, the model isn't compiled."""
+    state = DummyTrainer(mist_args).build_components(rank=0, world_size=1)
+    assert not _is_compiled(state["model"])
+
+
+def test_build_components_old_config_without_compile_key(tmp_pipeline, mist_args):
+    """A config from before the setting trains uncompiled."""
+    results, _ = tmp_pipeline
+    cfg = json.loads((Path(results) / "config.json").read_text())
+    cfg["training"].pop("compile", None)
+    (Path(results) / "config.json").write_text(json.dumps(cfg))
+    state = DummyTrainer(mist_args).build_components(rank=0, world_size=1)
+    assert not _is_compiled(state["model"])
+
+
+@pytest.mark.parametrize("world_size", [1, 2])
+def test_build_components_compiles_in_place(tmp_pipeline, mist_args, monkeypatch, world_size):
+    """Compiling keeps the model's type and weight names, and comes before DDP."""
+    monkeypatch.setattr(bt.hardware, "resolve_compile", lambda requested, warn=True: True)
+    state = DummyTrainer(mist_args).build_components(rank=0, world_size=world_size)
+    model = state["model"].module if world_size > 1 else state["model"]
+    assert isinstance(model, DummyModel)
+    assert _is_compiled(model)
+    assert not any(key.startswith("_orig_mod.") for key in model.state_dict())
+
+
 def test_setup_initializes_process_group_once(tmp_pipeline, mist_args, monkeypatch, patch_dist):
     """Ensure process group is initialized only once."""
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
@@ -1819,6 +1851,24 @@ def test_small_validation_split_warns(tmp_pipeline, mist_args, monkeypatch):
 
     combined = "\n".join(printed)
     assert "holds out only 1 of 2" in combined
+
+
+def test_overwrite_config_sets_compile(tmp_pipeline, mist_args):
+    """--compile overrides training.compile."""
+    mist_args.compile = True
+    trainer = DummyTrainer(mist_args)
+    assert trainer.config["training"]["compile"] is True
+
+
+def test_overwrite_config_keeps_compile_without_the_flag(tmp_pipeline, mist_args):
+    """Without --compile, the config's value stands."""
+    results, _ = tmp_pipeline
+    cfg = json.loads((Path(results) / "config.json").read_text())
+    cfg["training"]["compile"] = True
+    (Path(results) / "config.json").write_text(json.dumps(cfg))
+    mist_args.compile = False
+    trainer = DummyTrainer(mist_args)
+    assert trainer.config["training"]["compile"] is True
 
 
 def test_overwrite_config_sets_validate_every(tmp_pipeline, mist_args):

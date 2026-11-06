@@ -14,6 +14,11 @@ All notable changes to MIST are listed here, newest first. MIST follows
 - **`nnunet-res`** — a clearer name for the residual network MIST has called
   `nnunet`.
 
+- `training.compile` (and `--compile`) compiles the model with `torch.compile`
+  during training. It's off by default. Checkpoints keep the same weight names, so
+  they work with or without it, and older configs train as they did. Inference
+  doesn't use it. `examples/mist_compile_benchmark.ipynb` measures its effect on a
+  GPU.
 - `training.validate_every` (and `--validate-every`) runs validation every N
   epochs instead of every epoch. Validation always runs on the last epoch.
   Defaults to `1`, the previous behavior.

@@ -4,6 +4,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from mist.utils import hardware
+
 
 def _format_parameter_count(num_params: int) -> str:
     """Format a parameter count as e.g. '0.68M (683,412)'."""
@@ -30,10 +32,15 @@ def training_summary_rows(
     per_gpu = training["batch_size_per_gpu"]
     global_batch = per_gpu * num_gpus
     patch_size = " × ".join(str(dim) for dim in config["spatial_config"]["patch_size"])
+    compile_requested = training.get("compile", False)
     return [
         ("Model", str(config["model"]["architecture"])),
         ("Parameters", _format_parameter_count(num_params)),
         ("AMP", "BF16" if training["amp"] else "off (FP32)"),
+        (
+            "torch.compile",
+            "on" if hardware.resolve_compile(compile_requested, warn=False) else "off",
+        ),
         ("GPUs", str(num_gpus)),
         ("Global batch size", f"{global_batch} ({per_gpu}/GPU × {num_gpus})"),
         ("Patch size", patch_size),

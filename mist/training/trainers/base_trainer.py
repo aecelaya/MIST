@@ -253,6 +253,10 @@ class BaseTrainer(ABC):
         if getattr(self.mist_args, "validate_every", None) is not None:
             self.config["training"]["validate_every"] = int(self.mist_args.validate_every)
 
+        # Turn on torch.compile if asked for on the command line.
+        if getattr(self.mist_args, "compile", False):
+            self.config["training"]["compile"] = True
+
         # Resolve AMP against the current hardware. BF16 autocast is only
         # hardware-accelerated on Ampere or newer GPUs; downgrade to FP32 on
         # pre-Ampere/CPU. Resolving here (once, in the parent process) persists
@@ -738,6 +742,12 @@ class BaseTrainer(ABC):
         # end-to-end CPU training run hit it immediately -- Stage 0's
         # coupling-site audit missed this one.
         model.to(hardware.get_device_for_rank(rank))
+
+        # Compile in place rather than with torch.compile(model), whose wrapper would
+        # add "_orig_mod." to the name of every weight in the checkpoints. Configs
+        # from before this setting don't have it, and train as they always have.
+        if hardware.resolve_compile(training.get("compile", False), warn=rank == 0):
+            model.compile()
 
         # Set up model for distributed data parallel training. device_ids
         # only makes sense for a CUDA/ROCm rank; this is unreachable on

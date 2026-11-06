@@ -190,6 +190,45 @@ def test_bf16_supported_false_on_rdna2(monkeypatch) -> None:
     assert hardware.bf16_supported() is False
 
 
+@pytest.mark.parametrize("accelerator", ["cpu", "cuda", "rocm"])
+def test_resolve_compile_not_requested_returns_false(monkeypatch, accelerator) -> None:
+    """Without a request, compile stays off everywhere and nothing warns."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert hardware.resolve_compile(False) is False
+
+
+@pytest.mark.parametrize("accelerator", ["cuda", "rocm"])
+def test_resolve_compile_on_a_gpu(monkeypatch, accelerator) -> None:
+    """A request on a GPU is met."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    monkeypatch.setattr(hardware.os, "name", "posix")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert hardware.resolve_compile(True) is True
+
+
+@pytest.mark.parametrize(
+    "accelerator, os_name, where",
+    [("cpu", "posix", "a CPU"), ("cuda", "nt", "Windows")],
+)
+def test_resolve_compile_unsupported_warns(monkeypatch, accelerator, os_name, where) -> None:
+    """A request where compile isn't supported is turned off, with a warning."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    monkeypatch.setattr(hardware.os, "name", os_name)
+    with pytest.warns(UserWarning, match=where):
+        assert hardware.resolve_compile(True) is False
+
+
+def test_resolve_compile_can_skip_the_warning(monkeypatch) -> None:
+    """Other DDP ranks and the summary table resolve the setting without warning."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cpu")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert hardware.resolve_compile(True, warn=False) is False
+
+
 def test_resolve_amp_not_requested_returns_false() -> None:
     """A False request always resolves to False and never warns."""
     with warnings.catch_warnings():

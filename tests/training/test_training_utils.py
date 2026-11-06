@@ -30,6 +30,19 @@ def test_training_summary_rows_labels_and_values():
     assert values["Parameters"] == "0.68M (683,412)"
 
 
+@pytest.mark.parametrize(
+    "requested, supported, expected",
+    [(True, True, "on"), (True, False, "off"), (False, True, "off")],
+)
+def test_training_summary_rows_reports_compile(monkeypatch, requested, supported, expected):
+    """The table shows whether the model will really be compiled."""
+    monkeypatch.setattr(tu.hardware, "get_accelerator_type", lambda: "cuda" if supported else "cpu")
+    monkeypatch.setattr(tu.hardware.os, "name", "posix")
+    config = _summary_config()
+    config["training"]["compile"] = requested
+    assert dict(tu.training_summary_rows(config, 1000, world_size=1))["torch.compile"] == expected
+
+
 def test_training_summary_rows_saved_model_final():
     """Without a validation split, the final-epoch model is reported."""
     values = dict(tu.training_summary_rows(_summary_config(), 1000, world_size=1))
@@ -76,6 +89,7 @@ def test_training_summary_rows_order_is_stable():
         "Model",
         "Parameters",
         "AMP",
+        "torch.compile",
         "GPUs",
         "Global batch size",
         "Patch size",

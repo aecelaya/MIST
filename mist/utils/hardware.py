@@ -17,6 +17,7 @@ data loader without the user having to know these details themselves — see
 """
 
 import contextlib
+import os
 import warnings
 from typing import Literal
 
@@ -220,6 +221,33 @@ def resolve_amp(requested: bool | str, *, warn: bool = True) -> bool:
         warnings.warn(
             f"AMP was requested but {device} has no hardware BF16 support; "
             "falling back to FP32. Set training.amp = false to silence this.",
+            stacklevel=2,
+        )
+    return False
+
+
+def resolve_compile(requested: bool, *, warn: bool = True) -> bool:
+    """Resolve a requested torch.compile setting against the current hardware.
+
+    As in nnU-Net, compiling is left off on CPUs and on Windows, where its default
+    backend isn't supported.
+
+    Args:
+        requested: The compile setting from config (``training.compile``).
+        warn: Whether to warn when the request can't be met.
+
+    Returns:
+        Whether to compile the model.
+    """
+    if not requested:
+        return False
+    if get_accelerator_type() != "cpu" and os.name != "nt":
+        return True
+    if warn:
+        where = "Windows" if os.name == "nt" else "a CPU"
+        warnings.warn(
+            f"torch.compile was requested but isn't supported on {where}; training "
+            "without it. Set training.compile = false to silence this.",
             stacklevel=2,
         )
     return False
