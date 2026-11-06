@@ -88,7 +88,7 @@ Below is an example of a valid `config.json` file.
     "l2_penalty": 1e-4,
     "grad_clip_norm": 1.0,
     "amp": "auto",
-    "compile": false,
+    "compile": true,
 
     "augmentation": {
       "enabled": true,
@@ -1412,6 +1412,16 @@ CPU-only training is single-process — MIST does not (yet) support distributed
 training across multiple CPU processes, only across multiple GPUs (see
 [Multi-GPU training](#multi-gpu-training) below, which applies identically to
 AMD ROCm GPUs as it does to NVIDIA ones).
+
+## Compiling the model
+
+New configs set `training.compile` to `true`, which compiles the model with
+`torch.compile` during training on GPUs. It has no effect on CPUs or Windows, and
+configs from before this setting train without it. Compiling takes extra time at
+the start of each fold, usually a few minutes at most, and steps then run faster.
+Checkpoints don't change, so models train, resume, and predict the same way either
+way. To turn it off, for example after a compiler error, set `training.compile` to
+`false` in `config.json`.
 
 ## Multi-GPU training
 

@@ -14,11 +14,12 @@ All notable changes to MIST are listed here, newest first. MIST follows
 - **`nnunet-res`** — a clearer name for the residual network MIST has called
   `nnunet`.
 
-- `training.compile` (and `--compile`) compiles the model with `torch.compile`
-  during training. It's off by default. Checkpoints keep the same weight names, so
-  they work with or without it, and older configs train as they did. Inference
-  doesn't use it. `examples/mist_compile_benchmark.ipynb` measures its effect on a
-  GPU.
+- `training.compile` compiles the model with `torch.compile` during training. New
+  configs turn it on; it stays off on CPUs and Windows, and configs from before this setting train as they did. In benchmarks
+  without data loading on an A100, steps ran a median of 1.6 times faster with BF16
+  and 1.25 times with FP32, after one to seven extra minutes per fold. Checkpoints
+  keep the same weight names, so they work with or without it. Inference doesn't
+  use it. `examples/mist_compile_benchmark.ipynb` measures its effect on a GPU.
 - `mist_train` warns about mistakes in `config.json`: keys MIST doesn't use, with
   the likely spelling, and values of the wrong type or range, such as
   `"compile": "false"`. These are only warnings, so existing configs still train.

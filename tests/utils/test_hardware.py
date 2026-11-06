@@ -209,24 +209,14 @@ def test_resolve_compile_on_a_gpu(monkeypatch, accelerator) -> None:
         assert hardware.resolve_compile(True) is True
 
 
-@pytest.mark.parametrize(
-    "accelerator, os_name, where",
-    [("cpu", "posix", "a CPU"), ("cuda", "nt", "Windows")],
-)
-def test_resolve_compile_unsupported_warns(monkeypatch, accelerator, os_name, where) -> None:
-    """A request where compile isn't supported is turned off, with a warning."""
+@pytest.mark.parametrize("accelerator, os_name", [("cpu", "posix"), ("cuda", "nt")])
+def test_resolve_compile_unsupported_is_quiet(monkeypatch, accelerator, os_name) -> None:
+    """Where compile isn't supported, it stays off without a warning, since it's the default."""
     monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
     monkeypatch.setattr(hardware.os, "name", os_name)
-    with pytest.warns(UserWarning, match=where):
-        assert hardware.resolve_compile(True) is False
-
-
-def test_resolve_compile_can_skip_the_warning(monkeypatch) -> None:
-    """Other DDP ranks and the summary table resolve the setting without warning."""
-    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cpu")
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        assert hardware.resolve_compile(True, warn=False) is False
+        assert hardware.resolve_compile(True) is False
 
 
 def test_resolve_amp_not_requested_returns_false() -> None:

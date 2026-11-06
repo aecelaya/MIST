@@ -39,7 +39,7 @@ def training_summary_rows(
         ("AMP", "BF16" if training["amp"] else "off (FP32)"),
         (
             "torch.compile",
-            "on" if hardware.resolve_compile(compile_requested, warn=False) else "off",
+            "on" if hardware.resolve_compile(compile_requested) else "off",
         ),
         ("GPUs", str(num_gpus)),
         ("Global batch size", f"{global_batch} ({per_gpu}/GPU × {num_gpus})"),

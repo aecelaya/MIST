@@ -219,11 +219,6 @@ the following arguments:
   _(default: `0.0`)_
 - `--validate-every`: Run validation every N epochs. Validation always runs on
   the last epoch. _(default: `1`)_
-- `--compile`: Compile the model with `torch.compile` during training. It's off by
-  default, has no effect on CPUs or Windows, and doesn't change the checkpoints, so
-  models train, resume, and predict the same way with or without it. Its speed and
-  memory gains are still being measured, and the planned patch size doesn't account
-  for them. _(default: off)_
 - `--resume`: Resume training from the latest checkpoint. See
   [Resuming training](#resuming-training) for details.
 

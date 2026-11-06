@@ -344,8 +344,9 @@ def build_base_config() -> dict[str, Any]:
             # BF16 or FP32, chosen by a speed test at the first mist_train. See
             # mist.training.precision_test.
             "amp": "auto",
-            # Compile the model with torch.compile during training.
-            "compile": False,
+            # Compile the model with torch.compile during training, on GPUs that
+            # support it. Configs from before this setting train without it.
+            "compile": True,
             "augmentation": {
                 "enabled": True,
                 "transforms": {

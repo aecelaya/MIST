@@ -354,11 +354,8 @@ def test_add_train_args_full_parse_success(patched_registries):
         "4",
         "--overwrite",
         "--resume",
-        "--compile",
     ]
     ns = parser.parse_args(argv)
-
-    assert ns.compile is True
 
     assert ns.results == "out"
     assert ns.numpy == "npdir"

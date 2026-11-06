@@ -226,31 +226,20 @@ def resolve_amp(requested: bool | str, *, warn: bool = True) -> bool:
     return False
 
 
-def resolve_compile(requested: bool, *, warn: bool = True) -> bool:
-    """Resolve a requested torch.compile setting against the current hardware.
+def resolve_compile(requested: bool) -> bool:
+    """Resolve the torch.compile setting against the current hardware.
 
     As in nnU-Net, compiling is left off on CPUs and on Windows, where its default
-    backend isn't supported.
+    backend isn't supported. This is quiet because compiling is on by default; the
+    training summary shows whether it's on.
 
     Args:
         requested: The compile setting from config (``training.compile``).
-        warn: Whether to warn when the request can't be met.
 
     Returns:
         Whether to compile the model.
     """
-    if not requested:
-        return False
-    if get_accelerator_type() != "cpu" and os.name != "nt":
-        return True
-    if warn:
-        where = "Windows" if os.name == "nt" else "a CPU"
-        warnings.warn(
-            f"torch.compile was requested but isn't supported on {where}; training "
-            "without it. Set training.compile = false to silence this.",
-            stacklevel=2,
-        )
-    return False
+    return bool(requested) and get_accelerator_type() != "cpu" and os.name != "nt"
 
 
 def tune_gpu_math() -> None:

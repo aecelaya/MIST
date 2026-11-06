@@ -237,12 +237,6 @@ def add_train_args(parser: ArgParser) -> None:
         help="Run validation every N epochs (always on the last epoch).",
     )
     g.add_argument(
-        "--compile",
-        action="store_true",
-        default=False,
-        help="Compile the model with torch.compile during training.",
-    )
-    g.add_argument(
         "--resume",
         action="store_true",
         default=False,
