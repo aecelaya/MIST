@@ -1,0 +1,30 @@
+# Copies README.md to this image's Docker Hub page.
+#
+# Requires repo secrets: DOCKER_USERNAME, DOCKER_PASSWORD. The password must be a
+# token with read, write, and delete access, which Docker Hub requires for this.
+name: Sync Docker Hub README
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - .github/workflows/docker-hub-readme.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Update the Docker Hub page
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          repository: mistmedical/mist
+          # Relative links would otherwise break on Docker Hub.
+          enable-url-completion: true
