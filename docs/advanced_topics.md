@@ -1450,6 +1450,21 @@ same machine, each job must use a different `master_port` value — port conflic
 will cause a job to fail with an "address already in use" error. Change this
 value by editing `config.json` directly.
 
+### What extra GPUs change
+
+More GPUs let MIST train on more data in the same or a similar amount of time;
+they don't shorten the run by default. `batch_size_per_gpu` applies to each GPU,
+so the global batch grows with the number of GPUs, while the number of steps per
+epoch usually stays at `min_steps_per_epoch`. For example, two GPUs with a batch
+size of 2 use a global batch of 4 and train on twice as many patches per epoch.
+The extra data isn't guaranteed to improve accuracy.
+
+To finish sooner instead, lower `training.min_steps_per_epoch` in proportion, such
+as from `250` to `125` on two GPUs. This keeps the number of patches about the
+same. An epoch always has enough steps to cover the training set once, so the
+step count won't go below the number of training cases divided by the global
+batch. Validation splits its cases across GPUs, so it gets faster either way.
+
 ### Distributed training across nodes (one fold per node)
 
 On an HPC cluster it's common to train each fold as its own job, spread across
