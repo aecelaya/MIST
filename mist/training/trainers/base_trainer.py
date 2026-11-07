@@ -534,6 +534,7 @@ class BaseTrainer(ABC):
                 bf16_plan,
                 fp32_plan,
                 memory,
+                hardware.resolve_compile(training.get("compile", False)),
             )
         print_info(choice.reason)
         training["amp"] = choice.amp

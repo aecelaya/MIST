@@ -2205,7 +2205,7 @@ def _fake_precision(monkeypatch, amp, bf16_supported=True):
         batch = 8 if config["training"]["amp"] else 4
         return bt.patch_planning.Plan([32, 32, 16], batch, 2 * 1024**3)
 
-    def choose(architecture, model_kwargs, bf16_plan, fp32_plan, memory):
+    def choose(architecture, model_kwargs, bf16_plan, fp32_plan, memory, compiled):
         tested.append((architecture, bf16_plan.batch_size_per_gpu, fp32_plan.batch_size_per_gpu))
         return bt.precision_test.Choice(amp, "Speeds were measured.")
 
@@ -2214,6 +2214,30 @@ def _fake_precision(monkeypatch, amp, bf16_supported=True):
     monkeypatch.setattr(bt.hardware, "bf16_supported", lambda: bf16_supported)
     monkeypatch.setattr(bt.precision_test, "choose_precision", choose)
     return tested
+
+
+@pytest.mark.parametrize("compiled", [False, True])
+def test_auto_amp_tests_the_compile_setting_training_will_use(
+    tmp_pipeline, mist_args, monkeypatch, compiled
+):
+    """The speed test compiles the model only if training will."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto_amp(results)
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["compile"] = compiled
+    cfg_path.write_text(json.dumps(cfg))
+    _fake_precision(monkeypatch, amp=True)
+    monkeypatch.setattr(bt.hardware, "resolve_compile", bool)
+    fake_choose = bt.precision_test.choose_precision
+    seen = []
+
+    def choose(*args):
+        seen.append(args[-1])
+        return fake_choose(*args)
+
+    monkeypatch.setattr(bt.precision_test, "choose_precision", choose)
+    DummyTrainer(mist_args)
+    assert seen == [compiled]
 
 
 def test_auto_amp_uses_the_winning_precision_and_its_plan(

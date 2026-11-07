@@ -7,7 +7,8 @@ mist_train runs a few real training steps in each and saves the choice.
 FP32 takes roughly twice the activation memory, so it only wins if it's clearly
 faster without shrinking the patch, since a larger patch can help accuracy. It may
 use a smaller batch, so the two are compared in samples per second. The steps use
-random data, so they leave out data loading.
+random data, so they leave out data loading. They compile the model if training
+will, since compiling can speed up BF16 more than FP32.
 
 Each measurement runs in its own process: using the GPU in mist_train's main process
 would hold memory on it for the whole run, and running out of memory here shouldn't
@@ -70,6 +71,7 @@ def measure_steps(
     model_kwargs: dict[str, Any],
     batch_size: int,
     amp: bool,
+    compiled: bool = False,
 ) -> Measurement:
     """Run real training steps on random data, set up as training sets up the GPU.
 
@@ -78,6 +80,7 @@ def measure_steps(
         model_kwargs: Arguments for the model, including in_channels and patch_size.
         batch_size: Batch size per GPU.
         amp: True for BF16, False for FP32.
+        compiled: Whether to compile the model, as training does.
 
     Returns:
         The measurement.
@@ -86,6 +89,8 @@ def measure_steps(
     cuda = torch.cuda.is_available()
     device = torch.device("cuda" if cuda else "cpu")
     model = get_model_from_registry(architecture, **model_kwargs).to(device).train()
+    if compiled:
+        model.compile()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     shape = (batch_size, model_kwargs["in_channels"], *model_kwargs["patch_size"])
 
@@ -103,7 +108,7 @@ def measure_steps(
         if cuda:
             torch.cuda.synchronize()
 
-    # The first steps set up cuDNN and the optimizer's state.
+    # The first steps compile the model and set up cuDNN and the optimizer's state.
     for _ in range(constants.SPEED_TEST_WARMUP_STEPS):
         step()
 
@@ -126,6 +131,7 @@ def run_measurement(
     model_kwargs: dict[str, Any],
     batch_size: int,
     amp: bool,
+    compiled: bool = False,
 ) -> Measurement | None:
     """Run measure_steps in its own process.
 
@@ -134,6 +140,7 @@ def run_measurement(
         model_kwargs: Arguments for the model, including in_channels and patch_size.
         batch_size: Batch size per GPU.
         amp: True for BF16, False for FP32.
+        compiled: Whether to compile the model, as training does.
 
     Returns:
         The measurement, or None if it ran out of memory or otherwise failed.
@@ -144,6 +151,7 @@ def run_measurement(
             "model_kwargs": model_kwargs,
             "batch_size": batch_size,
             "amp": amp,
+            "compiled": compiled,
         }
     )
     try:
@@ -166,6 +174,7 @@ def choose_precision(
     bf16_plan: Plan,
     fp32_plan: Plan,
     gpu_memory_bytes: float,
+    compiled: bool,
 ) -> Choice:
     """Choose BF16 or FP32, keeping BF16 unless FP32 is clearly better.
 
@@ -175,6 +184,7 @@ def choose_precision(
         bf16_plan: The plan if training with BF16.
         fp32_plan: The plan if training with FP32.
         gpu_memory_bytes: Memory of the GPU training will run on.
+        compiled: Whether training will compile the model.
 
     Returns:
         The choice. Its plan is fp32_plan if amp is False, else bf16_plan.
@@ -187,8 +197,8 @@ def choose_precision(
         return Choice(True, "Using BF16, since FP32 may not fit in memory at this patch.")
 
     kwargs = {**model_kwargs, "patch_size": bf16_plan.patch_size}
-    bf16 = run_measurement(architecture, kwargs, bf16_plan.batch_size_per_gpu, True)
-    fp32 = run_measurement(architecture, kwargs, fp32_plan.batch_size_per_gpu, False)
+    bf16 = run_measurement(architecture, kwargs, bf16_plan.batch_size_per_gpu, True, compiled)
+    fp32 = run_measurement(architecture, kwargs, fp32_plan.batch_size_per_gpu, False, compiled)
     if bf16 is None or fp32 is None:
         return Choice(True, "Using BF16, since the speed test couldn't finish.")
 

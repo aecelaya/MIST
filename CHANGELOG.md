@@ -56,6 +56,10 @@ All notable changes to MIST are listed here, newest first. MIST follows
 - `mist_analyze` now computes `median_resampled_image_size` and its memory warning
   in RAI axis order. Images stored with their axes in a different order used to
   get a wrong estimate, and that estimate sets the patch size.
+- `training.amp` now defaults to `"auto"`. On a GPU with hardware BF16, the first
+  `mist_train` times a few training steps in BF16 and FP32, compiling the model if
+  training will, and saves the choice. FP32 is chosen only if it's at least 10%
+  faster and needs no smaller a patch. An explicit `true` or `false` skips the test.
 - Later `mist_train` runs warn if the saved plan doesn't suit their GPU, and plan
   again if `--model` changes the network, keeping values set by hand.
 - **Validation and inference predict up to 4 patches at once,** or fewer if the

@@ -1,5 +1,6 @@
 """Tests for mist.training.precision_test."""
 
+import json
 import subprocess
 
 import pytest
@@ -26,17 +27,17 @@ def _fake_speeds(monkeypatch, bf16, fp32):
     """Make run_measurement return the given measurements, and record its calls."""
     calls = []
 
-    def run(architecture, model_kwargs, batch_size, amp):
-        calls.append((architecture, model_kwargs["patch_size"], batch_size, amp))
+    def run(architecture, model_kwargs, batch_size, amp, compiled):
+        calls.append((architecture, model_kwargs["patch_size"], batch_size, amp, compiled))
         return bf16 if amp else fp32
 
     monkeypatch.setattr(pt, "run_measurement", run)
     return calls
 
 
-def _choose(bf16_plan=None, fp32_plan=None):
+def _choose(bf16_plan=None, fp32_plan=None, compiled=False):
     return pt.choose_precision(
-        "nnunet-plain", MODEL_KWARGS, bf16_plan or _plan(), fp32_plan or _plan(), MEMORY
+        "nnunet-plain", MODEL_KWARGS, bf16_plan or _plan(), fp32_plan or _plan(), MEMORY, compiled
     )
 
 
@@ -56,9 +57,18 @@ def test_fp32_wins_when_clearly_faster(monkeypatch):
     assert "BF16 4.00 and FP32 8.00 samples per second" in choice.reason
     assert "100% faster" in choice.reason
     assert calls == [
-        ("nnunet-plain", [64, 64, 64], 4, True),
-        ("nnunet-plain", [64, 64, 64], 4, False),
+        ("nnunet-plain", [64, 64, 64], 4, True, False),
+        ("nnunet-plain", [64, 64, 64], 4, False, False),
     ]
+
+
+def test_both_precisions_are_timed_compiled_if_training_will_compile(monkeypatch):
+    """The test measures the setup that will train."""
+    calls = _fake_speeds(
+        monkeypatch, pt.Measurement(1.0, 4, 5.0 * GIB), pt.Measurement(1.0, 4, 9.0 * GIB)
+    )
+    _choose(compiled=True)
+    assert [call[-1] for call in calls] == [True, True]
 
 
 def test_bf16_stays_when_fp32_is_only_slightly_faster(monkeypatch):
@@ -168,6 +178,32 @@ def test_run_measurement_reads_the_last_line(monkeypatch):
         lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, stdout, ""),
     )
     assert pt.run_measurement("nnunet-plain", MODEL_KWARGS, 2, False) == pt.Measurement(0.5, 2, 3.0)
+
+
+@pytest.mark.parametrize("compiled", [False, True])
+def test_measure_steps_compiles_only_if_asked(monkeypatch, compiled):
+    """The steps run on a compiled model only when training will compile."""
+    compiles = []
+    monkeypatch.setattr(pt.torch.nn.Module, "compile", lambda self: compiles.append(self))
+    kwargs = {**MODEL_KWARGS, "patch_size": [16, 16, 16]}
+    monkeypatch.setattr(constants, "SPEED_TEST_WARMUP_STEPS", 1, raising=False)
+    monkeypatch.setattr(constants, "SPEED_TEST_STEPS", 1, raising=False)
+    pt.measure_steps("nnunet-plain", kwargs, 1, False, compiled)
+    assert len(compiles) == (1 if compiled else 0)
+
+
+def test_run_measurement_passes_compiled_to_the_child(monkeypatch):
+    """The child process receives the compile setting."""
+    seen = []
+
+    def run(command, **_kwargs):
+        seen.append(json.loads(command[-1]))
+        stdout = '{"seconds_per_step": 0.5, "batch_size": 2, "peak_bytes": 3.0}\n'
+        return subprocess.CompletedProcess([], 0, stdout, "")
+
+    monkeypatch.setattr(pt.subprocess, "run", run)
+    pt.run_measurement("nnunet-plain", MODEL_KWARGS, 2, False, True)
+    assert seen[0]["compiled"] is True
 
 
 def test_measure_steps_stops_early_on_a_slow_network(monkeypatch):

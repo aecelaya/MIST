@@ -1025,7 +1025,8 @@ AMP applies to the full training loop and is also propagated to inference:
 `training.amp` is set to `"auto"` by default. If the GPU has no BF16 hardware,
 MIST trains in float32. If it does, the first `mist_train` runs a few training steps
 in each precision and saves the choice to `config.json`, since float32 with TF32
-convolutions can be faster on the same GPU. This adds about a minute. It keeps BF16
+convolutions can be faster on the same GPU. The test compiles the model if training
+will, which can add several minutes; otherwise it adds about a minute. It keeps BF16
 unless float32 is at least 10% faster in samples per second and needs no smaller a
 patch; float32 may use a smaller batch. Training a different network with `--model`
 tests again.
