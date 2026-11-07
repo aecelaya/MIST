@@ -218,7 +218,7 @@ the following arguments:
   [Custom cross validation](advanced_topics.md#custom-cross-validation) for details.
   _(default: `0.0`)_
 - `--validate-every`: Run validation every N epochs. Validation always runs on
-  the last epoch. _(default: `1`)_
+  the last epoch. _(default: `25` for new configs)_
 - `--resume`: Resume training from the latest checkpoint. See
   [Resuming training](#resuming-training) for details.
 

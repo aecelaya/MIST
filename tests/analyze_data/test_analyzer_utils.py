@@ -450,6 +450,11 @@ class TestBuildBaseConfig:
         assert cfg["training"]["amp"] == "auto"
         assert cfg["training"]["compile"] is True
 
+    def test_new_configs_do_not_validate_every_epoch(self):
+        """Validating whole cases every epoch is too slow to be the default."""
+        cfg = au.build_base_config()
+        assert cfg["training"]["validate_every"] == 25
+
     def test_communication_backend_defaults_to_auto(self):
         """training.hardware.communication_backend defaults to "auto".
 

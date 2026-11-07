@@ -326,7 +326,10 @@ def build_base_config() -> dict[str, Any]:
             "nfolds": 5,
             "folds": None,
             "val_percent": 0.0,
-            "validate_every": 1,
+            # Validation runs whole cases with sliding-window inference, so running
+            # it every epoch can dominate training time on large datasets. Configs
+            # from before this default keep validating as they did.
+            "validate_every": 25,
             "epochs": 1000,
             "min_steps_per_epoch": 250,
             "batch_size_per_gpu": "auto",

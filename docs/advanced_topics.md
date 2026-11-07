@@ -70,7 +70,7 @@ Below is an example of a valid `config.json` file.
     "nfolds": 5,
     "folds": [0, 1, 2, 3, 4],
     "val_percent": 0.0,
-    "validate_every": 1,
+    "validate_every": 25,
     "epochs": 1000,
     "min_steps_per_epoch": 250,
     "batch_size_per_gpu": "auto",
@@ -1235,9 +1235,11 @@ Another feature is the ability to adjust the train/validation/test split via the
 
 The validation loss is the soft Dice loss over the foreground classes, computed
 for each validation case with sliding-window inference. Validation runs every
-epoch by default; set `validate_every` (or `--validate-every`) to run it every N
-epochs instead, which saves time on large validation sets. Validation always runs
-on the last epoch.
+25 epochs by default and always on the last epoch; set `validate_every` (or
+`--validate-every`) to change this. Without a validation split, it only adds
+points to the validation curve, so it doesn't affect the saved model. With
+`val_percent` above 0, only epochs that run validation can be chosen as the best
+model, so use a lower value if you want to choose among more epochs.
 
 The `--val-percent` flag can also be used to override this setting at the
 command line when running `mist_run_all` or `mist_train`. This makes it easy to

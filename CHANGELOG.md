@@ -24,8 +24,11 @@ All notable changes to MIST are listed here, newest first. MIST follows
   the likely spelling, and values of the wrong type or range, such as
   `"compile": "false"`. These are only warnings, so existing configs still train.
 - `training.validate_every` (and `--validate-every`) runs validation every N
-  epochs instead of every epoch. Validation always runs on the last epoch.
-  Defaults to `1`, the previous behavior.
+  epochs instead of every epoch. Validation always runs on the last epoch. New
+  configs use `25`, because validating whole cases every epoch can take much of
+  the training time on large datasets. Configs without this setting validate
+  every epoch, as they did before. With `val_percent` above 0, only validated
+  epochs can be chosen as the best model.
 
 ### Changed
 
