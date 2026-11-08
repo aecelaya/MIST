@@ -42,6 +42,14 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Changed
 
+- **MIST's generic data loader is now the default on every machine,** including
+  NVIDIA GPUs with DALI installed. New configs set `training.hardware.data_loader`
+  to `"generic"`, and older configs that say `"auto"` get it too. In benchmarks it
+  matched or beat DALI: about 4 times faster per training step on LiTS-sized
+  images, where DALI reads whole volumes for each patch, and faster on BraTS (47
+  against over 60 seconds per epoch on Quadro RTX 6000s). DALI is still available
+  with `"data_loader": "dali"` and the `[dali]` extra, which plain installs no
+  longer need.
 - Benchmark notebooks and manual GPU check scripts moved from `examples/` and
   `tests/regression/gpu/` to a new `benchmarks/` folder, with a README for
   each. `examples/` keeps the MIST demos.

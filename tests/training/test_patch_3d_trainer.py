@@ -133,6 +133,8 @@ def tmp_pipeline(tmp_path):
                 "master_addr": "localhost",
                 "master_port": 12345,
                 "communication_backend": "nccl",
+                # These tests patch the DALI loader; the default is "generic".
+                "data_loader": "dali",
             },
         },
         "inference": {
