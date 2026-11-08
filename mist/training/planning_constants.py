@@ -26,6 +26,11 @@ class PlanningConstants:
     # BF16 activation memory measured 0.50 to 0.60 of FP32's on the same networks.
     BF16_ACTIVATION_FACTOR = 0.55
 
+    # FP16 activation memory measured 0.62 to 0.64 of FP32's on the T4 and 0.80 on
+    # the A100 (nnunet-plain, 128 x 128 x 128, batch 2), so FP16 plans use the
+    # higher value. Networks whose BF16 factor is higher still use that instead.
+    FP16_ACTIVATION_FACTOR = 0.80
+
     # Networks whose memory differs from the values above, by name prefix: (bytes
     # per activation in FP32, BF16 factor). These come from swinunetr-small and
     # primus-medium only. Attention and other layers between the counted activations

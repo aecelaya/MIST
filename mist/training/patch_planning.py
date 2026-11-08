@@ -28,6 +28,7 @@ import mist.models  # noqa: F401  # Registers every architecture.
 from mist.models.model_registry import get_model_from_registry
 from mist.models.nnunet.nnunet_utils import get_plain_unet_params, get_unet_params
 from mist.training.planning_constants import PlanningConstants as constants
+from mist.utils import hardware
 from mist.utils.console import print_warning
 
 _GIB = 1024**3
@@ -202,20 +203,36 @@ def activation_limit(estimate: NetworkEstimate, budget_gb: float) -> float:
     return per_batch * scale * heavier
 
 
-def estimated_bytes(estimate: NetworkEstimate, batch_size: int, amp: bool) -> float:
+def activation_factor(
+    amp: bool | str, bf16_factor: float = constants.BF16_ACTIVATION_FACTOR
+) -> float:
+    """Return the share of FP32 activation memory a precision takes.
+
+    Args:
+        amp: The resolved training.amp: True for BF16, "fp16", or False for FP32.
+        bf16_factor: The network's BF16 factor.
+
+    Returns:
+        1 for FP32, bf16_factor for BF16, and for FP16 the larger of bf16_factor
+        and FP16_ACTIVATION_FACTOR.
+    """
+    if amp == hardware.FP16:
+        return max(bf16_factor, constants.FP16_ACTIVATION_FACTOR)
+    return bf16_factor if amp else 1.0
+
+
+def estimated_bytes(estimate: NetworkEstimate, batch_size: int, amp: bool | str) -> float:
     """Estimate peak GPU memory per GPU for a network and batch size.
 
     Args:
         estimate: The network's size.
         batch_size: Batch size per GPU.
-        amp: Whether training uses BF16 mixed precision.
+        amp: The resolved training.amp: True for BF16, "fp16", or False for FP32.
 
     Returns:
         Estimated peak memory in bytes.
     """
-    per_activation = estimate.bytes_per_activation
-    if amp:
-        per_activation *= estimate.bf16_factor
+    per_activation = estimate.bytes_per_activation * activation_factor(amp, estimate.bf16_factor)
     return (
         constants.OVERHEAD_BYTES
         + constants.BYTES_PER_PARAMETER * estimate.parameters
@@ -307,7 +324,7 @@ def plan_patch_and_batch(
     median_size: Sequence[int],
     target_spacing: Sequence[float],
     gpu_memory_bytes: float,
-    amp: bool,
+    amp: bool | str,
     num_cases: int,
     num_gpus: int = 1,
     batch_size: int | None = None,
@@ -322,7 +339,7 @@ def plan_patch_and_batch(
         median_size: Median resampled image size.
         target_spacing: Target spacing.
         gpu_memory_bytes: Memory of the GPU training will run on.
-        amp: Whether training will use BF16 mixed precision.
+        amp: The resolved training.amp: True for BF16, "fp16", or False for FP32.
         num_cases: Number of training cases, for capping the batch size.
         num_gpus: Number of GPUs sharing the capped global batch.
         batch_size: A batch size set by hand, to plan the patch around.
@@ -433,7 +450,7 @@ def plan_for_config(config: dict[str, Any], num_cases: int, num_gpus: int) -> Pl
     spatial = config["spatial_config"]
     training = config["training"]
     batch_size = None if is_auto(training["batch_size_per_gpu"]) else training["batch_size_per_gpu"]
-    amp = bool(training["amp"])
+    amp = training["amp"] if training["amp"] == hardware.FP16 else bool(training["amp"])
     memory = detect_gpu_memory_bytes()[0] or constants.DEFAULT_GPU_MEMORY_GB * _GIB
 
     if not is_auto(spatial["patch_size"]):
@@ -553,8 +570,9 @@ def inference_batch_size(config: dict[str, Any], device: torch.device | str) -> 
         warnings.warn(f"Could not size the inference batch: {error}", stacklevel=2)
         return cap
 
-    per_activation = constants.INFERENCE_BYTES_PER_ACTIVATION
-    if config["training"].get("amp"):
-        per_activation *= constants.BF16_ACTIVATION_FACTOR
+    amp = config["training"].get("amp")
+    per_activation = constants.INFERENCE_BYTES_PER_ACTIVATION * activation_factor(
+        amp if amp == hardware.FP16 else bool(amp)
+    )
     fits = int(available // (per_activation * estimate.activations))
     return max(1, min(cap, fits))

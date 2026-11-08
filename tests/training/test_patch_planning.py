@@ -112,6 +112,22 @@ def test_bf16_lowers_the_estimate_and_batch_raises_it():
     assert two - one == pytest.approx(three - two)
 
 
+def test_fp16_is_estimated_between_bf16_and_fp32():
+    """FP16 takes more memory than BF16 in practice, so it isn't planned as BF16."""
+    estimate = pp.NetworkEstimate(1e8, 10**7)
+    bf16, fp16, fp32 = (pp.estimated_bytes(estimate, 2, amp) for amp in (True, "fp16", False))
+    assert bf16 < fp16 < fp32
+
+
+@pytest.mark.parametrize(
+    "amp, bf16_factor, expected",
+    [(False, 0.55, 1.0), (True, 0.55, 0.55), ("fp16", 0.55, 0.80), ("fp16", 0.9, 0.9)],
+)
+def test_activation_factor(amp, bf16_factor, expected):
+    """FP16 uses the network's BF16 factor when that's higher, as for Swin."""
+    assert pp.activation_factor(amp, bf16_factor) == pytest.approx(expected)
+
+
 # Patch rules.
 
 
@@ -391,6 +407,22 @@ def test_plan_for_config_stays_within_the_memory_budget(monkeypatch):
     assert np.prod(whole_gpu.patch_size) > np.prod(budgeted.patch_size)
 
 
+def test_plan_for_config_estimates_fp16_as_fp16(monkeypatch):
+    """An FP16 plan for the whole GPU gets no larger a patch than a BF16 one."""
+    _with_gpu(monkeypatch, 16)
+    bf16 = pp.plan_for_config(_auto_config(amp=True), 500, 1)
+    fp16 = pp.plan_for_config(_auto_config(amp="fp16"), 500, 1)
+    assert np.prod(fp16.patch_size) * fp16.batch_size_per_gpu <= (
+        np.prod(bf16.patch_size) * bf16.batch_size_per_gpu
+    )
+    hand_set = _auto_config(patch=[128, 128, 128], batch=2)
+    estimates = {}
+    for amp in (True, "fp16"):
+        hand_set["training"]["amp"] = amp
+        estimates[amp] = pp.plan_for_config(hand_set, 500, 1).estimated_bytes
+    assert estimates["fp16"] > estimates[True]
+
+
 def test_a_budget_matches_nnunets_rule(monkeypatch):
     """With a budget, one sample may have nnU-Net's 560M activations per 8 GiB."""
     _with_gpu(monkeypatch, 80)
@@ -489,6 +521,22 @@ def test_inference_batch_follows_gpu_memory_within_limits(monkeypatch, memory_gb
     )
     monkeypatch.setattr(torch.cuda, "memory_allocated", lambda _d: 0)
     assert pp.inference_batch_size(_planned_config(), "cuda:0") == expected
+
+
+def test_inference_batch_is_no_larger_in_fp16_than_bf16(monkeypatch):
+    """FP16 inference is sized with FP16's memory factor."""
+    monkeypatch.setattr(
+        torch.cuda,
+        "get_device_properties",
+        lambda _d: argparse.Namespace(total_memory=2 * GIB),
+    )
+    monkeypatch.setattr(torch.cuda, "memory_allocated", lambda _d: 0)
+    config = _planned_config()
+    sizes = {}
+    for amp in (True, "fp16", False):
+        config["training"]["amp"] = amp
+        sizes[amp] = pp.inference_batch_size(config, "cuda:0")
+    assert sizes[True] > sizes["fp16"] > sizes[False]
 
 
 def test_inference_batch_accounts_for_memory_already_in_use(monkeypatch):

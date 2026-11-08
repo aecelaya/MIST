@@ -486,7 +486,9 @@ class BaseTrainer(ABC):
         if test_precision:
             precision = "BF16 or FP32"
         else:
-            precision = "BF16" if training["amp"] else "FP32"
+            precision = {hardware.FP16: "FP16", True: "BF16", False: "FP32"}[
+                training["amp"] if training["amp"] == hardware.FP16 else bool(training["amp"])
+            ]
 
         budget_gb = patch_planning.memory_budget_gb(self.config)
         usable = planned_for * PlanningConstants.MEMORY_FRACTION

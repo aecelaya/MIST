@@ -1080,12 +1080,17 @@ float32 with a warning where it doesn't. To disable AMP explicitly, set it to
 
 ### FP16 (opt in)
 
-Setting `training.amp` to `"fp16"` trains in float16 mixed precision. It runs on any NVIDIA or AMD GPU, including those without BF16 hardware,
-where FP16 tensor cores (NVIDIA Volta and Turing, such as the V100, T4, and Quadro
-RTX 6000) can make it much faster than float32. Most consumer Pascal GPUs (GTX 10
-series) run FP16 slowly, so it may not help there. On a machine without a GPU it
-falls back to float32 with a warning. The automatic test doesn't consider FP16 yet,
-so it's only used when set.
+Setting `training.amp` to `"fp16"` trains in float16 mixed precision. It runs on
+any NVIDIA or AMD GPU, including those without BF16 hardware, where FP16 tensor
+cores (NVIDIA Volta and Turing, such as the V100, T4, and Quadro RTX 6000) can
+make it much faster than float32: on a T4, `nnunet-plain` trained 3.5 to 4 times
+faster. Most consumer Pascal GPUs (GTX 10 series) run FP16 slowly, so it may not
+help there. On a machine without a GPU it falls back to float32 with a warning.
+The automatic test doesn't consider FP16 yet, so it's only used when set.
+
+FP16 takes more GPU memory than BF16: its activations took 0.62 to 0.64 of
+float32's memory on a T4 and 0.80 on an A100, against about 0.55 for BF16. Plans
+and inference batch sizes for FP16 use 0.80.
 
 ```json
 "training": {
