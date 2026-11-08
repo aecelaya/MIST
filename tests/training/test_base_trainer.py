@@ -8,6 +8,7 @@ import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 import rich
@@ -811,6 +812,35 @@ def test_init_warns_about_mistakes_in_config_file(tmp_pipeline, mist_args, monke
     DummyTrainer(mist_args)
 
     assert any("training.compil'" in warning for warning in warnings)
+
+
+def test_init_warns_about_data_preprocessed_by_an_older_mist(tmp_pipeline, mist_args, monkeypatch):
+    """Fortran-order labels and missing foreground locations each get a warning."""
+    _, numpy_dir = tmp_pipeline
+    (numpy_dir / "labels").mkdir(exist_ok=True)
+    label = np.expand_dims(np.zeros((4, 5, 6), dtype=np.uint8).T, axis=-1)
+    np.save(numpy_dir / "labels" / "case.npy", label)
+    warnings = []
+    monkeypatch.setattr(bt, "print_warning", warnings.append)
+
+    DummyTrainer(mist_args)
+
+    assert any("Fortran order" in warning for warning in warnings)
+    assert any("foreground locations" in warning for warning in warnings)
+
+
+def test_init_is_quiet_about_data_from_this_mist(tmp_pipeline, mist_args, monkeypatch):
+    """C-order labels with saved locations get no data warnings."""
+    _, numpy_dir = tmp_pipeline
+    (numpy_dir / "labels").mkdir(exist_ok=True)
+    (numpy_dir / "foreground").mkdir(exist_ok=True)
+    np.save(numpy_dir / "labels" / "case.npy", np.zeros((4, 5, 6, 1), dtype=np.uint8))
+    warnings = []
+    monkeypatch.setattr(bt, "print_warning", warnings.append)
+
+    DummyTrainer(mist_args)
+
+    assert not any("mist_preprocess again" in warning for warning in warnings)
 
 
 @pytest.mark.parametrize("rank", [0, 1])

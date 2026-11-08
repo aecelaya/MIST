@@ -150,6 +150,13 @@ To run the preprocessing portion of the MIST pipeline only, use the
     and normalization are all skipped. DTMs are still computed if
     `--compute-dtms` is also passed.
 
+The output folder has `images`, `labels`, and, with `--compute-dtms`, `dtms`
+folders of NumPy arrays, one per case. It also has a `foreground` folder with the
+locations of each label class in each case, which training uses to center patches
+on foreground without scanning every label. Data preprocessed before MIST 2.5.0
+lacks this folder and stores labels in a slower layout; training still works, but
+warns, and runs faster after `mist_preprocess` is run again.
+
 ### Example
 
 Run the MIST preprocessing pipeline and compute DTMs.

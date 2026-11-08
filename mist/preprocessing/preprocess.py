@@ -2,6 +2,7 @@
 
 import argparse
 import concurrent.futures
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ import pandas as pd
 import SimpleITK as sitk
 
 from mist.analyze_data import analyzer_utils
-from mist.preprocessing import preprocessing_utils
+from mist.preprocessing import foreground_locations, preprocessing_utils
 from mist.preprocessing.preprocessing_constants import PreprocessingConstants as pc
 
 # MIST imports.
@@ -489,11 +490,25 @@ def _preprocess_single_patient(
             fg_bbox=fg_bbox,
         )
 
+        # Save every array in C order. Converting labels to MIST's (x, y, z)
+        # order transposes them, and DALI reorders a Fortran-order file in full
+        # for every patch, which is slow for large images.
         patient_npy = f"{patient_id}.npy"
-        np.save(output_dirs["images"] / patient_npy, result["image"])
-        np.save(output_dirs["labels"] / patient_npy, result["mask"])
+        np.save(output_dirs["images"] / patient_npy, np.ascontiguousarray(result["image"]))
+        label = np.ascontiguousarray(result["mask"])
+        np.save(output_dirs["labels"] / patient_npy, label)
         if compute_dtms and result["dtm"] is not None:
-            np.save(output_dirs["dtms"] / patient_npy, result["dtm"])
+            np.save(output_dirs["dtms"] / patient_npy, np.ascontiguousarray(result["dtm"]))
+
+        # Find where each class is once here, so training doesn't scan every
+        # label. The seed depends only on the patient, so reruns match.
+        classes = config["dataset_info"]["labels"][1:]
+        rng = np.random.default_rng(zlib.crc32(patient_id.encode()))
+        foreground_locations.save(
+            output_dirs["foreground"] / f"{patient_id}.npz",
+            foreground_locations.find(label, classes, rng),
+            classes,
+        )
 
         return None
     except Exception as exc:  # pylint: disable=broad-except
@@ -529,9 +544,11 @@ def preprocess_dataset(args: argparse.Namespace) -> None:
         "images": Path(args.numpy) / "images",
         "labels": Path(args.numpy) / "labels",
         "dtms": Path(args.numpy) / "dtms",
+        "foreground": Path(args.numpy) / foreground_locations.FOLDER,
     }
     output_dirs["images"].mkdir(parents=True, exist_ok=True)
     output_dirs["labels"].mkdir(parents=True, exist_ok=True)
+    output_dirs["foreground"].mkdir(parents=True, exist_ok=True)
 
     # Apply CLI overrides to config and write back once, so downstream stages
     # (training, inference) see the correct flags regardless of which

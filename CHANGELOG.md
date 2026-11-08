@@ -115,6 +115,14 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Fixed
 
+- **Training on large images is much faster.** `mist_preprocess` saved labels in
+  Fortran order, which made the DALI loader rearrange each whole label for every
+  patch. On an A100 with LiTS-sized CT (about 512 × 512 × 480 voxels), this made
+  DALI wait about 1.9 seconds per training step for data. Labels are now saved in
+  C order. `mist_preprocess` also saves each case's foreground locations in a new
+  `foreground` folder, and the generic loader uses them instead of scanning each
+  label in every worker. Training warns about data preprocessed the old way; run
+  `mist_preprocess` again to fix it.
 - Multi-GPU training now applies MIST's GPU math settings (cuDNN benchmark mode,
   fast matmul, and TF32 convolutions). They were only set in the parent process,
   so the spawned training processes ran with PyTorch's defaults. Multi-GPU speed

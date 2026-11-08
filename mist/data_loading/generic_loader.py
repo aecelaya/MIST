@@ -56,12 +56,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, Sampler
 
+from mist.preprocessing import foreground_locations
 from mist.utils import hardware
-
-# Most foreground voxel locations kept per class per case (nnU-Net's cap). A
-# uniform subset of a class's voxels still gives uniform picks, and bounds what
-# each worker keeps in memory to about 60 KB per class per case.
-_MAX_FOREGROUND_LOCATIONS = 10000
 
 # Deliberately not imported from data_loading_utils.py: that module imports
 # nvidia.dali at the top for its DALI-graph-building helpers, so importing it
@@ -222,48 +218,6 @@ def _random_anchor(
     return int(np.clip(center - jitter, 0, max_start))
 
 
-def _foreground_locations(
-    label: np.ndarray,
-    labels: Sequence[int],
-    rng: np.random.Generator,
-) -> dict[int | None, np.ndarray]:
-    """Find where each foreground class is in a case's (D, H, W, C) label.
-
-    This scan reads the whole label file, so _PatchTrainingDataset does it once
-    per case and reuses the result, much as dali_loader.py's
-    `random_object_bbox(cache_objects=True)` reuses its boxes.
-
-    Args:
-        label: The case's label array.
-        labels: The configured foreground classes.
-        rng: Random generator for subsampling large classes.
-
-    Returns:
-        Up to _MAX_FOREGROUND_LOCATIONS (d, h, w) voxel coordinates per class
-        present. If no configured class is present, the same for any nonzero
-        voxel, under the key None. Empty if there is no foreground at all.
-    """
-
-    def subset(mask: np.ndarray) -> np.ndarray:
-        coords = np.argwhere(mask)
-        if coords.shape[0] > _MAX_FOREGROUND_LOCATIONS:
-            keep = rng.choice(coords.shape[0], _MAX_FOREGROUND_LOCATIONS, replace=False)
-            coords = coords[keep]
-        return coords.astype(np.uint16)
-
-    label_channel = np.asarray(label[..., 0])
-    locations = {}
-    for class_id in labels:
-        coords = subset(label_channel == class_id)
-        if coords.size:
-            locations[class_id] = coords
-    if not locations:
-        coords = subset(label_channel != 0)
-        if coords.size:
-            locations[None] = coords
-    return locations
-
-
 def _foreground_anchor_center(
     locations: dict[int | None, np.ndarray],
     labels: Sequence[int],
@@ -340,7 +294,9 @@ def _extract_patch(
     """
     center = None
     if labels and oversampling and rng.random() < oversampling:
-        locations = get_locations() if get_locations else _foreground_locations(label, labels, rng)
+        locations = (
+            get_locations() if get_locations else foreground_locations.find(label, labels, rng)
+        )
         center = _foreground_anchor_center(locations, labels, rng)
 
     anchors = [
@@ -388,7 +344,8 @@ class _PatchTrainingDataset(Dataset):
     processes managed by the DataLoader -- see the module docstring for why
     patch placement uses a fresh, unseeded RNG per call rather than one
     seeded up front. Each worker keeps its own cache of foreground locations,
-    filled the first time it needs a case's.
+    filled the first time it needs a case's: from the file mist_preprocess saved
+    if there is one, otherwise by scanning the label.
     """
 
     def __init__(
@@ -421,9 +378,14 @@ class _PatchTrainingDataset(Dataset):
         label: np.ndarray,
         rng: np.random.Generator,
     ) -> dict[int | None, np.ndarray]:
-        """Return a case's foreground locations, scanning its label only once."""
+        """Return a case's foreground locations, finding them only once."""
         if index not in self._foreground_cache:
-            self._foreground_cache[index] = _foreground_locations(label, self._labels, rng)
+            saved = foreground_locations.load(
+                foreground_locations.path_for(self._label_paths[index]), self._labels
+            )
+            if saved is None:
+                saved = foreground_locations.find(label, self._labels, rng)
+            self._foreground_cache[index] = saved
         return self._foreground_cache[index]
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:

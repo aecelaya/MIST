@@ -74,6 +74,8 @@ class BaseTrainer(ABC):
         # spawned training processes don't rerun __init__.
         for problem in config_validation.find_config_problems(self.config):
             print_warning(f"config.json: {problem}")
+        for problem in training_utils.preprocessed_data_problems(self.numpy_dir):
+            print_warning(problem)
 
         # Snapshot config before CLI overrides so resume checks can compare.
         _original_config = copy.deepcopy(self.config)

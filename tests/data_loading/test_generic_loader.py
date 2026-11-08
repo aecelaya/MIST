@@ -38,6 +38,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from mist.data_loading import augmentation
 from mist.data_loading import generic_loader as gl
+from mist.preprocessing import foreground_locations as fl
 from mist.utils import hardware
 from tests.regression.ants_sitk.fixtures import generate_dataset
 from tests.regression.ants_sitk.harness import run_pipeline
@@ -94,7 +95,7 @@ def test_foreground_anchor_center_returns_none_without_foreground():
     """No foreground voxels anywhere -> None (caller falls back to random)."""
     label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
     rng = np.random.default_rng(0)
-    locations = gl._foreground_locations(label, [1, 2], rng)
+    locations = fl.find(label, [1, 2], rng)
     assert locations == {}
     assert gl._foreground_anchor_center(locations, labels=[1, 2], rng=rng) is None
 
@@ -104,7 +105,7 @@ def test_foreground_anchor_center_finds_the_only_voxel():
     label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
     label[3, 4, 5, 0] = 1
     rng = np.random.default_rng(0)
-    locations = gl._foreground_locations(label, [1, 2], rng)
+    locations = fl.find(label, [1, 2], rng)
     assert gl._foreground_anchor_center(locations, labels=[1, 2], rng=rng) == (3, 4, 5)
 
 
@@ -113,17 +114,17 @@ def test_foreground_anchor_center_falls_back_to_any_nonzero_voxel():
     label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
     label[1, 2, 3, 0] = 9  # Not in the configured `labels` list below.
     rng = np.random.default_rng(0)
-    locations = gl._foreground_locations(label, [1, 2], rng)
+    locations = fl.find(label, [1, 2], rng)
     assert gl._foreground_anchor_center(locations, labels=[1, 2], rng=rng) == (1, 2, 3)
 
 
 def test_foreground_locations_caps_each_class(monkeypatch):
     """Large classes keep a bounded subset of real, distinct locations."""
-    monkeypatch.setattr(gl, "_MAX_FOREGROUND_LOCATIONS", 50)
+    monkeypatch.setattr(fl, "MAX_LOCATIONS", 50)
     label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
     label[:5] = 1  # 500 voxels, over the cap.
     label[9, 9, 9, 0] = 2  # One voxel, under it.
-    locations = gl._foreground_locations(label, [1, 2], np.random.default_rng(0))
+    locations = fl.find(label, [1, 2], np.random.default_rng(0))
     assert locations[1].shape == (50, 3)
     assert len({tuple(c) for c in locations[1].tolist()}) == 50
     assert np.all(locations[1][:, 0] < 5)
@@ -136,7 +137,7 @@ def test_foreground_anchor_center_weights_classes_equally():
     label[:10] = 1
     label[19, 19, 19, 0] = 2
     rng = np.random.default_rng(0)
-    locations = gl._foreground_locations(label, [1, 2], rng)
+    locations = fl.find(label, [1, 2], rng)
     picks = [gl._foreground_anchor_center(locations, [1, 2], rng) for _ in range(1000)]
     assert 0.4 < np.mean([p == (19, 19, 19) for p in picks]) < 0.6
 
@@ -150,15 +151,33 @@ def test_dataset_scans_each_label_once(tmp_path, monkeypatch):
         np.save(path, array)
 
     calls = []
-    real = gl._foreground_locations
-    monkeypatch.setattr(
-        gl, "_foreground_locations", lambda *a, **k: calls.append(1) or real(*a, **k)
-    )
+    real = fl.find
+    monkeypatch.setattr(fl, "find", lambda *a, **k: calls.append(1) or real(*a, **k))
     dataset = gl._PatchTrainingDataset(paths, paths, None, (4, 4, 4), [1], 1.0, True)
     for _ in range(5):
         dataset[0]
         dataset[1]
     assert len(calls) == 2
+
+
+def test_dataset_uses_saved_foreground_locations(tmp_path, monkeypatch):
+    """Locations saved by mist_preprocess are used instead of scanning the label."""
+    (tmp_path / "labels").mkdir()
+    (tmp_path / fl.FOLDER).mkdir()
+    label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
+    label[5, 5, 5, 0] = 1
+    path = tmp_path / "labels" / "case.npy"
+    np.save(path, label)
+    # A saved location that differs from the label's shows which one was used.
+    fl.save(fl.path_for(path), {1: np.array([[2, 2, 2]], dtype=np.uint16)}, [1])
+
+    def no_scan(*_args, **_kwargs):
+        raise AssertionError("The label was scanned.")
+
+    monkeypatch.setattr(fl, "find", no_scan)
+    dataset = gl._PatchTrainingDataset([str(path)], [str(path)], None, (4, 4, 4), [1], 1.0, True)
+    dataset[0]
+    assert dataset._foreground_cache[0][1].tolist() == [[2, 2, 2]]
 
 
 # --------------------------------------------------------------------------- #
