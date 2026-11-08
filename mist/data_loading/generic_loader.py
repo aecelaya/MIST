@@ -51,13 +51,22 @@ worker parallelism.
 
 import platform
 from collections.abc import Callable, Iterator, Sequence
+from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset, Sampler
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset, Sampler, default_collate
 
 from mist.preprocessing import foreground_locations
 from mist.utils import hardware
+
+# Training patches that run past the image edge are sent as only the part inside
+# the image, and padded with zeros on the training device. Patches enlarged for
+# spatial augmentation are often mostly padding on small images, such as BraTS,
+# and each sent byte is copied in the main process before it reaches the device.
+# False pads in the workers instead, as before 2.5.0; it's here for comparison.
+_PAD_ON_DEVICE = True
 
 # Deliberately not imported from data_loading_utils.py: that module imports
 # nvidia.dali at the top for its DALI-graph-building helpers, so importing it
@@ -269,6 +278,68 @@ def _slice_with_padding(
     return patch
 
 
+def _slice_inside(
+    array: np.ndarray,
+    starts: Sequence[int],
+    shape: Sequence[int],
+) -> tuple[np.ndarray, list[tuple[int, int]]]:
+    """Slice the part of a (D, H, W, C) patch inside the array, and say how to pad it.
+
+    Padding the result with zeros by the returned amounts gives exactly what
+    _slice_with_padding returns, without making the padding here.
+
+    Returns:
+        The slice inside the array, and (before, after) zero padding per axis.
+    """
+    inside = []
+    pad = []
+    for start, size, dim in zip(starts, shape, array.shape[:3], strict=True):
+        low = min(max(0, start), dim)
+        high = max(min(dim, start + size), low)
+        inside.append(slice(low, high))
+        # A patch wholly outside the array along an axis is all padding.
+        before = min(max(low - start, 0), size - (high - low))
+        pad.append((before, size - before - (high - low)))
+    return array[tuple(inside)], pad
+
+
+def _pad_on_device(array: torch.Tensor, pad: torch.Tensor) -> torch.Tensor:
+    """Zero-pad a (C, D, H, W) tensor by (before, after) amounts per spatial axis."""
+    widths = [int(amount) for axis in reversed(range(3)) for amount in pad[axis]]
+    return F.pad(array, widths) if any(widths) else array
+
+
+def _patch_window(
+    label: np.ndarray,
+    roi_size: tuple[int, int, int],
+    labels: list[int] | None,
+    oversampling: float | None,
+    rng: np.random.Generator,
+    patch_margin: tuple[int, int, int],
+    get_locations: Callable[[], dict[int | None, np.ndarray]] | None,
+) -> tuple[list[int], list[int]]:
+    """Choose where a patch starts and its shape, including the margin."""
+    center = None
+    if labels and oversampling and rng.random() < oversampling:
+        locations = (
+            get_locations() if get_locations else foreground_locations.find(label, labels, rng)
+        )
+        center = _foreground_anchor_center(locations, labels, rng)
+
+    anchors = [
+        _random_anchor(
+            label.shape[axis],
+            roi_size[axis],
+            rng,
+            center=center[axis] if center is not None else None,
+        )
+        for axis in range(3)
+    ]
+    starts = [anchor - margin for anchor, margin in zip(anchors, patch_margin, strict=True)]
+    shape = [roi + 2 * margin for roi, margin in zip(roi_size, patch_margin, strict=True)]
+    return starts, shape
+
+
 def _extract_patch(
     image: np.ndarray,
     label: np.ndarray,
@@ -292,25 +363,9 @@ def _extract_patch(
     zero-padded. `get_locations` supplies the case's foreground locations, so
     the caller can cache them; by default they're found from `label`.
     """
-    center = None
-    if labels and oversampling and rng.random() < oversampling:
-        locations = (
-            get_locations() if get_locations else foreground_locations.find(label, labels, rng)
-        )
-        center = _foreground_anchor_center(locations, labels, rng)
-
-    anchors = [
-        _random_anchor(
-            label.shape[axis],
-            roi_size[axis],
-            rng,
-            center=center[axis] if center is not None else None,
-        )
-        for axis in range(3)
-    ]
-    starts = [anchor - margin for anchor, margin in zip(anchors, patch_margin, strict=True)]
-    shape = [roi + 2 * margin for roi, margin in zip(roi_size, patch_margin, strict=True)]
-
+    starts, shape = _patch_window(
+        label, roi_size, labels, oversampling, rng, patch_margin, get_locations
+    )
     image = _slice_with_padding(image, starts, shape)
     label = _slice_with_padding(label, starts, shape)
     if dtm is not None:
@@ -395,6 +450,27 @@ class _PatchTrainingDataset(Dataset):
 
         rng = np.random.default_rng()
 
+        if self._extract_patches and _PAD_ON_DEVICE:
+            starts, shape = _patch_window(
+                label,
+                self._roi_size,
+                self._labels,
+                self._oversampling,
+                rng,
+                self._patch_margin,
+                lambda: self._cached_locations(index, label, rng),
+            )
+            image, pad = _slice_inside(image, starts, shape)
+            label, _ = _slice_inside(label, starts, shape)
+            batch = {
+                "image": _to_channels_first(image),
+                "label": _to_channels_first(label),
+                "pad": torch.tensor(pad, dtype=torch.int64),
+            }
+            if dtm is not None:
+                batch["dtm"] = _to_channels_first(_slice_inside(dtm, starts, shape)[0])
+            return batch
+
         if self._extract_patches:
             image, label, dtm = _extract_patch(
                 image,
@@ -415,6 +491,18 @@ class _PatchTrainingDataset(Dataset):
         if dtm is not None:
             batch["dtm"] = _to_channels_first(dtm)
         return batch
+
+
+def _collate_patches(samples: list[dict[str, torch.Tensor]]) -> dict[str, Any]:
+    """Batch training patches, leaving any that need padding for the device.
+
+    Patches entirely inside their images stack as usual. Otherwise the patches
+    differ in shape, so they're kept apart, and GenericIterator pads and stacks
+    them on the training device.
+    """
+    if all(not sample["pad"].any() for sample in samples):
+        return default_collate([{k: v for k, v in s.items() if k != "pad"} for s in samples])
+    return {"_unpadded": samples}
 
 
 class _FullVolumeDataset(Dataset):
@@ -497,6 +585,22 @@ class GenericIterator:
         except StopIteration:
             self._iterator = iter(self._data_loader)
             batch = next(self._iterator)
+        if "_unpadded" in batch:
+            samples = batch["_unpadded"]
+            keys = [key for key in samples[0] if key != "pad"]
+            return [
+                {
+                    key: torch.stack(
+                        [
+                            _pad_on_device(
+                                sample[key].to(self._device, non_blocking=True), sample["pad"]
+                            )
+                            for sample in samples
+                        ]
+                    )
+                    for key in keys
+                }
+            ]
         return [{key: value.to(self._device, non_blocking=True) for key, value in batch.items()}]
 
     def reset(self) -> None:
@@ -570,6 +674,7 @@ def get_training_dataset(
         dataset,
         batch_size=batch_size,
         sampler=_EndlessShuffleSampler(len(dataset), shuffle_generator),
+        collate_fn=_collate_patches if extract_patches and _PAD_ON_DEVICE else None,
         num_workers=num_workers,
         multiprocessing_context=_multiprocessing_context(num_workers),
         pin_memory=_pin_memory(),
