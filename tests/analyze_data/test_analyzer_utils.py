@@ -450,6 +450,11 @@ class TestBuildBaseConfig:
         assert cfg["training"]["amp"] == "auto"
         assert cfg["training"]["compile"] is True
 
+    def test_new_configs_plan_for_an_8_gib_budget(self):
+        """New configs plan for 8 GiB, as nnU-Net does, whatever the GPU."""
+        cfg = au.build_base_config()
+        assert cfg["training"]["gpu_memory_budget_gb"] == 8
+
     def test_new_configs_do_not_validate_every_epoch(self):
         """Validating whole cases every epoch is too slow to be the default."""
         cfg = au.build_base_config()

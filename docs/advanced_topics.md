@@ -74,6 +74,7 @@ Below is an example of a valid `config.json` file.
     "epochs": 1000,
     "min_steps_per_epoch": 250,
     "batch_size_per_gpu": "auto",
+    "gpu_memory_budget_gb": 8,
     "dali_foreground_prob": 0.6,
 
     "loss": {
@@ -177,8 +178,7 @@ controls a different part of the MIST pipeline:
 
 `mist_analyze` leaves `spatial_config.patch_size` and `training.batch_size_per_gpu`
 as `"auto"`. The first `mist_train` run chooses them for the network it's about to
-train, on the GPU it's running on, prints the result, and saves it to
-`config.json`. Later runs, `--resume`, and inference reuse the saved values, so
+train and a memory budget, prints the result, and saves it to `config.json`. Later runs, `--resume`, and inference reuse the saved values, so
 analysis and preprocessing can run on a different machine from training. MIST
 assumes all GPUs on the training machine are the same.
 
@@ -191,9 +191,9 @@ around it.
 1. **Start large.** The search starts from a large patch shaped by the target
    spacing, clipped to the median resampled image size, and reduced to the nearest
    size the network can use.
-2. **Shrink until it fits.** While the network doesn't fit in 90% of the GPU's
-   memory at a batch size of 2, the search shrinks the axis taking up the largest
-   share of the image, as nnU-Net's planner does.
+2. **Shrink until it fits.** While the network doesn't fit the memory budget at a
+   batch size of 2, the search shrinks the axis taking up the largest share of the
+   image, as nnU-Net's planner does.
 3. **Spend what's left on the batch.** The batch size stays at 2 if the patch had
    to shrink. If the patch reached the image size with memory to spare, the batch
    size grows to use it, up to a limit: one global batch sees at most 5% of the
@@ -204,12 +204,42 @@ every architecture. It also accounts for BF16 or FP32, since FP32 takes roughly
 twice the activation memory. It's still an estimate: if training runs out of
 memory, use a smaller `--patch-size`.
 
+### Memory budget
+
+`training.gpu_memory_budget_gb` sets how much GPU memory the plan is for. It
+defaults to 8 GiB, and uses nnU-Net's rule for its default 8 GB target: a patch
+fits if one sample's activations number at most 560 million per 8 GiB of budget at
+a batch size of 2. MIST counts activations the same way nnU-Net does, so a U-Net
+gets nnU-Net's patch: 128 × 128 × 128 for LiTS. The rule doesn't depend on BF16 or
+FP32, so both get the same patch; FP32 just uses more memory, about 11 GiB instead
+of 6.5 for LiTS. Networks whose activations take more memory than a U-Net's, such
+as SwinUNETR, get a proportionally lower limit. The plan must also fit in 90% of the
+GPU's memory by MIST's own estimate, so a small GPU still gets a smaller patch.
+
+Planning for a fixed budget means:
+
+- The same dataset gets the same plan on any GPU with at least that much memory,
+  so results are easier to reproduce and compare.
+- Patches stay at sizes the memory estimate was checked at. Very large patches can
+  need far more memory than estimated: a 256 × 224 × 224 patch planned for most of a
+  40 GB A100 ran out of memory in its first step.
+- Steps stay fast. A patch planned for a whole 40 GB GPU can hold several times the
+  voxels, and each step takes correspondingly longer.
+
+To use more of a large GPU, raise the budget, for example to 24 or 40, which match
+nnU-Net's larger ResEnc presets. Very large patches haven't been checked: the
+256 × 224 × 224 patch above is what LiTS gets with a budget of 40. Set the budget to
+`null` to plan for 90% of the GPU's memory by MIST's estimate, as MIST did before.
+Configs without this setting plan for 8 GiB.
+
 ### Training on a different GPU later
 
-What was planned for is recorded under `planning` in `config.json`. A later
-`mist_train` compares it with its own GPU and warns, without changing anything, if
-the network may not fit, or if the GPU has at least 1.5 times the memory it was
-planned for. To plan again, set both values back to `"auto"`.
+What was planned for, including the memory budget, is recorded under `planning` in
+`config.json`. A later `mist_train` compares it with its own GPU and warns, without
+changing anything, if the network may not fit. If the plan used the whole GPU
+(`gpu_memory_budget_gb` set to `null`), it also warns when the GPU has at least 1.5
+times the memory it was planned for. To plan again, set both values back to
+`"auto"`.
 
 Training a different network with `--model` plans again automatically, since a
 patch that suits one network may not suit another. Values set by hand are kept.

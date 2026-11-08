@@ -333,6 +333,9 @@ def build_base_config() -> dict[str, Any]:
             "epochs": 1000,
             "min_steps_per_epoch": 250,
             "batch_size_per_gpu": "auto",
+            # GPU memory the plan may use, whatever the GPU, as nnU-Net plans for
+            # 8 GB. null plans for the whole GPU.
+            "gpu_memory_budget_gb": 8,
             "dali_foreground_prob": 0.6,
             "loss": {
                 "name": "dice_ce",

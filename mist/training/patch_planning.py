@@ -179,6 +179,29 @@ def estimate_network(
     return size
 
 
+def activation_limit(estimate: NetworkEstimate, budget_gb: float) -> float:
+    """Return the most activations a whole batch may have for a memory budget.
+
+    This is nnU-Net's rule: REFERENCE_ACTIVATIONS per sample at a batch size of
+    REFERENCE_BATCH_SIZE for every REFERENCE_BUDGET_GB, whatever the precision.
+    Networks whose activations take more memory than a U-Net's get a
+    proportionally lower limit.
+
+    Args:
+        estimate: The network's size.
+        budget_gb: The memory budget in GiB.
+
+    Returns:
+        The limit on activations per sample times the batch size.
+    """
+    per_batch = constants.REFERENCE_ACTIVATIONS * constants.REFERENCE_BATCH_SIZE
+    scale = budget_gb / constants.REFERENCE_BUDGET_GB
+    heavier = constants.BYTES_PER_ACTIVATION / max(
+        estimate.bytes_per_activation, constants.BYTES_PER_ACTIVATION
+    )
+    return per_batch * scale * heavier
+
+
 def estimated_bytes(estimate: NetworkEstimate, batch_size: int, amp: bool) -> float:
     """Estimate peak GPU memory per GPU for a network and batch size.
 
@@ -288,6 +311,7 @@ def plan_patch_and_batch(
     num_cases: int,
     num_gpus: int = 1,
     batch_size: int | None = None,
+    budget_gb: float | None = None,
 ) -> Plan:
     """Choose a patch size and batch size for a network and a GPU.
 
@@ -302,6 +326,8 @@ def plan_patch_and_batch(
         num_cases: Number of training cases, for capping the batch size.
         num_gpus: Number of GPUs sharing the capped global batch.
         batch_size: A batch size set by hand, to plan the patch around.
+        budget_gb: A memory budget, applied with nnU-Net's rule (see
+            activation_limit). None plans for 90% of the GPU's memory instead.
 
     Returns:
         The plan. If even the smallest patch doesn't fit, the plan holds that
@@ -309,6 +335,14 @@ def plan_patch_and_batch(
     """
     budget = gpu_memory_bytes * constants.MEMORY_FRACTION
     minimum = batch_size or constants.MIN_BATCH_SIZE
+
+    def within_budget(candidate: NetworkEstimate, batch: int) -> bool:
+        """Whether a batch fits the GPU and, if there is one, the budget."""
+        if estimated_bytes(candidate, batch, amp) > budget:
+            return False
+        if budget_gb is None:
+            return True
+        return candidate.activations * batch <= activation_limit(candidate, budget_gb)
 
     def estimate_for(patch_size: list[int]) -> NetworkEstimate | None:
         """Return the estimate, or None if the network can't use this patch."""
@@ -332,7 +366,7 @@ def plan_patch_and_batch(
         raise ValueError(f"Could not find a patch size that {architecture} can use.")
 
     shrunk = False
-    while estimated_bytes(estimate, minimum, amp) > budget:
+    while not within_budget(estimate, minimum):
         smaller = _shrink_axis(architecture, patch, median_size, target_spacing)
         smaller_estimate = estimate_for(smaller) if smaller is not None else None
         if smaller_estimate is None:
@@ -344,6 +378,9 @@ def plan_patch_and_batch(
     if batch_size is None and not shrunk:
         unit = estimated_bytes(estimate, 1, amp) - estimated_bytes(estimate, 0, amp)
         fits = int((budget - estimated_bytes(estimate, 0, amp)) // unit)
+        if budget_gb is not None:
+            # nnU-Net rounds here, rather than rounding down.
+            fits = min(fits, round(activation_limit(estimate, budget_gb) / estimate.activations))
         # Keep one global batch to a small share of the dataset's voxels.
         dataset_voxels = float(num_cases) * float(np.prod(median_size))
         capped = dataset_voxels * constants.MAX_DATASET_FRACTION / float(np.prod(patch))
@@ -368,11 +405,20 @@ def is_auto(value: Any) -> bool:
     return value is None or value == AUTO
 
 
+def memory_budget_gb(config: dict[str, Any]) -> float | None:
+    """Return the GPU memory budget to plan for, or None to plan for the whole GPU.
+
+    Configs without training.gpu_memory_budget_gb get the default budget.
+    """
+    return config["training"].get("gpu_memory_budget_gb", constants.DEFAULT_MEMORY_BUDGET_GB)
+
+
 def plan_for_config(config: dict[str, Any], num_cases: int, num_gpus: int) -> Plan:
     """Plan whatever a configuration leaves as "auto", for this machine's GPU.
 
-    A patch or batch size set by hand is kept and the other is chosen around it.
-    With a patch set by hand, the batch size is the minimum.
+    The plan uses at most the configured memory budget, and no more than the GPU
+    allows. A patch or batch size set by hand is kept and the other is chosen
+    around it. With a patch set by hand, the batch size is the minimum.
 
     Args:
         config: MIST configuration, with its AMP setting already resolved.
@@ -413,6 +459,7 @@ def plan_for_config(config: dict[str, Any], num_cases: int, num_gpus: int) -> Pl
         num_cases=num_cases,
         num_gpus=num_gpus,
         batch_size=batch_size,
+        budget_gb=memory_budget_gb(config),
     )
 
 
@@ -460,7 +507,9 @@ def check_plan_fits(config: dict[str, Any], patch_was_set: bool = False) -> None
             "config.json to plan again."
         )
     elif (
-        not patch_was_set and memory >= constants.UNDERUSED_RATIO * planning["gpu_memory_gb"] * _GIB
+        not patch_was_set
+        and planning.get("memory_budget_gb") is None
+        and memory >= constants.UNDERUSED_RATIO * planning["gpu_memory_gb"] * _GIB
     ):
         print_warning(
             f"The patch size was planned for {planning['gpu_memory_gb']:.0f} GiB per GPU, but "

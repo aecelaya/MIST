@@ -2184,7 +2184,7 @@ def test_first_run_announces_planning_then_the_result(
 
     combined = "\n".join(printed)
     header = combined.index("Planning patch and batch size")
-    target = combined.index("Planning dummy for 8.0 GiB")
+    target = combined.index("Planning dummy for a budget of 8 GiB on this 8.0 GiB GPU")
     result = combined.index("Patch [32, 32, 16], batch size 3 per GPU")
     assert header < target < result
     assert "Saved to config.json" in combined
@@ -2197,7 +2197,16 @@ def test_first_run_without_a_gpu_says_so(tmp_pipeline, mist_args, monkeypatch, p
     _fake_plan(monkeypatch, [])
     monkeypatch.setattr(bt.patch_planning, "detect_gpu_memory_bytes", lambda: (None, 0))
     DummyTrainer(mist_args)
-    assert any("No GPU found, so planning dummy" in message for message in printed)
+    assert any("since none was found" in message for message in printed)
+
+
+def test_first_run_saves_the_memory_budget_it_planned_for(tmp_pipeline, mist_args, monkeypatch):
+    """The plan records the budget, so later runs know it wasn't the whole GPU."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto(results)
+    _fake_plan(monkeypatch, [])
+    DummyTrainer(mist_args)
+    assert json.loads(Path(cfg_path).read_text())["planning"]["memory_budget_gb"] == 8.0
 
 
 def test_later_runs_say_they_reuse_the_saved_values(tmp_pipeline, mist_args, monkeypatch, printed):

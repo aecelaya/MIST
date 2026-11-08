@@ -104,6 +104,8 @@ def test_composite_loss_weighting_can_hold_any_key(config):
         ("training", "val_percent", 20, "should be a number from 0 to 1"),
         ("training", "dali_foreground_prob", -0.1, "should be a number from 0 to 1"),
         ("training", "augmentation", True, "should be a section"),
+        ("training", "gpu_memory_budget_gb", "8", "should be a number of GiB above 0"),
+        ("training", "gpu_memory_budget_gb", 0, "should be a number of GiB above 0"),
     ],
 )
 def test_invalid_values_are_found(config, section, key, value, expected):
@@ -124,6 +126,8 @@ def test_invalid_values_are_found(config, section, key, value, expected):
         ("learning_rate", 1),
         ("val_percent", 0),
         ("dali_foreground_prob", 1),
+        ("gpu_memory_budget_gb", 24),
+        ("gpu_memory_budget_gb", None),
     ],
 )
 def test_valid_values_are_accepted(config, key, value):

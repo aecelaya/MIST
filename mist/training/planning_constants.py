@@ -38,6 +38,22 @@ class PlanningConstants:
     # Share of GPU memory to plan for, leaving room for the estimate's error.
     MEMORY_FRACTION = 0.9
 
+    # GPU memory to plan for by default (training.gpu_memory_budget_gb), whatever
+    # the GPU, as nnU-Net's default planner does. Plans then match across GPUs and
+    # stay at patch sizes the estimate was checked at. A larger GPU still trains
+    # faster; to use its memory for larger patches, raise the budget.
+    DEFAULT_MEMORY_BUDGET_GB = 8.0
+
+    # nnU-Net's rule for a budget (nnU-Net 2.8.1, ExperimentPlanner): a patch fits
+    # if one sample's activations, as estimate_network counts them, are at most
+    # this many per 8 GB of budget at a batch size of 2. It doesn't depend on the
+    # precision, so BF16 and FP32 get the same plan. Networks whose activations take
+    # more memory than a U-Net's (see ACTIVATION_MEMORY_BY_PREFIX) get a
+    # proportionally lower limit.
+    REFERENCE_ACTIVATIONS = 560_000_000
+    REFERENCE_BUDGET_GB = 8.0
+    REFERENCE_BATCH_SIZE = 2
+
     # Assumed memory when no GPU is visible, as when training on a CPU.
     DEFAULT_GPU_MEMORY_GB = 16
 

@@ -41,6 +41,16 @@ All notable changes to MIST are listed here, newest first. MIST follows
   the image size, and one global batch sees at most 5% of the dataset. New runs
   may get different patch and batch sizes than before; configs that already have
   values keep them.
+- **Plans now use nnU-Net's default 8 GB memory budget,** set by the new
+  `training.gpu_memory_budget_gb`. As in nnU-Net, a patch fits if one sample has
+  at most 560 million activations per 8 GiB at a batch size of 2, whatever the GPU
+  and precision, so U-Nets get nnU-Net's patch size. Planning for most of a 40 GB
+  A100 gave LiTS a 256 × 224 × 224 patch, about 6 times the voxels of nnU-Net's
+  128³, which ran out of memory in its first step; it now gets 128³, like nnU-Net,
+  in BF16 or FP32. The plan must still fit in 90% of the GPU. Raise the budget to
+  use more of a large GPU, or set it to `null` to plan for 90% of the GPU as before.
+  Configs without the setting plan for 8 GiB; configs that already have a plan keep
+  it.
 - The planner's memory estimate is refitted to steady training memory measured on
   four GPUs, with separate values for SwinUNETR and Primus. Plans for U-Net and
   MedNeXt networks use up to about 1.4 times the voxels they did. Configs that

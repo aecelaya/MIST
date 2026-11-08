@@ -488,14 +488,21 @@ class BaseTrainer(ABC):
         else:
             precision = "BF16" if training["amp"] else "FP32"
 
+        budget_gb = patch_planning.memory_budget_gb(self.config)
+        usable = planned_for * PlanningConstants.MEMORY_FRACTION
+        gpu = (
+            f"this {planned_for / gib:.1f} GiB GPU"
+            if memory is not None
+            else f"an assumed {planned_for / gib:.1f} GiB GPU, since none was found"
+        )
+        target = (
+            f"{usable / gib:.1f} GiB, 90% of {gpu}"
+            if budget_gb is None
+            else f"a budget of {budget_gb:g} GiB on {gpu}"
+        )
+
         print_section_header("Planning patch and batch size")
-        if memory is not None:
-            print_info(f"Planning {architecture} for {planned_for / gib:.1f} GiB, {precision}.")
-        else:
-            print_info(
-                f"No GPU found, so planning {architecture} for "
-                f"{planned_for / gib:.1f} GiB, {precision}."
-            )
+        print_info(f"Planning {architecture} for {target}, {precision}.")
         with console.status("Estimating GPU memory..."):
             plan = patch_planning.plan_for_config(self.config, len(self.paths), num_gpus)
         if test_precision:
@@ -508,6 +515,7 @@ class BaseTrainer(ABC):
             "patch_size": plan.patch_size,
             "batch_size_per_gpu": plan.batch_size_per_gpu,
             "gpu_memory_gb": round(planned_for / gib, 1),
+            "memory_budget_gb": budget_gb,
             "amp": bool(training["amp"]),
             "amp_auto": amp_auto,
             "estimated_gpu_memory_gb": round(plan.estimated_bytes / gib, 1),
@@ -515,11 +523,11 @@ class BaseTrainer(ABC):
         io.write_json_file(self.config_json, self.config)
         print_success(
             f"Patch {plan.patch_size}, batch size {plan.batch_size_per_gpu} per GPU, about "
-            f"{plan.estimated_bytes / gib:.1f} of {planned_for / gib:.1f} GiB. Saved to config.json."
+            f"{plan.estimated_bytes / gib:.1f} GiB estimated. Saved to config.json."
         )
-        if plan.estimated_bytes > planned_for:
+        if plan.estimated_bytes > usable:
             print_warning(
-                f"This may not fit in {planned_for / gib:.1f} GiB, even at the smallest patch."
+                f"This may not fit in {usable / gib:.1f} GiB, even at the smallest patch."
             )
 
     def _choose_precision(

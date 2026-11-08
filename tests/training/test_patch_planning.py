@@ -290,6 +290,15 @@ def test_check_warns_when_the_gpu_is_much_bigger_than_planned(monkeypatch, warne
     assert len(warned) == 1 and "48 GiB" in warned[0] and '"auto"' in warned[0]
 
 
+def test_check_doesnt_suggest_a_larger_patch_for_a_budgeted_plan(monkeypatch, warned):
+    """A plan made for a memory budget is meant to stay small on a big GPU."""
+    _with_gpu(monkeypatch, 48)
+    config = _config(planned_gb=16)
+    config["planning"]["memory_budget_gb"] = 8.0
+    pp.check_plan_fits(config)
+    assert warned == []
+
+
 def test_check_is_quiet_when_the_plan_suits_the_gpu(monkeypatch, warned):
     """A matching GPU says nothing."""
     _with_gpu(monkeypatch, 16)
@@ -347,12 +356,12 @@ def test_activation_layers_exclude_norms_and_activations():
 # Planning from a config.
 
 
-def _auto_config(patch="auto", batch="auto", amp=True, architecture="nnunet-plain"):
+def _auto_config(patch="auto", batch="auto", amp=True, architecture="nnunet-plain", budget=None):
     return {
         "model": {"architecture": architecture, "params": {"in_channels": 1, "out_channels": 3}},
         "preprocessing": {"median_resampled_image_size": [400, 400, 300]},
         "spatial_config": {"patch_size": patch, "target_spacing": [1.0, 1.0, 1.0]},
-        "training": {"batch_size_per_gpu": batch, "amp": amp},
+        "training": {"batch_size_per_gpu": batch, "amp": amp, "gpu_memory_budget_gb": budget},
     }
 
 
@@ -369,6 +378,59 @@ def test_plan_for_config_uses_this_gpu(monkeypatch):
     _with_gpu(monkeypatch, 32)
     large = pp.plan_for_config(_auto_config(), 500, 1)
     assert np.prod(large.patch_size) > np.prod(small.patch_size)
+
+
+def test_plan_for_config_stays_within_the_memory_budget(monkeypatch):
+    """With a budget, a larger GPU plans the same patch as the budget allows."""
+    _with_gpu(monkeypatch, 80)
+    budgeted = pp.plan_for_config(_auto_config(budget=8), 500, 1)
+    _with_gpu(monkeypatch, 24)
+    assert pp.plan_for_config(_auto_config(budget=8), 500, 1) == budgeted
+    assert budgeted.estimated_bytes <= 8 * GIB
+    whole_gpu = pp.plan_for_config(_auto_config(budget=None), 500, 1)
+    assert np.prod(whole_gpu.patch_size) > np.prod(budgeted.patch_size)
+
+
+def test_a_budget_matches_nnunets_rule(monkeypatch):
+    """With a budget, one sample may have nnU-Net's 560M activations per 8 GiB."""
+    _with_gpu(monkeypatch, 80)
+    for budget in (8, 24):
+        plan = pp.plan_for_config(_auto_config(budget=budget), 500, 1)
+        estimate = pp.estimate_network("nnunet-plain", 1, 3, plan.patch_size, [1.0, 1.0, 1.0])
+        assert estimate.activations <= 560e6 * budget / 8
+
+
+def test_a_budget_plans_the_same_patch_in_bf16_and_fp32(monkeypatch):
+    """nnU-Net's rule doesn't depend on the precision, if the GPU is large enough."""
+    _with_gpu(monkeypatch, 40)
+    bf16 = pp.plan_for_config(_auto_config(budget=8, amp=True), 500, 1)
+    fp32 = pp.plan_for_config(_auto_config(budget=8, amp=False), 500, 1)
+    assert bf16.patch_size == fp32.patch_size
+    assert fp32.estimated_bytes > bf16.estimated_bytes
+
+
+def test_heavier_networks_get_a_lower_activation_limit():
+    """Swin's activations take more memory, so fewer of them fit the budget."""
+    unet = pp.estimate_network("nnunet-plain", 1, 3, [64, 64, 64], [1.0, 1.0, 1.0])
+    swin = pp.estimate_network("swinunetr-small", 1, 3, [64, 64, 64], [1.0, 1.0, 1.0])
+    assert pp.activation_limit(unet, 8) == 1120e6
+    assert pp.activation_limit(swin, 8) < pp.activation_limit(unet, 8)
+
+
+def test_a_budget_above_the_gpu_plans_for_the_gpu(monkeypatch):
+    """The budget can't make a plan larger than the GPU allows."""
+    _with_gpu(monkeypatch, 8)
+    assert pp.plan_for_config(_auto_config(budget=64), 500, 1) == pp.plan_for_config(
+        _auto_config(budget=None), 500, 1
+    )
+
+
+def test_configs_without_a_budget_get_the_default():
+    """Older configs plan for the default budget, and null means the whole GPU."""
+    config = _auto_config()
+    del config["training"]["gpu_memory_budget_gb"]
+    assert pp.memory_budget_gb(config) == 8.0
+    assert pp.memory_budget_gb(_auto_config(budget=None)) is None
 
 
 def test_plan_for_config_keeps_a_hand_set_patch(monkeypatch):

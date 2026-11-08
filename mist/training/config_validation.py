@@ -98,6 +98,10 @@ def _value_problem(path: str, value: Any) -> str | None:
         return f"'{path}' should be a number, but is {value!r}."
     if path in _FRACTIONS and not (_is_number(value) and 0 <= value <= 1):
         return f"'{path}' should be a number from 0 to 1, but is {value!r}."
+    if path == "training.gpu_memory_budget_gb" and not (
+        value is None or (_is_number(value) and value > 0)
+    ):
+        return f"'{path}' should be a number of GiB above 0, or null, but is {value!r}."
     return None
 
 
