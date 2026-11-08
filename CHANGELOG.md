@@ -30,7 +30,7 @@ All notable changes to MIST are listed here, newest first. MIST follows
   without data loading on an A100, steps ran a median of 1.6 times faster with BF16
   and 1.25 times with FP32, after one to seven extra minutes per fold. Checkpoints
   keep the same weight names, so they work with or without it. Inference doesn't
-  use it. `examples/mist_compile_benchmark.ipynb` measures its effect on a GPU.
+  use it. `benchmarks/mist_compile_benchmark.ipynb` measures its effect on a GPU.
 - `mist_train` warns about mistakes in `config.json`: keys MIST doesn't use, with
   the likely spelling, and values of the wrong type or range, such as
   `"compile": "false"`. These are only warnings, so existing configs still train.
@@ -43,6 +43,9 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Changed
 
+- Benchmark notebooks and manual GPU check scripts moved from `examples/` and
+  `tests/regression/gpu/` to a new `benchmarks/` folder, with a README for
+  each. `examples/` keeps the MIST demos.
 - **The patch and batch size are now chosen at the start of training,** from an
   estimate of the network's GPU memory, instead of at analysis from a fixed voxel
   budget. `mist_analyze` leaves both as `"auto"`, and the first `mist_train` plans

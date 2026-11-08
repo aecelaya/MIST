@@ -5,7 +5,7 @@ how far off the estimate is for the others. For each network it trains a few rea
 steps on one GPU at a planned patch size, then prints peak memory beside the
 estimate:
 
-    python tests/regression/gpu/calibrate_planning.py
+    python benchmarks/calibrate_planning.py
 
 Run it on an idle GPU. A ratio well above 1 means the planner may overfill the GPU
 for that network; well below 1 means it leaves memory unused. This only covers

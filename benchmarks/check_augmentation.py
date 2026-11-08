@@ -3,7 +3,7 @@
 The test suite fakes DALI, so the DALI pipeline only really runs on a CUDA
 machine. Run this there after mist_analyze and mist_preprocess:
 
-    python tests/regression/gpu/check_augmentation.py \\
+    python benchmarks/check_augmentation.py \\
         --results /path/to/results --numpy /path/to/numpy --out /tmp/aug_check
 
 For each data loader backend available ("dali" and "generic") it builds the

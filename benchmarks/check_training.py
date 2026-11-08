@@ -4,7 +4,7 @@ Runs mist_analyze, mist_preprocess, and a short mist_train on one fold in new
 folders, then prints PASS, WARN, or FAIL for each check along with timing and
 GPU memory. Use a small dataset, since every case in fold 0 gets predicted:
 
-    python tests/regression/gpu/check_training.py \\
+    python benchmarks/check_training.py \\
         --data /path/to/dataset.json --out /path/to/check_training
 
 This shows that the pipeline runs and does what it's designed to. It doesn't show
