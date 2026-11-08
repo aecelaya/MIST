@@ -8,16 +8,17 @@ All notable changes to MIST are listed here, newest first. MIST follows
 ### Added
 
 - **FP16 mixed precision, opt in.** Setting `training.amp` to `"fp16"` trains in
-  FP16, as nnU-Net does, on any GPU, including those without BF16 hardware, such
+  FP16 on any GPU, including those without BF16 hardware, such
   as the V100, T4, and Quadro RTX 6000. Training scales gradients, computes the
   loss in FP32, and saves the gradient scale in checkpoints. If FP16 keeps
   producing NaN or inf losses (20 steps in a row) or its gradient scale collapses,
   the rest of the fold trains in BF16 or FP32 with a warning. The optimizer keeps
   its usual epsilon. `"auto"` doesn't consider FP16 yet.
-- **`nnunet-plain`** — nnU-Net's own default network, `PlainConvUNet`, with its
-  topology rules: no depth limit, and downsampling an axis only when its spacing
-  is under twice the finest spacing among axes that can still be downsampled.
-  Its parameter names match nnU-Net's.
+- **`nnunet-plain`** — a plain convolutional U-Net with two convolutions per
+  stage, no depth limit, and downsampling of an axis only when its spacing is
+  under twice the finest spacing among axes that can still be downsampled. Its
+  parameter names match nnU-Net's `PlainConvUNet`, so those checkpoints load
+  directly.
 - **`nnunet-res`** — a clearer name for the residual network MIST has called
   `nnunet`.
 
@@ -44,17 +45,15 @@ All notable changes to MIST are listed here, newest first. MIST follows
   budget. `mist_analyze` leaves both as `"auto"`, and the first `mist_train` plans
   them for its own GPU, network, and precision, then saves them to `config.json`.
   The search shrinks the axis taking up the most of the image until the network
-  fits, as nnU-Net does. The batch size stays at 2 unless the patch has reached
+  fits. The batch size stays at 2 unless the patch has reached
   the image size, and one global batch sees at most 5% of the dataset. New runs
   may get different patch and batch sizes than before; configs that already have
   values keep them.
-- **Plans now use nnU-Net's default 8 GB memory budget,** set by the new
-  `training.gpu_memory_budget_gb`. As in nnU-Net, a patch fits if one sample has
-  at most 560 million activations per 8 GiB at a batch size of 2, whatever the GPU
-  and precision, so U-Nets get nnU-Net's patch size. Planning for most of a 40 GB
-  A100 gave LiTS a 256 × 224 × 224 patch, about 6 times the voxels of nnU-Net's
-  128³, which ran out of memory in its first step; it now gets 128³, like nnU-Net,
-  in BF16 or FP32. The plan must still fit in 90% of the GPU. Raise the budget to
+- **Plans now use an 8 GiB memory budget by default,** set by the new
+  `training.gpu_memory_budget_gb`. A patch fits if one sample has at most 560
+  million activations per 8 GiB at a batch size of 2, whatever the GPU and
+  precision. Planning for most of a 40 GB A100 gave LiTS a 256 × 224 × 224 patch,
+  which ran out of memory in its first step; it now gets 128³ in BF16 or FP32. The plan must still fit in 90% of the GPU. Raise the budget to
   use more of a large GPU, or set it to `null` to plan for 90% of the GPU as before.
   Configs without the setting plan for 8 GiB; configs that already have a plan keep
   it.
@@ -63,7 +62,7 @@ All notable changes to MIST are listed here, newest first. MIST follows
   MedNeXt networks use up to about 1.4 times the voxels they did. Configs that
   already have a plan keep it. PrimusV2 with `amp` off can still exceed the estimate
   on the A100, L4, and RTX PRO 6000.
-- **Target spacing now follows nnU-Net's anisotropy rule.** The coarsest axis moves
+- **Target spacing has a new anisotropy rule.** The coarsest axis moves
   from its median to its 10th percentile only if its spacing is over 3 times the
   next coarsest axis and its median voxel count is under a third of the smallest
   other axis. It never goes finer than the next coarsest axis. Previously MIST
@@ -85,14 +84,14 @@ All notable changes to MIST are listed here, newest first. MIST follows
 - **Inference recovers from running out of GPU memory** by halving its batch, then
   stitching on the CPU, and holds results for each test-time flip on the CPU until
   they're averaged.
-- **Training augmentation now follows nnU-Net's default transforms.** New
+- **Training augmentation has new transforms and defaults.** New
   transforms: rotation (±30° per axis, or ±180° in-plane for quasi-2D patches),
   scaling from 0.7 to 1.4 (replacing zoom, which only zoomed in), simulated low
   resolution, and gamma (including on the inverted image). Noise, blur,
-  brightness, and flips use nnU-Net's probabilities and ranges, and contrast now
+  brightness, and flips use new probabilities and ranges, and contrast now
   scales about the mean instead of acting as a second brightness. Rotation and
   scaling resample a larger patch cropped around the same center (images and
-  DTMs linearly, labels per class with an argmax, as in nnU-Net), and apply to
+  DTMs linearly, labels per class with an argmax), and apply to
   DTMs too (previously zoom was skipped when DTMs were used). Scaling keeps DTM
   distances valid: unnormalized DTMs are divided by the scale factor, and
   quasi-2D patches, which scale only in-plane, skip scaling when DTMs are used.
@@ -111,7 +110,7 @@ All notable changes to MIST are listed here, newest first. MIST follows
   `scaling`, `low_resolution`, and `gamma`. Missing keys mean enabled, so older
   configs get the new transforms; their `zoom` key is read as `scaling`.
 - **Predictions are restored to the original image space by resampling class
-  probabilities, then taking the argmax**, as nnU-Net does. Previously MIST
+  probabilities, then taking the argmax.** Previously MIST
   took the argmax at the training spacing and resampled the labels. This helps
   most for small or thin structures when the original images are finer than
   the training spacing; along the low-resolution axis of anisotropic images
@@ -123,8 +122,7 @@ All notable changes to MIST are listed here, newest first. MIST follows
   default `val_percent` of `0.0`, the saved model is the final-epoch model.
   Previously it was the model with the lowest loss on the held-out fold, which
   let the fold used for cross-validation choose its own model and made
-  cross-validation results optimistic. nnU-Net also uses the final model by
-  default. With `val_percent` above `0.0`, the saved model is still the best one
+  cross-validation results optimistic. With `val_percent` above `0.0`, the saved model is still the best one
   on the validation split carved from the training cases, now chosen by the
   validation loss smoothed with an exponential moving average (decay 0.9) so
   that one noisy epoch doesn't pick it. Cross-validation scores from a default

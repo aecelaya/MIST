@@ -193,7 +193,7 @@ around it.
    size the network can use.
 2. **Shrink until it fits.** While the network doesn't fit the memory budget at a
    batch size of 2, the search shrinks the axis taking up the largest share of the
-   image, as nnU-Net's planner does.
+   image.
 3. **Spend what's left on the batch.** The batch size stays at 2 if the patch had
    to shrink. If the patch reached the image size with memory to spare, the batch
    size grows to use it, up to a limit: one global batch sees at most 5% of the
@@ -207,10 +207,9 @@ memory, use a smaller `--patch-size`.
 ### Memory budget
 
 `training.gpu_memory_budget_gb` sets how much GPU memory the plan is for. It
-defaults to 8 GiB, and uses nnU-Net's rule for its default 8 GB target: a patch
-fits if one sample's activations number at most 560 million per 8 GiB of budget at
-a batch size of 2. MIST counts activations the same way nnU-Net does, so a U-Net
-gets nnU-Net's patch: 128 × 128 × 128 for LiTS. The rule doesn't depend on BF16 or
+defaults to 8 GiB. A patch fits if one sample's activations number at most 560
+million per 8 GiB of budget at a batch size of 2, which gives a U-Net a
+128 × 128 × 128 patch for LiTS. The rule doesn't depend on BF16 or
 FP32, so both get the same patch; FP32 just uses more memory, about 11 GiB instead
 of 6.5 for LiTS. Networks whose activations take more memory than a U-Net's, such
 as SwinUNETR, get a proportionally lower limit. The plan must also fit in 90% of the
@@ -226,8 +225,7 @@ Planning for a fixed budget means:
 - Steps stay fast. A patch planned for a whole 40 GB GPU can hold several times the
   voxels, and each step takes correspondingly longer.
 
-To use more of a large GPU, raise the budget, for example to 24 or 40, which match
-nnU-Net's larger ResEnc presets. Very large patches haven't been checked: the
+To use more of a large GPU, raise the budget, for example to 24 or 40. Very large patches haven't been checked: the
 256 × 224 × 224 patch above is what LiTS gets with a budget of 40. Set the budget to
 `null` to plan for 90% of the GPU's memory by MIST's estimate, as MIST did before.
 Configs without this setting plan for 8 GiB.
@@ -279,7 +277,7 @@ mist_train --numpy /path/to/numpy --results /path/to/results \
 Each architecture imposes its own patch size constraints when overriding
 manually. The key distinction is between _adaptive_ and _fixed_ topology:
 
-- **Adaptive** (nnUNet, ResEnc, FMG-Net, W-Net): the architecture inspects
+- **Adaptive** (`nnunet-*`, ResEnc, FMG-Net, W-Net): the architecture inspects
   `target_spacing` at construction time and skips downsampling on any axis that
   is already low-resolution (applying stride-1 there instead). Those axes accept
   any patch size ≥ 1.
@@ -291,8 +289,8 @@ manually. The key distinction is between _adaptive_ and _fixed_ topology:
 | ------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `nnunet-plain`            | Depends on the planned depth        | No depth limit: an axis must be divisible by `2^(times it's downsampled)`; raises an error at model construction if violated. For example, 256 is downsampled six times and needs a multiple of 64 |
 | `nnunet-res`, `nnunet`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: the low-res axis uses stride-1, so any value is valid there                      |
-| `resenc`                  | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet                                                                           |
-| `fmgnet`, `wnet`          | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet                                                                           |
+| `resenc`                  | Multiples of 32 on downsampled axes | Same adaptive topology as `nnunet-res`                                                                     |
+| `fmgnet`, `wnet`          | Multiples of 32 on downsampled axes | Same adaptive topology as `nnunet-res`                                                                     |
 | `mednext-*`               | All dimensions divisible by **16**  | Fixed 4-stage encoder (`2⁴ = 16`); no adaptation for anisotropic axes                                      |
 | `swinunetr-*`             | All dimensions divisible by **32**  | Fixed: `patch_size=2` tokenizer × 4 downsampling stages; raises an error at model construction if violated |
 | `primus-*`, `primusv2-*`  | All dimensions divisible by **8**   | Fixed: one token per `8 × 8 × 8` patch; raises an error at model construction if violated                  |
@@ -307,8 +305,8 @@ All MIST models are **3D-only**. For highly anisotropic data (e.g., thick-slice
 CT), use a thin patch along the anisotropic axis (e.g., `256 256 5`) rather than
 a 2D patch — the analysis step will choose this automatically.
 
-MIST's default network architecture is `nnunet-plain`, nnU-Net's own 3D network
-with two deep supervision heads. However the following architectures are also
+MIST's default network architecture is `nnunet-plain`, a plain convolutional
+U-Net with two deep supervision heads. However the following architectures are also
 available:
 
 | Architecture         | `model.architecture` |
@@ -337,10 +335,11 @@ available:
 The architecture can be specified with the `--model` flag in the `mist_run_all`
 or `mist_train` commands or directly edited in the `config.json` file.
 
-`nnunet-plain` matches nnU-Net's `PlainConvUNet`: two plain convolutions per
-stage, the same filter counts, and the same topology rules as nnU-Net's planner,
-including no limit on depth. Its parameter names and shapes match too, apart
-from the duplicate `decoder.encoder.` entries in nnU-Net checkpoints.
+`nnunet-plain` has two plain convolutions per stage and no limit on depth: an
+axis is downsampled while its spacing is under twice the finest spacing among
+the axes that can still be downsampled. Its parameter names and shapes match
+nnU-Net's `PlainConvUNet`, so nnU-Net checkpoints load directly; their duplicate
+`decoder.encoder.` entries are skipped.
 
 `nnunet-res` is the network MIST used by default through version 2.4.0, with a
 residual block per stage and at most five downsamplings. The name `nnunet` still
@@ -424,10 +423,9 @@ to the new token grid (for cubic pretraining patches).
 ### MedNeXt kernel size
 
 MedNeXt's depthwise convolutions support kernel sizes of `3`, `5`, and `7`.
-Larger kernels capture longer-range spatial context and are the primary
-differentiator of MedNeXt over nnUNet, at the cost of higher memory usage. The
-default is `3`, which matches nnUNet's receptive field and is the safest choice
-for memory-constrained hardware.
+Larger kernels capture longer-range spatial context at the cost of higher memory
+usage. The default is `3`, the receptive field of a standard 3 × 3 × 3
+convolution, and the safest choice for memory-constrained hardware.
 
 | `kernel_size` | Receptive field | Memory cost |
 | ------------- | --------------- | ----------- |
@@ -457,8 +455,8 @@ exposed as a CLI flag. For example, to use a kernel size of 5 with MedNeXt base:
 
 MedNeXt uses a **fixed 4-stage encoder** (`blocks_down` has length 4 for all
 variants). Each stage halves the spatial resolution by stride-2 convolution, so
-all patch dimensions must be divisible by `2⁴ = 16`. Unlike nnUNet, there is no
-adaptive topology — the same stride schedule is applied to every axis regardless
+all patch dimensions must be divisible by `2⁴ = 16`. There is no adaptive
+topology: the same stride schedule is applied to every axis regardless
 of spacing anisotropy.
 
 The automatic patch selection always produces multiples of 32 (which are also
@@ -471,7 +469,7 @@ with other architectures.
 
 SwinUNETR-V2 requires that all three spatial dimensions of the input patch are
 divisible by **32** (the `patch_size=2` tokenizer followed by four downsampling
-stages: `2 × 2⁴ = 32`). Unlike nnUNet and MedNeXt, SwinUNETR validates this
+stages: `2 × 2⁴ = 32`). Unlike MedNeXt, SwinUNETR validates this
 constraint at model construction time and raises a `ValueError` immediately if
 it is violated, rather than failing silently at the first forward pass.
 
@@ -497,7 +495,7 @@ The two variants differ in their traversal schedule:
   `[1, 2, 1, 3, 1, 2, 1]`.
 
 Both variants adapt their depth and stride schedule to the input `patch_size`
-and `target_spacing`, the same way nnUNet does.
+and `target_spacing`.
 
 ### Adding a custom model
 
@@ -1082,8 +1080,7 @@ float32 with a warning where it doesn't. To disable AMP explicitly, set it to
 
 ### FP16 (opt in)
 
-Setting `training.amp` to `"fp16"` trains in float16 mixed precision, as nnU-Net
-does. It runs on any NVIDIA or AMD GPU, including those without BF16 hardware,
+Setting `training.amp` to `"fp16"` trains in float16 mixed precision. It runs on any NVIDIA or AMD GPU, including those without BF16 hardware,
 where FP16 tensor cores (NVIDIA Volta and Turing, such as the V100, T4, and Quadro
 RTX 6000) can make it much faster than float32. Most consumer Pascal GPUs (GTX 10
 series) run FP16 slowly, so it may not help there. On a machine without a GPU it
@@ -1286,7 +1283,7 @@ Another feature is the ability to adjust the train/validation/test split via the
 - **`0.0` (default)** — the held-out fold is the validation set, used only to
   track the validation loss. The saved model is the one from the final epoch, so
   the held-out fold never chooses its own model and the cross-validation results
-  are unbiased. nnU-Net does the same by default.
+  are unbiased.
 - **Above `0.0`** — that share of each fold's training cases is held out for
   validation, and the held-out fold remains an independent test set. The saved
   model is the one with the lowest validation loss after exponential smoothing
@@ -1321,9 +1318,9 @@ mist_train --numpy /path/to/preprocessed/npy/files \
 ## Data Augmentation
 
 Data augmentation is controlled through the `training.augmentation` section of
-the `config.json` file. By default, augmentation is enabled and follows nnU-Net's
-default training transforms: the same transforms, order, probabilities, and
-ranges. Probabilities are per training patch.
+the `config.json` file. By default, augmentation is enabled with the transforms,
+probabilities, and ranges below, applied in this order. Probabilities are per
+training patch.
 
 | Transform               | What it does                                                                                     | Probability                       | Config key       |
 | ----------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------- | ---------------- |
@@ -1343,7 +1340,7 @@ content at the borders of a rotated or zoomed-out patch, the data loader crops a
 larger patch around the same center, and the transform resamples it to the
 patch size. Images and DTMs use linear interpolation. Labels are interpolated
 linearly one class at a time, and each voxel takes the class with the highest
-score, as in nnU-Net.
+score.
 
 A patch whose largest dimension is more than three times its smallest (e.g.,
 `256 × 256 × 5`) is treated as quasi-2D: rotation and scaling happen only in
@@ -1422,7 +1419,7 @@ from background.
 The network predicts at the training spacing (`spatial_config.target_spacing`),
 so each prediction is resampled back to the original image's spacing and size.
 MIST resamples each class's probabilities with linear interpolation, then takes
-the argmax at the original resolution, as nnU-Net does. Boundaries therefore
+the argmax at the original resolution. Boundaries therefore
 follow the network's confidence rather than an upsampled label map, which helps
 most for small or thin structures when the original images are finer than the
 training spacing. Along the low-resolution axis of anisotropic images, MIST
