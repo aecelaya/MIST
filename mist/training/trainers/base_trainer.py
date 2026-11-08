@@ -516,7 +516,7 @@ class BaseTrainer(ABC):
             "batch_size_per_gpu": plan.batch_size_per_gpu,
             "gpu_memory_gb": round(planned_for / gib, 1),
             "memory_budget_gb": budget_gb,
-            "amp": bool(training["amp"]),
+            "amp": training["amp"] if training["amp"] == hardware.FP16 else bool(training["amp"]),
             "amp_auto": amp_auto,
             "estimated_gpu_memory_gb": round(plan.estimated_bytes / gib, 1),
         }
@@ -815,12 +815,64 @@ class BaseTrainer(ABC):
             "composite_loss_weighting": composite_loss_weighting,
             "optimizer": optimizer,
             "lr_scheduler": lr_scheduler,
+            "grad_scaler": self._grad_scaler(training["amp"] == hardware.FP16),
+            "nonfinite_steps": 0,
             "epoch": 0,
             "global_step": 0,
             "best_val_loss": np.inf,
             "smoothed_val_loss": None,
             "alpha": 0.5,
         }
+
+    @staticmethod
+    def _grad_scaler(enabled: bool) -> torch.amp.GradScaler:
+        """Return a gradient scaler, which does nothing unless enabled for FP16."""
+        device = "cpu" if hardware.get_accelerator_type() == "cpu" else "cuda"
+        return torch.amp.GradScaler(device, enabled=enabled)
+
+    def _leave_fp16_if_failing(self, state: dict[str, Any], mean_loss: float, rank: int) -> bool:
+        """Check FP16 training after a step, and leave FP16 if it keeps failing.
+
+        Gradient scaling skips the occasional step whose gradients overflow, so a
+        single NaN or inf loss is expected. Many in a row, or a gradient scale
+        that keeps shrinking, mean FP16 isn't working for this run, so the rest
+        of the fold trains in BF16 if the GPU has it, or FP32. Every rank sees the
+        same loss and gradients, so all of them decide the same way.
+
+        Args:
+            state: The training state.
+            mean_loss: This step's loss, averaged across ranks.
+            rank: This process's rank.
+
+        Returns:
+            Whether training is still in FP16 and so the loss needn't stop it.
+        """
+        scaler = state["grad_scaler"]
+        if not scaler.is_enabled():
+            return False
+        finite = bool(np.isfinite(mean_loss))
+        state["nonfinite_steps"] = 0 if finite else state["nonfinite_steps"] + 1
+        too_many = state["nonfinite_steps"] >= TrainerConstants.FP16_MAX_NONFINITE_STEPS
+        collapsed = scaler.get_scale() < TrainerConstants.FP16_MIN_GRAD_SCALE
+        if not (too_many or collapsed):
+            return True
+
+        fallback = hardware.bf16_supported()
+        self.config["training"]["amp"] = fallback
+        state["grad_scaler"] = self._grad_scaler(False)
+        state["nonfinite_steps"] = 0
+        if rank == 0:
+            reason = (
+                f"{TrainerConstants.FP16_MAX_NONFINITE_STEPS} steps in a row had a NaN or inf loss"
+                if too_many
+                else "the gradient scale kept shrinking"
+            )
+            print_warning(
+                f"FP16 training isn't working for this fold: {reason}. Training the rest "
+                f"of the fold in {'BF16' if fallback else 'FP32'}. Set training.amp to "
+                'false or "auto" in config.json to avoid FP16.'
+            )
+        return finite
 
     def _checkpoint_path(self, fold: int) -> Path:
         """Return the checkpoint path for a given fold."""
@@ -848,6 +900,7 @@ class BaseTrainer(ABC):
             "model_state_dict": unwrapped.state_dict(),
             "optimizer_state_dict": state["optimizer"].state_dict(),
             "lr_scheduler_state_dict": state["lr_scheduler"].state_dict(),
+            "grad_scaler_state_dict": state["grad_scaler"].state_dict(),
         }
         # Write to a temp file then atomically rename so a mid-write SIGKILL
         # never leaves a corrupted checkpoint on disk.
@@ -894,6 +947,12 @@ class BaseTrainer(ABC):
         # Restore optimizer and scheduler states.
         state["optimizer"].load_state_dict(checkpoint["optimizer_state_dict"])
         state["lr_scheduler"].load_state_dict(checkpoint["lr_scheduler_state_dict"])
+
+        # The gradient scale carries on where it was, in FP16. Checkpoints from
+        # before FP16 support, or saved outside FP16, have no scale to restore.
+        scaler_state = checkpoint.get("grad_scaler_state_dict")
+        if scaler_state and state["grad_scaler"].is_enabled():
+            state["grad_scaler"].load_state_dict(scaler_state)
 
         # Restore bookkeeping — epoch is incremented so the loop starts on the
         # next unfinished epoch.
@@ -1099,15 +1158,21 @@ class BaseTrainer(ABC):
                         else:
                             mean_loss = loss_det.item()
 
-                    # Check for NaN/Inf and flag for early exit.
-                    if not np.isfinite(mean_loss):
+                    # Check for NaN/Inf and flag for early exit. FP16 training
+                    # tolerates some, since gradient scaling skips those steps.
+                    if self._leave_fp16_if_failing(state, mean_loss, rank):
+                        pass
+                    elif not np.isfinite(mean_loss):
                         if rank == 0:
                             print_error("Stopping training: Detected NaN or inf loss value!")
                         stop_training[0] = 1
 
-                    # Update running average and progress bar (rank 0 only).
+                    # Update running average and progress bar (rank 0 only). A
+                    # skipped FP16 step's loss would spoil the average.
                     if rank == 0:
-                        train_mean_loss = running_train_loss(mean_loss)
+                        if np.isfinite(mean_loss):
+                            running_train_loss(mean_loss)
+                        train_mean_loss = running_train_loss.result()
                         pb.update(
                             loss=train_mean_loss,
                             lr=state["optimizer"].param_groups[0]["lr"],

@@ -39,7 +39,7 @@ def training_summary_rows(
     return [
         ("Model", str(config["model"]["architecture"])),
         ("Parameters", _format_parameter_count(num_params)),
-        ("AMP", "BF16" if training["amp"] else "off (FP32)"),
+        ("AMP", _precision_name(training["amp"])),
         (
             "torch.compile",
             "on" if hardware.resolve_compile(compile_requested) else "off",
@@ -50,6 +50,13 @@ def training_summary_rows(
         ("Epochs", str(training["epochs"])),
         ("Saved model", _saved_model_description(training)),
     ]
+
+
+def _precision_name(amp: bool | str) -> str:
+    """Describe a resolved training.amp setting."""
+    if amp == hardware.FP16:
+        return "FP16"
+    return "BF16" if amp else "off (FP32)"
 
 
 def _saved_model_description(training: dict[str, Any]) -> str:

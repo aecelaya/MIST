@@ -140,21 +140,43 @@ class Patch3DTrainer(BaseTrainer):
         amp_context = hardware.autocast_context(amp_enabled)
 
         optimizer.zero_grad()
-        with amp_context:
-            output = model(image)
-
+        if amp_enabled == hardware.FP16:
+            # The loss's softmax, logs, and sums can overflow FP16, so it's
+            # computed in FP32 from the network's FP16 outputs.
+            with amp_context:
+                output = model(image)
             y_deep_supervision = output.get("deep_supervision", None)
+            if y_deep_supervision is not None:
+                y_deep_supervision = tuple(extra.float() for extra in y_deep_supervision)
             loss = criterion(
                 y_true=label,
-                y_pred=output["prediction"],
+                y_pred=output["prediction"].float(),
                 y_supervision=y_deep_supervision,
                 alpha=alpha,
                 dtm=dtm,
             )
+        else:
+            with amp_context:
+                output = model(image)
 
-        loss.backward()
+                y_deep_supervision = output.get("deep_supervision", None)
+                loss = criterion(
+                    y_true=label,
+                    y_pred=output["prediction"],
+                    y_supervision=y_deep_supervision,
+                    alpha=alpha,
+                    dtm=dtm,
+                )
+
+        # Gradient scaling keeps small FP16 gradients from becoming zero, and
+        # skips steps whose gradients overflow. It does nothing unless training
+        # uses FP16.
+        scaler = state["grad_scaler"]
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
         return loss
 
     def validation_step(self, **kwargs) -> torch.Tensor:
@@ -209,4 +231,5 @@ class Patch3DTrainer(BaseTrainer):
 
         # Compute the loss using the criterion. Running out of memory may have left
         # the prediction on the CPU, but the loss goes back to the GPU for reducing.
-        return self.validation_loss(label.to(pred.device), pred).to(image.device)
+        # Sums over a whole image can overflow FP16, so the loss is computed in FP32.
+        return self.validation_loss(label.to(pred.device), pred.float()).to(image.device)

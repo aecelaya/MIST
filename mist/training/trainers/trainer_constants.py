@@ -14,6 +14,13 @@ class TrainerConstants:
     # Gradient clipping value.
     GRAD_CLIP_VALUE: float = 1.0
 
+    # FP16 training leaves FP16 for the rest of the fold, for BF16 if the GPU has
+    # it and FP32 otherwise, after this many steps in a row with a NaN or inf loss,
+    # or once the gradient scale falls below the minimum. Gradient scaling skips
+    # the occasional overflow on its own; these catch training that keeps failing.
+    FP16_MAX_NONFINITE_STEPS: int = 20
+    FP16_MIN_GRAD_SCALE: float = 1.0
+
     # Loss names that require sddl_spacing_xyz at construction.
     SPACING_AWARE_LOSSES: frozenset[str] = frozenset({"volumetric_sddl", "vessel_sddl"})
 

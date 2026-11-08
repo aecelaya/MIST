@@ -90,8 +90,8 @@ def _value_problem(path: str, value: Any) -> str | None:
     """Describe what's wrong with a setting's value, if anything."""
     if path in _BOOLEANS and not isinstance(value, bool):
         return f"'{path}' should be true or false, but is {value!r}."
-    if path == "training.amp" and not (isinstance(value, bool) or value == "auto"):
-        return f"'{path}' should be true, false, or \"auto\", but is {value!r}."
+    if path == "training.amp" and not (isinstance(value, bool) or value in ("auto", "fp16")):
+        return f'\'{path}\' should be true, false, "auto", or "fp16", but is {value!r}.'
     if path in _INTEGERS and not (_is_number(value) and float(value).is_integer()):
         return f"'{path}' should be a whole number, but is {value!r}."
     if path in _NUMBERS and not _is_number(value):

@@ -7,6 +7,13 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Added
 
+- **FP16 mixed precision, opt in.** Setting `training.amp` to `"fp16"` trains in
+  FP16, as nnU-Net does, on any GPU, including those without BF16 hardware, such
+  as the V100, T4, and Quadro RTX 6000. Training scales gradients, computes the
+  loss in FP32, and saves the gradient scale in checkpoints. If FP16 keeps
+  producing NaN or inf losses (20 steps in a row) or its gradient scale collapses,
+  the rest of the fold trains in BF16 or FP32 with a warning. The optimizer keeps
+  its usual epsilon. `"auto"` doesn't consider FP16 yet.
 - **`nnunet-plain`** — nnU-Net's own default network, `PlainConvUNet`, with its
   topology rules: no depth limit, and downsampling an axis only when its spacing
   is under twice the finest spacing among axes that can still be downsampled.

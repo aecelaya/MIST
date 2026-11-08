@@ -307,3 +307,29 @@ def test_autocast_context_enabled_uses_cpu_device_type_on_cpu(monkeypatch) -> No
     monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cpu")
     ctx = hardware.autocast_context(True)
     assert ctx.device == "cpu"
+
+
+def test_resolve_amp_keeps_fp16_on_a_gpu(monkeypatch) -> None:
+    """FP16 runs on any GPU, so it's kept quietly, even on a pre-Ampere card."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (7, 5))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert hardware.resolve_amp("fp16") == hardware.FP16
+
+
+def test_resolve_amp_fp16_falls_back_to_fp32_without_a_gpu(monkeypatch) -> None:
+    """FP16 on a CPU-only machine becomes FP32, with a warning."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cpu")
+    with pytest.warns(UserWarning, match="FP16"):
+        assert hardware.resolve_amp("fp16") is False
+
+
+def test_autocast_context_uses_fp16_or_bf16(monkeypatch) -> None:
+    """ "fp16" autocasts to FP16, and True to BF16."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
+    created = []
+    monkeypatch.setattr(torch, "autocast", lambda **kwargs: created.append(kwargs))
+    hardware.autocast_context("fp16")
+    hardware.autocast_context(True)
+    assert [kwargs["dtype"] for kwargs in created] == [torch.float16, torch.bfloat16]

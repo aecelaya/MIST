@@ -96,7 +96,7 @@ def test_composite_loss_weighting_can_hold_any_key(config):
     ("section", "key", "value", "expected"),
     [
         ("training", "compile", "false", "should be true or false"),
-        ("training", "amp", "yes", 'should be true, false, or "auto"'),
+        ("training", "amp", "yes", 'should be true, false, "auto", or "fp16"'),
         ("training", "epochs", "1000", "should be a whole number"),
         ("training", "epochs", 10.5, "should be a whole number"),
         ("training", "epochs", True, "should be a whole number"),
@@ -121,6 +121,7 @@ def test_invalid_values_are_found(config, section, key, value, expected):
     ("key", "value"),
     [
         ("amp", "auto"),
+        ("amp", "fp16"),
         ("amp", False),
         ("epochs", 1000.0),
         ("learning_rate", 1),

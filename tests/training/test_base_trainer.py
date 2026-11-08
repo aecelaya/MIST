@@ -2407,3 +2407,87 @@ def test_changing_the_network_keeps_a_precision_set_by_hand(tmp_pipeline, mist_a
     trainer = DummyTrainer(mist_args)
     assert tested == []
     assert trainer.config["training"]["amp"] is True
+
+
+class _FakeScaler:
+    """A gradient scaler whose scale and on/off state are set by the test."""
+
+    def __init__(self, scale=1024.0, enabled=True):
+        self.scale = scale
+        self.enabled = enabled
+
+    def is_enabled(self):
+        return self.enabled
+
+    def get_scale(self):
+        return self.scale
+
+
+def _fp16_state(scale=1024.0):
+    return {"grad_scaler": _FakeScaler(scale), "nonfinite_steps": 0}
+
+
+def test_fp16_tolerates_a_few_nonfinite_losses(tmp_pipeline, mist_args, monkeypatch):
+    """Gradient scaling skips the odd overflow, so FP16 carries on."""
+    trainer = DummyTrainer(mist_args)
+    trainer.config["training"]["amp"] = "fp16"
+    state = _fp16_state()
+    assert trainer._leave_fp16_if_failing(state, float("nan"), rank=0) is True
+    assert trainer._leave_fp16_if_failing(state, 0.5, rank=0) is True
+    assert state["nonfinite_steps"] == 0
+    assert trainer.config["training"]["amp"] == "fp16"
+
+
+@pytest.mark.parametrize("bf16", [True, False])
+def test_fp16_falls_back_after_many_nonfinite_losses(tmp_pipeline, mist_args, monkeypatch, bf16):
+    """Too many NaN losses in a row switch the fold to BF16 or FP32, with a warning."""
+    trainer = DummyTrainer(mist_args)
+    trainer.config["training"]["amp"] = "fp16"
+    monkeypatch.setattr(bt.hardware, "bf16_supported", lambda: bf16)
+    warned = []
+    monkeypatch.setattr(bt, "print_warning", warned.append)
+    state = _fp16_state()
+    for _ in range(bt.TrainerConstants.FP16_MAX_NONFINITE_STEPS - 1):
+        assert trainer._leave_fp16_if_failing(state, float("inf"), rank=0) is True
+    assert trainer._leave_fp16_if_failing(state, float("inf"), rank=0) is False
+    assert trainer.config["training"]["amp"] is bf16
+    assert not state["grad_scaler"].is_enabled()
+    assert len(warned) == 1 and ("BF16" if bf16 else "FP32") in warned[0]
+
+
+def test_fp16_falls_back_when_the_gradient_scale_collapses(tmp_pipeline, mist_args, monkeypatch):
+    """A gradient scale below the minimum means FP16 keeps overflowing."""
+    trainer = DummyTrainer(mist_args)
+    trainer.config["training"]["amp"] = "fp16"
+    monkeypatch.setattr(bt.hardware, "bf16_supported", lambda: False)
+    monkeypatch.setattr(bt, "print_warning", lambda message: None)
+    state = _fp16_state(scale=0.5)
+    assert trainer._leave_fp16_if_failing(state, 0.5, rank=0) is True
+    assert trainer.config["training"]["amp"] is False
+
+
+def test_bf16_and_fp32_leave_nonfinite_losses_to_the_loop(tmp_pipeline, mist_args):
+    """Outside FP16 the check does nothing, so a NaN loss still stops training."""
+    trainer = DummyTrainer(mist_args)
+    state = {"grad_scaler": _FakeScaler(enabled=False), "nonfinite_steps": 0}
+    assert trainer._leave_fp16_if_failing(state, float("nan"), rank=0) is False
+
+
+def test_checkpoint_keeps_the_fp16_gradient_scale(tmp_pipeline, mist_args, monkeypatch):
+    """Resuming FP16 training carries on with the saved gradient scale."""
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
+
+    trainer = DummyTrainer(mist_args)
+    trainer.config["training"]["amp"] = "fp16"
+    state = trainer.build_components(rank=0, world_size=1)
+    assert state["grad_scaler"].is_enabled()
+    state["grad_scaler"].scale(torch.tensor(1.0))  # The scale starts on first use.
+    state["grad_scaler"].update(new_scale=128.0)
+    trainer.save_checkpoint(fold=0, state=state)
+
+    fresh = trainer.build_components(rank=0, world_size=1)
+    trainer.load_checkpoint(fold=0, state=fresh)
+    assert fresh["grad_scaler"].get_scale() == 128.0

@@ -1080,6 +1080,36 @@ float32 with a warning where it doesn't. To disable AMP explicitly, set it to
     float32 automatically (see the warning above) rather than require you to
     disable AMP by hand.
 
+### FP16 (opt in)
+
+Setting `training.amp` to `"fp16"` trains in float16 mixed precision, as nnU-Net
+does. It runs on any NVIDIA or AMD GPU, including those without BF16 hardware,
+where FP16 tensor cores (NVIDIA Volta and Turing, such as the V100, T4, and Quadro
+RTX 6000) can make it much faster than float32. Most consumer Pascal GPUs (GTX 10
+series) run FP16 slowly, so it may not help there. On a machine without a GPU it
+falls back to float32 with a warning. The automatic test doesn't consider FP16 yet,
+so it's only used when set.
+
+```json
+"training": {
+  "amp": "fp16"
+}
+```
+
+FP16 has a much smaller range than BF16, so MIST:
+
+- Scales the loss before computing gradients, so small gradients don't become
+  zero, and skips any step whose gradients overflow. The scale is saved in
+  checkpoints, so `--resume` carries on with it.
+- Computes the loss in float32 from the network's FP16 outputs, since a loss's
+  softmax, logarithms, and sums over many voxels can overflow FP16.
+- Watches for training that keeps failing. If 20 steps in a row have a NaN or inf
+  loss, or the gradient scale falls below 1, the rest of that fold trains in BF16 if
+  the GPU has it, or float32 otherwise, with a warning. Other folds start in FP16
+  again.
+
+Validation and inference also run in FP16.
+
 ## Transfer learning
 
 MIST supports initializing the encoder from a pretrained checkpoint before

@@ -627,3 +627,10 @@ def test_get_npy_paths_raises_without_more_tail_when_leq_five_missing(tmp_path):
     assert re.search(r"\(\+\d+ more\)", msg) is None
     # Preview should list some of the missing filenames.
     assert "x1.npy" in msg
+
+
+def test_summary_names_fp16():
+    """The training summary says FP16 when training uses it."""
+    assert tu._precision_name("fp16") == "FP16"
+    assert tu._precision_name(True) == "BF16"
+    assert tu._precision_name(False) == "off (FP32)"

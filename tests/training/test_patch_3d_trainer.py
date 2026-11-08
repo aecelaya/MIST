@@ -321,6 +321,7 @@ def test_training_step_uses_amp_context_when_configured(
         "optimizer": opt,
         "loss_function": fake_criterion,
         "composite_loss_weighting": None,
+        "grad_scaler": torch.amp.GradScaler("cpu", enabled=False),
         "epoch": 0,
         "global_step": 0,
         "alpha": 0.5,
@@ -362,6 +363,7 @@ def test_training_step_parameters_updated_after_step(tmp_pipeline, mist_args):
         "optimizer": opt,
         "loss_function": real_criterion,
         "composite_loss_weighting": None,
+        "grad_scaler": torch.amp.GradScaler("cpu", enabled=False),
         "epoch": 0,
         "alpha": 0.5,
     }
@@ -516,3 +518,68 @@ def test_validation_step_no_autocast_when_amp_disabled(
     )
 
     assert not autocast_entered, "autocast should not be entered when amp=False"
+
+
+def test_fp16_training_step_scales_gradients_and_computes_the_loss_in_fp32(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """In FP16, the loss gets FP32 outputs outside autocast, and the scaler steps."""
+    t = Patch3DTrainer(mist_args)
+    t.config["training"]["amp"] = "fp16"
+    model = DummyModel()
+    opt = torch.optim.SGD(model.parameters(), lr=0.1)
+
+    inside = {"autocast": False}
+
+    class _FakeAutocast:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            inside["autocast"] = True
+            return self
+
+        def __exit__(self, *_):
+            inside["autocast"] = False
+            return False
+
+    monkeypatch.setattr(torch, "autocast", _FakeAutocast)
+
+    seen = {}
+
+    def criterion(*, y_true, y_pred, y_supervision, alpha, dtm):
+        seen["inside_autocast"] = inside["autocast"]
+        seen["dtype"] = y_pred.dtype
+        return (y_pred - y_true).pow(2).mean()
+
+    calls = []
+
+    class _FakeScaler:
+        def scale(self, loss):
+            calls.append("scale")
+            return loss
+
+        def unscale_(self, optimizer):
+            calls.append("unscale")
+
+        def step(self, optimizer):
+            calls.append("step")
+            optimizer.step()
+
+        def update(self):
+            calls.append("update")
+
+    model.forward = lambda x: {"prediction": model.fc(x).half(), "deep_supervision": None}
+    state = {
+        "model": model,
+        "optimizer": opt,
+        "loss_function": criterion,
+        "grad_scaler": _FakeScaler(),
+        "alpha": 0.5,
+    }
+    batch = {"image": torch.randn(2, 4), "label": torch.randn(2, 4), "dtm": None}
+
+    t.training_step(state=state, data=batch)
+
+    assert seen == {"inside_autocast": False, "dtype": torch.float32}
+    assert calls == ["scale", "unscale", "step", "update"]
