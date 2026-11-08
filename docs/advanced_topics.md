@@ -1050,14 +1050,23 @@ AMP applies to the full training loop and is also propagated to inference:
   `Predictor` enters `torch.autocast` for all forward passes. AMP is silently
   skipped if no GPU is available (CPU-only inference always runs in float32).
 
-`training.amp` is set to `"auto"` by default. If the GPU has no BF16 hardware,
-MIST trains in float32. If it does, the first `mist_train` runs a few training steps
-in each precision and saves the choice to `config.json`, since float32 with TF32
-convolutions can be faster on the same GPU. The test compiles the model if training
-will, which can add several minutes; otherwise it adds about a minute. It keeps BF16
-unless float32 is at least 10% faster in samples per second and needs no smaller a
-patch; float32 may use a smaller batch. Training a different network with `--model`
-tests again.
+`training.amp` is set to `"auto"` by default. On a GPU, the first `mist_train`
+times a few training steps in each candidate precision and saves the choice to
+`config.json`, in tiers:
+
+- **With BF16 hardware**, BF16 is timed against float32, since float32 with TF32
+  convolutions can be faster on the same GPU, and some GPUs run BF16 slowly. If
+  BF16 is at least 10% faster, it's chosen and FP16 isn't timed. Otherwise FP16 is
+  timed too.
+- **Without BF16 hardware**, float32 is timed against FP16.
+
+The default (BF16 with hardware for it, else float32) is kept unless another
+precision is at least 10% faster in samples per second, needs no smaller a patch,
+and fits in memory; it may use a smaller batch. If a timing can't finish, the
+default is kept. The test compiles the model if training will, which can add
+several minutes per precision; otherwise it adds about a minute. Training a
+different network with `--model` tests again. On a machine without a GPU, MIST
+trains in float32 without a test.
 
 Setting `true` skips the test and uses BF16 where the hardware supports it, or
 float32 with a warning where it doesn't. To disable AMP explicitly, set it to
@@ -1078,15 +1087,15 @@ float32 with a warning where it doesn't. To disable AMP explicitly, set it to
     float32 automatically (see the warning above) rather than require you to
     disable AMP by hand.
 
-### FP16 (opt in)
+### FP16
 
-Setting `training.amp` to `"fp16"` trains in float16 mixed precision. It runs on
-any NVIDIA or AMD GPU, including those without BF16 hardware, where FP16 tensor
-cores (NVIDIA Volta and Turing, such as the V100, T4, and Quadro RTX 6000) can
-make it much faster than float32: on a T4, `nnunet-plain` trained 3.5 to 4 times
-faster. Most consumer Pascal GPUs (GTX 10 series) run FP16 slowly, so it may not
-help there. On a machine without a GPU it falls back to float32 with a warning.
-The automatic test doesn't consider FP16 yet, so it's only used when set.
+FP16 is float16 mixed precision, chosen by the automatic test or set with
+`training.amp: "fp16"`. It runs on any NVIDIA or AMD GPU, including those without
+BF16 hardware, where FP16 tensor cores (NVIDIA Volta and Turing, such as the V100,
+T4, and Quadro RTX 6000) can make it much faster than float32: on a T4,
+`nnunet-plain` trained 3.5 to 4 times faster. Most consumer Pascal GPUs (GTX 10
+series) run FP16 slowly, so the test keeps float32 there. Set on a machine without
+a GPU, it falls back to float32 with a warning.
 
 FP16 takes more GPU memory than BF16: its activations took 0.62 to 0.64 of
 float32's memory on a T4 and 0.80 on an A100, against about 0.55 for BF16. Plans

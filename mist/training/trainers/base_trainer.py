@@ -455,11 +455,12 @@ class BaseTrainer(ABC):
         training = self.config["training"]
         self._reset_plan_if_network_changed()
 
-        # Only a GPU with BF16 hardware has a choice to make.
+        # Any GPU has a choice to make: BF16, FP32, or FP16 with BF16 hardware, and
+        # FP32 or FP16 without. Planning starts from the default, BF16 or FP32.
         amp_auto = training["amp"] == "auto"
-        test_precision = amp_auto and hardware.resolve_amp("auto")
+        test_precision = amp_auto and patch_planning.detect_gpu_memory_bytes()[1] > 0
         if amp_auto:
-            training["amp"] = test_precision
+            training["amp"] = hardware.resolve_amp("auto")
 
         plan_needed = patch_planning.is_auto(spatial["patch_size"]) or patch_planning.is_auto(
             training["batch_size_per_gpu"]
@@ -484,7 +485,7 @@ class BaseTrainer(ABC):
             memory if memory is not None else (PlanningConstants.DEFAULT_GPU_MEMORY_GB * gib)
         )
         if test_precision:
-            precision = "BF16 or FP32"
+            precision = "BF16, FP32, or FP16" if training["amp"] else "FP32 or FP16"
         else:
             precision = {hardware.FP16: "FP16", True: "BF16", False: "FP32"}[
                 training["amp"] if training["amp"] == hardware.FP16 else bool(training["amp"])
@@ -533,24 +534,40 @@ class BaseTrainer(ABC):
             )
 
     def _choose_precision(
-        self, bf16_plan: patch_planning.Plan, memory: float, num_gpus: int
+        self, default_plan: patch_planning.Plan, memory: float, num_gpus: int
     ) -> patch_planning.Plan:
-        """Time BF16 and FP32, set training.amp, and return the plan for the winner."""
+        """Time the candidate precisions, set training.amp, and return the winner's plan.
+
+        Args:
+            default_plan: The plan for the default precision, training.amp as resolved
+                from "auto": BF16 with BF16 hardware, else FP32.
+            memory: Memory of the GPU training will run on.
+            num_gpus: Number of GPUs that will train.
+
+        Returns:
+            The plan for the chosen precision.
+        """
         training = self.config["training"]
-        fp32_config = {**self.config, "training": {**training, "amp": False}}
-        fp32_plan = patch_planning.plan_for_config(fp32_config, len(self.paths), num_gpus)
-        with console.status("Timing BF16 and FP32..."):
+        default = training["amp"]
+        candidates = [True, False, hardware.FP16] if default else [False, hardware.FP16]
+        plans = {}
+        for amp in candidates:
+            if amp == default:
+                plans[amp] = default_plan
+                continue
+            config = {**self.config, "training": {**training, "amp": amp}}
+            plans[amp] = patch_planning.plan_for_config(config, len(self.paths), num_gpus)
+        with console.status("Timing training precisions..."):
             choice = precision_test.choose_precision(
                 self.config["model"]["architecture"],
                 {**self.config["model"]["params"], **self.config["spatial_config"]},
-                bf16_plan,
-                fp32_plan,
+                plans,
                 memory,
                 hardware.resolve_compile(training.get("compile", False)),
             )
         print_info(choice.reason)
         training["amp"] = choice.amp
-        return bf16_plan if choice.amp else fp32_plan
+        return plans[choice.amp]
 
     def _validate_pretrained_config(self) -> None:
         """Validate pretrained encoder compatibility if --pretrained-weights set.

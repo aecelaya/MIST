@@ -1,14 +1,23 @@
-"""Time BF16 and FP32 on this GPU and choose which one to train with.
+"""Time training precisions on this GPU and choose which one to train with.
 
 hardware.bf16_supported says a GPU runs BF16 in hardware, not that BF16 is faster
-there. TF32 convolutions can make FP32 faster on the same GPU, so the first
-mist_train runs a few real training steps in each and saves the choice.
+there: TF32 convolutions can make FP32 faster, and some older A100s run BF16
+slowly. FP16 has tensor cores on GPUs without BF16 hardware (V100, T4, Quadro
+RTX 6000). So the first mist_train runs a few real training steps in each
+candidate and saves the choice, in tiers:
 
-FP32 takes roughly twice the activation memory, so it only wins if it's clearly
-faster without shrinking the patch, since a larger patch can help accuracy. It may
-use a smaller batch, so the two are compared in samples per second. The steps use
-random data, so they leave out data loading. They compile the model if training
-will, since compiling can speed up BF16 more than FP32.
+- With BF16 hardware, BF16 is timed against FP32. If BF16 is clearly faster, it's
+  chosen and FP16 isn't timed, since FP16 adds gradient scaling for no gain there.
+  Otherwise FP16 is timed too.
+- Without BF16 hardware, FP32 is timed against FP16.
+
+The default (BF16 with hardware for it, else FP32) is kept unless another
+precision is clearly faster without shrinking the patch, since a larger patch can
+help accuracy. A precision may use a smaller batch, so they're compared in samples
+per second. The steps use random data, so they leave out data loading. They compile
+the model if training will, since compiling speeds up some precisions more than
+others, and FP16 steps scale gradients and compute the loss in FP32, as training
+does.
 
 Each measurement runs in its own process: using the GPU in mist_train's main process
 would hold memory on it for the whole run, and running out of memory here shouldn't
@@ -58,11 +67,11 @@ class Choice:
     """The precision to train with.
 
     Attributes:
-        amp: True for BF16, False for FP32.
+        amp: True for BF16, False for FP32, or "fp16".
         reason: A sentence explaining the choice, to print.
     """
 
-    amp: bool
+    amp: bool | str
     reason: str
 
 
@@ -70,7 +79,7 @@ def measure_steps(
     architecture: str,
     model_kwargs: dict[str, Any],
     batch_size: int,
-    amp: bool,
+    amp: bool | str,
     compiled: bool = False,
 ) -> Measurement:
     """Run real training steps on random data, set up as training sets up the GPU.
@@ -79,7 +88,7 @@ def measure_steps(
         architecture: Registered model name.
         model_kwargs: Arguments for the model, including in_channels and patch_size.
         batch_size: Batch size per GPU.
-        amp: True for BF16, False for FP32.
+        amp: True for BF16, False for FP32, or "fp16".
         compiled: Whether to compile the model, as training does.
 
     Returns:
@@ -93,18 +102,26 @@ def measure_steps(
         model.compile()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     shape = (batch_size, model_kwargs["in_channels"], *model_kwargs["patch_size"])
+    # As in training, FP16 scales gradients and computes the loss in FP32.
+    fp16 = amp == hardware.FP16
+    scaler = torch.amp.GradScaler(device.type, enabled=fp16)
+
+    def mean(tensor: torch.Tensor) -> torch.Tensor:
+        return tensor.float().mean() if fp16 else tensor.mean()
 
     def step() -> None:
         optimizer.zero_grad()
         with hardware.autocast_context(amp):
             output = model(torch.randn(shape, device=device))
+        with hardware.autocast_context(False if fp16 else amp):
             if isinstance(output, dict):
                 extras = output.get("deep_supervision") or []
-                loss = output["prediction"].mean() + sum(extra.mean() for extra in extras)
+                loss = mean(output["prediction"]) + sum(mean(extra) for extra in extras)
             else:
-                loss = output.mean()
-        loss.backward()
-        optimizer.step()
+                loss = mean(output)
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         if cuda:
             torch.cuda.synchronize()
 
@@ -130,7 +147,7 @@ def run_measurement(
     architecture: str,
     model_kwargs: dict[str, Any],
     batch_size: int,
-    amp: bool,
+    amp: bool | str,
     compiled: bool = False,
 ) -> Measurement | None:
     """Run measure_steps in its own process.
@@ -139,7 +156,7 @@ def run_measurement(
         architecture: Registered model name.
         model_kwargs: Arguments for the model, including in_channels and patch_size.
         batch_size: Batch size per GPU.
-        amp: True for BF16, False for FP32.
+        amp: True for BF16, False for FP32, or "fp16".
         compiled: Whether to compile the model, as training does.
 
     Returns:
@@ -168,50 +185,113 @@ def run_measurement(
         return None
 
 
+def _name(amp: bool | str) -> str:
+    """Name a training.amp value."""
+    if amp == hardware.FP16:
+        return "FP16"
+    return "BF16" if amp else "FP32"
+
+
 def choose_precision(
     architecture: str,
     model_kwargs: dict[str, Any],
-    bf16_plan: Plan,
-    fp32_plan: Plan,
+    plans: dict[bool | str, Plan],
     gpu_memory_bytes: float,
     compiled: bool,
 ) -> Choice:
-    """Choose BF16 or FP32, keeping BF16 unless FP32 is clearly better.
+    """Choose a precision, keeping the default unless another is clearly faster.
+
+    The default is BF16 if plans has a BF16 plan (the GPU has BF16 hardware), else
+    FP32. See the module docstring for the tiers.
 
     Args:
         architecture: Registered model name.
         model_kwargs: Arguments for the model, without the patch size.
-        bf16_plan: The plan if training with BF16.
-        fp32_plan: The plan if training with FP32.
+        plans: The plan for each precision to consider, keyed by training.amp value:
+            True (BF16), False (FP32), and "fp16".
         gpu_memory_bytes: Memory of the GPU training will run on.
         compiled: Whether training will compile the model.
 
     Returns:
-        The choice. Its plan is fp32_plan if amp is False, else bf16_plan.
+        The choice. Train with plans[choice.amp].
     """
-    if fp32_plan.patch_size != bf16_plan.patch_size:
-        return Choice(True, "Using BF16, since FP32 would need a smaller patch.")
-
+    default = True if True in plans else False
+    base = plans[default]
     budget = gpu_memory_bytes * constants.MEMORY_FRACTION
-    if fp32_plan.estimated_bytes > budget:
-        return Choice(True, "Using BF16, since FP32 may not fit in memory at this patch.")
+    kwargs = {**model_kwargs, "patch_size": base.patch_size}
+    measured: dict[bool | str, Measurement] = {}
+    too_big: set[bool | str] = set()
+    notes: list[str] = []
 
-    kwargs = {**model_kwargs, "patch_size": bf16_plan.patch_size}
-    bf16 = run_measurement(architecture, kwargs, bf16_plan.batch_size_per_gpu, True, compiled)
-    fp32 = run_measurement(architecture, kwargs, fp32_plan.batch_size_per_gpu, False, compiled)
-    if bf16 is None or fp32 is None:
-        return Choice(True, "Using BF16, since the speed test couldn't finish.")
+    def can_try(amp: bool | str) -> bool:
+        """Whether a precision fits the default's patch, by the estimate."""
+        if amp not in plans:
+            return False
+        if plans[amp].patch_size != base.patch_size:
+            notes.append(f"{_name(amp)} would need a smaller patch")
+            return False
+        if plans[amp].estimated_bytes > budget:
+            notes.append(f"{_name(amp)} may not fit in memory at this patch")
+            return False
+        return True
 
-    speeds = (
-        f"BF16 {bf16.samples_per_second:.2f} and FP32 {fp32.samples_per_second:.2f} "
-        "samples per second."
+    def measure(amp: bool | str) -> Measurement | None:
+        """Time a precision; None if it failed or used too much memory."""
+        result = run_measurement(architecture, kwargs, plans[amp].batch_size_per_gpu, amp, compiled)
+        if result is None:
+            notes.append(f"{_name(amp)}'s timing couldn't finish")
+            return None
+        measured[amp] = result
+        if amp != default and result.peak_bytes > budget:
+            notes.append(f"{_name(amp)} used too much memory")
+            too_big.add(amp)
+            return None
+        return result
+
+    def clearly_faster(amp: bool | str, than: bool | str) -> bool:
+        ratio = measured[amp].samples_per_second / measured[than].samples_per_second
+        return ratio >= constants.PRECISION_MIN_SPEEDUP
+
+    if measure(default) is None:
+        return Choice(default, f"Using {_name(default)}, since the speed test couldn't finish.")
+
+    # replaced is the precision the winner was chosen over, for the message.
+    best, replaced = default, None
+    if default is True:
+        fp32 = measure(False) if can_try(False) else None
+        bf16_clearly_faster = fp32 is not None and clearly_faster(True, False)
+        if fp32 is not None and clearly_faster(False, True):
+            best, replaced = False, True
+        if not bf16_clearly_faster and can_try(hardware.FP16):
+            if measure(hardware.FP16) is not None and clearly_faster(hardware.FP16, best):
+                best, replaced = hardware.FP16, best
+    elif can_try(hardware.FP16):
+        if measure(hardware.FP16) is not None and clearly_faster(hardware.FP16, False):
+            best, replaced = hardware.FP16, False
+
+    speeds = ", ".join(
+        f"{_name(amp)} {result.samples_per_second:.2f}" for amp, result in measured.items()
     )
-    if fp32.peak_bytes > budget:
-        return Choice(True, f"{speeds} Using BF16, since FP32 used too much memory.")
-    speedup = fp32.samples_per_second / bf16.samples_per_second
-    if speedup < constants.FP32_MIN_SPEEDUP:
-        return Choice(True, f"{speeds} Using BF16, since FP32 isn't clearly faster.")
-    return Choice(False, f"{speeds} Using FP32, which is {speedup - 1:.0%} faster.")
+    parts = [f"{speeds} samples per second."] if len(measured) > 1 else []
+    if notes:
+        parts.append(notes[0][0].upper() + "; ".join(notes)[1:] + ".")
+    others = [amp for amp in measured if amp != best and amp not in too_big]
+    if replaced is not None:
+        gain = measured[best].samples_per_second / measured[replaced].samples_per_second - 1
+        parts.append(f"Using {_name(best)}, which is {gain:.0%} faster than {_name(replaced)}.")
+        close = [amp for amp in others if amp != replaced and not clearly_faster(best, amp)]
+        if close:
+            names = " and ".join(_name(amp) for amp in close)
+            parts.append(f"{names} isn't clearly faster than {_name(best)}.")
+    elif not others:
+        parts.append(f"Using {_name(best)}.")
+    elif all(clearly_faster(best, amp) for amp in others):
+        slowest = " and ".join(_name(amp) for amp in others)
+        parts.append(f"Using {_name(best)}, which is clearly faster than {slowest}.")
+    else:
+        rivals = " or ".join(_name(amp) for amp in others)
+        parts.append(f"Using {_name(best)}, since {rivals} isn't clearly faster.")
+    return Choice(best, " ".join(parts))
 
 
 def main() -> None:

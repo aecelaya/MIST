@@ -347,7 +347,7 @@ def build_base_config() -> dict[str, Any]:
             "warmup_epochs": 20,
             "l2_penalty": 0.0001,
             "grad_clip_norm": 1.0,
-            # BF16 or FP32, chosen by a speed test at the first mist_train. See
+            # BF16, FP32, or FP16, chosen by a speed test at the first mist_train. See
             # mist.training.precision_test.
             "amp": "auto",
             # Compile the model with torch.compile during training, on GPUs that

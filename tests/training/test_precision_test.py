@@ -8,6 +8,7 @@ import pytest
 from mist.training import precision_test as pt
 from mist.training.patch_planning import Plan
 from mist.training.planning_constants import PlanningConstants as constants
+from mist.utils.hardware import FP16
 
 GIB = 1024**3
 MEMORY = 80.0 * GIB
@@ -23,22 +24,36 @@ def _plan(patch=(64, 64, 64), batch=4, gib=10.0):
     return Plan(list(patch), batch, gib * GIB)
 
 
-def _fake_speeds(monkeypatch, bf16, fp32):
-    """Make run_measurement return the given measurements, and record its calls."""
+def _fake_speeds(monkeypatch, speeds):
+    """Make run_measurement return speeds[amp], and record its calls."""
     calls = []
 
     def run(architecture, model_kwargs, batch_size, amp, compiled):
         calls.append((architecture, model_kwargs["patch_size"], batch_size, amp, compiled))
-        return bf16 if amp else fp32
+        return speeds.get(amp)
 
     monkeypatch.setattr(pt, "run_measurement", run)
     return calls
 
 
-def _choose(bf16_plan=None, fp32_plan=None, compiled=False):
-    return pt.choose_precision(
-        "nnunet-plain", MODEL_KWARGS, bf16_plan or _plan(), fp32_plan or _plan(), MEMORY, compiled
-    )
+def _speed(seconds, batch=4, gib=5.0):
+    return pt.Measurement(seconds, batch, gib * GIB)
+
+
+def _choose(plans=None, compiled=False, bf16_hardware=True):
+    if plans is None:
+        plans = {False: _plan(), FP16: _plan()}
+        if bf16_hardware:
+            plans[True] = _plan()
+    return pt.choose_precision("nnunet-plain", MODEL_KWARGS, plans, MEMORY, compiled)
+
+
+def _timed(calls):
+    return [call[3] for call in calls]
+
+
+SLOW = 1.0
+NOISE = 1.0 / (constants.PRECISION_MIN_SPEEDUP - 0.01)  # Faster, but within the margin.
 
 
 def test_samples_per_second_accounts_for_batch_size():
@@ -47,97 +62,169 @@ def test_samples_per_second_accounts_for_batch_size():
     assert pt.Measurement(0.5, 2, 0.0).samples_per_second == 4.0
 
 
-def test_fp32_wins_when_clearly_faster(monkeypatch):
-    """FP32 is chosen at the speedup, and the reason shows both speeds."""
+# With BF16 hardware.
+
+
+def test_bf16_clearly_faster_than_fp32_skips_fp16(monkeypatch):
+    """FP16 isn't timed when BF16 already wins, since it would add nothing."""
+    calls = _fake_speeds(monkeypatch, {True: _speed(0.5), False: _speed(1.0)})
+    choice = _choose()
+    assert choice.amp is True
+    assert _timed(calls) == [True, False]
+    assert "BF16 8.00, FP32 4.00 samples per second" in choice.reason
+    assert "clearly faster than FP32" in choice.reason
+
+
+def test_fp32_wins_when_clearly_faster_than_bf16_and_fp16(monkeypatch):
+    """A GPU with slow BF16 trains in FP32, after FP16 is timed too."""
     calls = _fake_speeds(
-        monkeypatch, pt.Measurement(1.0, 4, 5.0 * GIB), pt.Measurement(0.5, 4, 9.0 * GIB)
+        monkeypatch, {True: _speed(1.0), False: _speed(0.5), FP16: _speed(0.5 * NOISE)}
     )
     choice = _choose()
     assert choice.amp is False
-    assert "BF16 4.00 and FP32 8.00 samples per second" in choice.reason
-    assert "100% faster" in choice.reason
-    assert calls == [
-        ("nnunet-plain", [64, 64, 64], 4, True, False),
-        ("nnunet-plain", [64, 64, 64], 4, False, False),
-    ]
+    assert _timed(calls) == [True, False, FP16]
+    assert "Using FP32, which is 100% faster than BF16" in choice.reason
+    assert "FP16 isn't clearly faster than FP32" in choice.reason
 
 
-def test_both_precisions_are_timed_compiled_if_training_will_compile(monkeypatch):
-    """The test measures the setup that will train."""
+def test_fp16_wins_when_bf16_is_slow_and_fp16_is_clearly_faster(monkeypatch):
+    """FP16 beats the faster of BF16 and FP32 by the margin, so it's chosen."""
+    calls = _fake_speeds(monkeypatch, {True: _speed(1.0), False: _speed(0.5), FP16: _speed(0.25)})
+    choice = _choose()
+    assert choice.amp == FP16
+    assert _timed(calls) == [True, False, FP16]
+    assert "Using FP16, which is 100% faster than FP32" in choice.reason
+
+
+def test_bf16_stays_when_nothing_is_clearly_faster(monkeypatch):
+    """Gains under the margin could be noise, so the default stays."""
     calls = _fake_speeds(
-        monkeypatch, pt.Measurement(1.0, 4, 5.0 * GIB), pt.Measurement(1.0, 4, 9.0 * GIB)
-    )
-    _choose(compiled=True)
-    assert [call[-1] for call in calls] == [True, True]
-
-
-def test_bf16_stays_when_fp32_is_only_slightly_faster(monkeypatch):
-    """A gain under the margin could be noise, so BF16 stays."""
-    speedup = constants.FP32_MIN_SPEEDUP - 0.01
-    _fake_speeds(
-        monkeypatch,
-        pt.Measurement(speedup, 4, 5.0 * GIB),
-        pt.Measurement(1.0, 4, 9.0 * GIB),
+        monkeypatch, {True: _speed(SLOW), False: _speed(NOISE), FP16: _speed(NOISE)}
     )
     choice = _choose()
     assert choice.amp is True
+    assert _timed(calls) == [True, False, FP16]
     assert "isn't clearly faster" in choice.reason
+
+
+def test_every_precision_is_timed_compiled_if_training_will_compile(monkeypatch):
+    """The test measures the setup that will train."""
+    calls = _fake_speeds(monkeypatch, {True: _speed(1.0), False: _speed(1.0), FP16: _speed(1.0)})
+    _choose(compiled=True)
+    assert [call[-1] for call in calls] == [True, True, True]
 
 
 def test_comparison_is_per_sample_when_fp32_needs_a_smaller_batch(monkeypatch):
     """Faster steps at half the batch aren't faster training."""
-    _fake_speeds(monkeypatch, pt.Measurement(1.0, 8, 5.0 * GIB), pt.Measurement(0.6, 4, 9.0 * GIB))
-    assert _choose(_plan(batch=8), _plan(batch=4)).amp is True
+    _fake_speeds(
+        monkeypatch,
+        {True: _speed(1.0, batch=8), False: _speed(0.6, batch=4), FP16: _speed(1.0, batch=8)},
+    )
+    plans = {True: _plan(batch=8), False: _plan(batch=4), FP16: _plan(batch=8)}
+    assert _choose(plans).amp is True
 
 
 def test_smaller_fp32_batch_can_still_win(monkeypatch):
     """FP32 at a smaller batch wins if it trains on more samples per second."""
     calls = _fake_speeds(
-        monkeypatch, pt.Measurement(1.0, 8, 5.0 * GIB), pt.Measurement(0.25, 4, 9.0 * GIB)
+        monkeypatch,
+        {True: _speed(1.0, batch=8), False: _speed(0.25, batch=4), FP16: _speed(1.0, batch=8)},
     )
-    assert _choose(_plan(batch=8), _plan(batch=4)).amp is False
-    assert [call[2] for call in calls] == [8, 4]
+    plans = {True: _plan(batch=8), False: _plan(batch=4), FP16: _plan(batch=8)}
+    assert _choose(plans).amp is False
+    assert [call[2] for call in calls] == [8, 4, 8]
 
 
-def test_a_smaller_fp32_patch_keeps_bf16_without_running(monkeypatch):
-    """Speed isn't worth a smaller patch, so nothing needs timing."""
-    calls = _fake_speeds(monkeypatch, None, None)
-    choice = _choose(_plan(patch=(128, 128, 128)), _plan(patch=(96, 96, 96)))
+def test_a_smaller_fp32_patch_is_not_timed_but_fp16_is(monkeypatch):
+    """Speed isn't worth a smaller patch; BF16 wasn't shown faster, so FP16 is timed."""
+    calls = _fake_speeds(monkeypatch, {True: _speed(1.0), FP16: _speed(1.0)})
+    plans = {
+        True: _plan(patch=(128, 128, 128)),
+        False: _plan(patch=(96, 96, 96)),
+        FP16: _plan(patch=(128, 128, 128)),
+    }
+    choice = _choose(plans)
     assert choice.amp is True
-    assert "smaller patch" in choice.reason
-    assert calls == []
+    assert _timed(calls) == [True, FP16]
+    assert "FP32 would need a smaller patch" in choice.reason
 
 
-def test_fp32_estimated_over_budget_keeps_bf16_without_running(monkeypatch):
+def test_fp32_estimated_over_budget_is_not_timed(monkeypatch):
     """A patch and batch set by hand can leave FP32 too big to try."""
-    calls = _fake_speeds(monkeypatch, None, None)
-    choice = _choose(_plan(gib=10.0), _plan(gib=79.0))
+    calls = _fake_speeds(monkeypatch, {True: _speed(1.0), FP16: _speed(1.0)})
+    choice = _choose({True: _plan(gib=10.0), False: _plan(gib=79.0), FP16: _plan(gib=12.0)})
     assert choice.amp is True
+    assert False not in _timed(calls)
     assert "may not fit" in choice.reason
-    assert calls == []
 
 
 def test_fp32_measured_over_budget_keeps_bf16(monkeypatch):
     """Real memory overrides the estimate, however fast FP32 was."""
-    _fake_speeds(monkeypatch, pt.Measurement(1.0, 4, 5.0 * GIB), pt.Measurement(0.1, 4, 79.0 * GIB))
+    _fake_speeds(
+        monkeypatch,
+        {True: _speed(1.0), False: _speed(0.1, gib=79.0), FP16: _speed(1.0)},
+    )
     choice = _choose()
     assert choice.amp is True
     assert "too much memory" in choice.reason
+    assert "isn't clearly faster" in choice.reason  # Said of FP16 only.
+    assert "FP32 or" not in choice.reason
 
 
-@pytest.mark.parametrize(
-    ("bf16", "fp32"),
-    [
-        (None, pt.Measurement(1.0, 4, 0.0)),
-        (pt.Measurement(1.0, 4, 0.0), None),
-    ],
-)
-def test_a_failed_measurement_keeps_bf16(monkeypatch, bf16, fp32):
+def test_a_failed_bf16_measurement_keeps_bf16_and_stops(monkeypatch):
     """Running out of memory in the test mustn't stop training."""
-    _fake_speeds(monkeypatch, bf16, fp32)
+    calls = _fake_speeds(monkeypatch, {False: _speed(1.0), FP16: _speed(1.0)})
     choice = _choose()
     assert choice.amp is True
     assert "couldn't finish" in choice.reason
+    assert _timed(calls) == [True]
+
+
+def test_a_failed_fp32_measurement_still_times_fp16(monkeypatch):
+    """One failed timing leaves the others to compare."""
+    calls = _fake_speeds(monkeypatch, {True: _speed(1.0), FP16: _speed(0.5)})
+    choice = _choose()
+    assert choice.amp == FP16
+    assert _timed(calls) == [True, False, FP16]
+    assert "FP32's timing couldn't finish" in choice.reason
+
+
+# Without BF16 hardware.
+
+
+def test_without_bf16_fp16_wins_when_clearly_faster(monkeypatch):
+    """On a T4, FP16 trained about 4 times faster than FP32."""
+    calls = _fake_speeds(monkeypatch, {False: _speed(2.5), FP16: _speed(0.63)})
+    choice = _choose(bf16_hardware=False)
+    assert choice.amp == FP16
+    assert _timed(calls) == [False, FP16]
+    assert "Using FP16, which is" in choice.reason
+    assert "faster than FP32" in choice.reason
+
+
+def test_without_bf16_fp32_stays_when_fp16_is_not_clearly_faster(monkeypatch):
+    """Consumer Pascal GPUs run FP16 slowly, and FP32 stays."""
+    _fake_speeds(monkeypatch, {False: _speed(SLOW), FP16: _speed(NOISE)})
+    choice = _choose(bf16_hardware=False)
+    assert choice.amp is False
+    assert "FP16 isn't clearly faster" in choice.reason
+
+
+def test_without_bf16_a_failed_fp32_measurement_keeps_fp32(monkeypatch):
+    """Without a baseline there's nothing to compare."""
+    calls = _fake_speeds(monkeypatch, {FP16: _speed(0.5)})
+    choice = _choose(bf16_hardware=False)
+    assert choice.amp is False
+    assert "couldn't finish" in choice.reason
+    assert _timed(calls) == [False]
+
+
+def test_without_bf16_fp16_over_budget_keeps_fp32(monkeypatch):
+    """FP16's own memory counts against it."""
+    _fake_speeds(monkeypatch, {False: _speed(1.0), FP16: _speed(0.25, gib=79.0)})
+    choice = _choose(bf16_hardware=False)
+    assert choice.amp is False
+    assert "FP16 used too much memory" in choice.reason
 
 
 @pytest.mark.parametrize(
@@ -222,7 +309,7 @@ def test_measure_steps_stops_early_on_a_slow_network(monkeypatch):
     assert len(timed) == constants.SPEED_TEST_MIN_STEPS
 
 
-@pytest.mark.parametrize("amp", [False, True])
+@pytest.mark.parametrize("amp", [False, True, "fp16"])
 def test_real_measurement_in_its_own_process(amp):
     """The whole path runs for real: a child process, a network, and its result."""
     kwargs = {**MODEL_KWARGS, "patch_size": [16, 16, 16]}

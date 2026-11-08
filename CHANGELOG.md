@@ -7,16 +7,15 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Added
 
-- **FP16 mixed precision, opt in.** Setting `training.amp` to `"fp16"` trains in
-  FP16 on any GPU, including those without BF16 hardware, such
-  as the V100, T4, and Quadro RTX 6000. Training scales gradients, computes the
+- **FP16 mixed precision.** `training.amp: "fp16"` trains in FP16 on any GPU,
+  including those without BF16 hardware, such as the V100, T4, and Quadro RTX
+  6000, and the automatic test can now choose it (see `training.amp` below). Training scales gradients, computes the
   loss in FP32, and saves the gradient scale in checkpoints. If FP16 keeps
   producing NaN or inf losses (20 steps in a row) or its gradient scale collapses,
   the rest of the fold trains in BF16 or FP32 with a warning. The optimizer keeps
   its usual epsilon. Plans estimate FP16's memory at 0.80 of FP32's activation
   memory, as measured on an A100, instead of BF16's 0.55. On a T4, FP16 trained
-  `nnunet-plain` 3.5 to 4 times faster than FP32. `"auto"` doesn't consider FP16
-  yet.
+  `nnunet-plain` 3.5 to 4 times faster than FP32.
 - **`nnunet-plain`** — a plain convolutional U-Net with two convolutions per
   stage, no depth limit, and downsampling of an axis only when its spacing is
   under twice the finest spacing among axes that can still be downsampled. Its
@@ -59,8 +58,8 @@ All notable changes to MIST are listed here, newest first. MIST follows
   `training.gpu_memory_budget_gb`. A patch fits if one sample has at most 560
   million activations per 8 GiB at a batch size of 2, whatever the GPU and
   precision. Planning for most of a 40 GB A100 gave LiTS a 256 × 224 × 224 patch,
-  which ran out of memory in its first step; it now gets 128³ in BF16 or FP32. The plan must still fit in 90% of the GPU. Raise the budget to
-  use more of a large GPU, or set it to `null` to plan for 90% of the GPU as before.
+  which ran out of memory in its first step; it now gets 128³ in BF16 or FP32. The
+  plan must still fit in 90% of the GPU. Raise the budget to use more of a large GPU, or set it to `null` to plan for 90% of the GPU as before.
   Configs without the setting plan for 8 GiB; configs that already have a plan keep
   it.
 - The planner's memory estimate is refitted to steady training memory measured on
@@ -78,10 +77,12 @@ All notable changes to MIST are listed here, newest first. MIST follows
 - `mist_analyze` now computes `median_resampled_image_size` and its memory warning
   in RAI axis order. Images stored with their axes in a different order used to
   get a wrong estimate, and that estimate sets the patch size.
-- `training.amp` now defaults to `"auto"`. On a GPU with hardware BF16, the first
-  `mist_train` times a few training steps in BF16 and FP32, compiling the model if
-  training will, and saves the choice. FP32 is chosen only if it's at least 10%
-  faster and needs no smaller a patch. An explicit `true` or `false` skips the test.
+- `training.amp` now defaults to `"auto"`. On a GPU, the first `mist_train` times
+  a few training steps, compiling the model if training will, and saves the
+  choice. With BF16 hardware it times BF16 and FP32, and FP16 too unless BF16 is
+  clearly faster; without it, FP32 and FP16. The default, BF16 or FP32, is kept
+  unless another precision is at least 10% faster and needs no smaller a patch.
+  An explicit `true`, `false`, or `"fp16"` skips the test.
 - Later `mist_train` runs warn if the saved plan doesn't suit their GPU, and plan
   again if `--model` changes the network, keeping values set by hand.
 - **Validation and inference predict up to 4 patches at once,** or fewer if the

@@ -84,9 +84,10 @@ class PlanningConstants:
     # Warn at training if the GPU has at least this many times the planned memory.
     UNDERUSED_RATIO = 1.5
 
-    # FP32 replaces BF16 only if the speed test finds it this many times faster,
-    # since the test leaves out data loading and a few steps are noisy.
-    FP32_MIN_SPEEDUP = 1.10
+    # The speed test replaces the default precision (BF16, or FP32 without BF16
+    # hardware) only with one it finds this many times faster, since the test
+    # leaves out data loading and a few steps are noisy.
+    PRECISION_MIN_SPEEDUP = 1.10
 
     # Training steps the speed test runs for each precision: some to warm up, then
     # some to time, stopping early on a slow network once it has the minimum.
