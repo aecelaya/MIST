@@ -657,6 +657,68 @@ def test_get_validation_dataset_yields_full_size_unpatched_images(preprocessed):
     assert len(seen_shapes) == len(preprocessed["image_paths"])
 
 
+@pytest.mark.parametrize(
+    ("requested", "workers", "prefetch"), [(8, 2, 1), (1, 1, 1), (0, 0, None), (-1, 0, None)]
+)
+def test_whole_volume_loaders_limit_workers_and_read_ahead(requested, workers, prefetch):
+    """At most two workers, each one volume ahead, keep shared memory small."""
+    settings = gl._full_volume_workers(requested)
+    assert settings["num_workers"] == workers
+    assert settings["prefetch_factor"] == prefetch
+
+
+@pytest.mark.parametrize("build", ["validation", "test"])
+def test_whole_volume_loaders_use_the_limited_settings(preprocessed, build):
+    """The validation and test loaders read at most two volumes ahead."""
+    if build == "validation":
+        loader = gl.get_validation_dataset(
+            image_paths=preprocessed["image_paths"],
+            label_paths=preprocessed["label_paths"],
+            seed=0,
+            num_workers=8,
+            rank=0,
+            world_size=1,
+        )
+    else:
+        loader = gl.get_test_dataset(image_paths=preprocessed["image_paths"], seed=0, num_workers=8)
+    assert loader._data_loader.num_workers == 2
+    assert loader._data_loader.prefetch_factor == 1
+
+
+class _CountingLoader:
+    """A data loader that counts how often an iterator is started over it."""
+
+    def __init__(self, batches):
+        self.batches = batches
+        self.started = 0
+
+    def __iter__(self):
+        self.started += 1
+        return iter(self.batches)
+
+
+def test_a_pass_starts_at_the_first_batch_and_ends_at_reset():
+    """Validation workers don't read ahead before a pass, or after it until the next."""
+    batches = [{"image": torch.zeros(1)}, {"image": torch.ones(1)}]
+    loader = _CountingLoader(batches)
+    iterator = gl.GenericIterator(loader, torch.device("cpu"))
+    assert loader.started == 0
+    assert iterator.next()[0]["image"].item() == 0
+    assert iterator.next()[0]["image"].item() == 1
+    assert loader.started == 1
+    iterator.reset()
+    assert iterator._iterator is None
+    assert iterator.next()[0]["image"].item() == 0  # A fresh pass, from the start.
+    assert loader.started == 2
+
+
+def test_an_endless_iterator_starts_its_workers_up_front():
+    """Training workers start reading as soon as the loader is built."""
+    loader = _CountingLoader([{"image": torch.zeros(1)}])
+    gl.GenericIterator(loader, torch.device("cpu"), endless=True)
+    assert loader.started == 1
+
+
 def test_get_test_dataset_preserves_input_order(preprocessed):
     """Test batches come back in the exact order of the input path list."""
     loader = gl.get_test_dataset(

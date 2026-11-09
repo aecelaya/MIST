@@ -42,6 +42,13 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Changed
 
+- **The generic loader's validation and test loaders no longer fill shared
+  memory.** The validation loader started its workers when the fold began, and
+  each read whole volumes ahead and kept them in `/dev/shm` until validation ran:
+  about 10 GiB per GPU for LiTS, so a 2-GPU run in a container with a 10 GiB
+  `/dev/shm` crashed with bus errors before its first step. Validation workers
+  now start when validation does and stop after it, and whole-volume loaders use
+  at most 2 workers, each reading 1 volume ahead.
 - The generic loader reads each training patch with one positioned read per
   position along the first axis, instead of copying it through a memory map of
   the file. On NFS, the memory map turned each LiTS-sized patch into tens of

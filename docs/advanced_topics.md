@@ -1619,7 +1619,13 @@ current batch. With `"data_loader": "dali"`, DALI's parallelism comes from CPU
 threads _within_ its pipeline instead.
 
 Either way, the number of workers/threads is set via
-`training.hardware.num_cpu_workers` in `config.json` (default: `8`). There is no
+`training.hardware.num_cpu_workers` in `config.json` (default: `8`). With the
+generic loader, validation and prediction read whole volumes, so they use at most
+2 workers, each reading one volume ahead, to keep shared memory (`/dev/shm`)
+small. Training batches go through shared memory too: about
+`num_cpu_workers` × 4 batches per GPU, roughly 3 GiB per GPU for a 128³ patch at
+batch size 2. In a container, give `/dev/shm` at least that much (for example,
+`docker run --shm-size=16g`). There is no
 CLI flag for this — it is a hardware-tuning setting that belongs in the
 configuration file alongside the rest of the training hardware parameters. Edit
 it directly if your machine has significantly more or fewer CPU cores than the
