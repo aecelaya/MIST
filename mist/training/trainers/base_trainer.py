@@ -554,8 +554,17 @@ class BaseTrainer(ABC):
                 transferred_keys = set(
                     transfer_summary["loaded"] + transfer_summary["channel_strategy_applied"]
                 )
+                # Count each tensor once: some models register the same
+                # parameter under two names (e.g., ResEnc's ConvNormAct holds
+                # its convolution as both "conv" and "all_modules.0"), and
+                # those keys share storage.
                 model_sd = model.state_dict()
-                loaded_scalars = sum(model_sd[k].numel() for k in transferred_keys if k in model_sd)
+                unique_tensors = {
+                    model_sd[k].data_ptr(): model_sd[k].numel()
+                    for k in transferred_keys
+                    if k in model_sd
+                }
+                loaded_scalars = sum(unique_tensors.values())
                 print_info(
                     f"Pretrained encoder loaded from {pretrained_weights}\n"
                     f"  Loaded:                   {n_loaded} tensors "
