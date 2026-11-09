@@ -42,13 +42,6 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Changed
 
-- **The generic loader's validation and test loaders no longer fill shared
-  memory.** The validation loader started its workers when the fold began, and
-  each read whole volumes ahead and kept them in `/dev/shm` until validation ran:
-  about 10 GiB per GPU for LiTS, so a 2-GPU run in a container with a 10 GiB
-  `/dev/shm` crashed with bus errors before its first step. Validation workers
-  now start when validation does and stop after it, and whole-volume loaders use
-  at most 2 workers, each reading 1 volume ahead.
 - The generic loader reads each training patch with one positioned read per
   position along the first axis, instead of copying it through a memory map of
   the file. On NFS, the memory map turned each LiTS-sized patch into tens of
@@ -95,9 +88,6 @@ All notable changes to MIST are listed here, newest first. MIST follows
   compared spacing with the finest axis, ignored voxel counts, and had no lower
   limit. Some anisotropic datasets now get a coarser target spacing, and smaller
   preprocessed images, from `mist_analyze`; existing configs keep their values.
-- `mist_analyze` now computes `median_resampled_image_size` and its memory warning
-  in RAI axis order. Images stored with their axes in a different order used to
-  get a wrong estimate, and that estimate sets the patch size.
 - `training.amp` now defaults to `"auto"`. On a GPU, the first `mist_train` times
   a few training steps, compiling the model if training will, and saves the
   choice. With BF16 hardware it times BF16 and FP32, and FP16 too unless BF16 is
@@ -161,22 +151,42 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Fixed
 
-- **Training on large images is much faster.** `mist_preprocess` saved labels in
-  Fortran order, which made the DALI loader rearrange each whole label for every
-  patch. On an A100 with LiTS-sized CT (about 512 × 512 × 480 voxels), this made
-  DALI wait about 1.9 seconds per training step for data. Labels are now saved in
-  C order. `mist_preprocess` also saves each case's foreground locations in a new
-  `foreground` folder, and the generic loader uses them instead of scanning each
-  label in every worker. Training warns about data preprocessed the old way; run
-  `mist_preprocess` again to fix it.
-- Multi-GPU training now applies MIST's GPU math settings (cuDNN benchmark mode,
-  fast matmul, and TF32 convolutions). They were only set in the parent process,
-  so the spawned training processes ran with PyTorch's defaults. Multi-GPU speed
-  and first-step memory may change.
+- Includes every fix in 2.4.1.
+- **The generic loader no longer scans labels in every worker.** `mist_preprocess`
+  saves each case's foreground locations in a new `foreground` folder, and the
+  generic loader uses them. Training warns about data without them; run
+  `mist_preprocess` again to save them.
+
+## 2.4.1 — 2026-11-09
+
+Bug fixes only, backported from the 2.5.0 work.
+
+### Fixed
+
 - Multi-GPU training with `resenc` no longer crashes on the second step with
   "Expected to have finished reduction in the prior iteration" when the network
   has more decoder stages than it uses for deep supervision. Those segmentation
   layers are now frozen; they stay in the state dict, so checkpoints still load.
+- Multi-GPU training now applies MIST's GPU math settings (cuDNN benchmark mode,
+  fast matmul, and TF32 convolutions). They were only set in the parent process,
+  so the spawned training processes ran with PyTorch's defaults. Multi-GPU speed
+  and first-step memory may change.
+- **Training on large images is much faster with DALI.** `mist_preprocess` saved
+  labels in Fortran order, which made the DALI loader rearrange each whole label
+  for every patch. On an A100 with LiTS-sized CT (about 512 × 512 × 480 voxels),
+  this made DALI wait about 1.9 seconds per training step for data. Labels are
+  now saved in C order. Data preprocessed the old way still trains, with a
+  warning; run `mist_preprocess` again to speed it up.
+- `mist_analyze` computes `median_resampled_image_size` in the target spacing's
+  axis order. For images whose axes aren't stored in RAI order, the estimate,
+  and with it the memory warning and the patch size, came out wrong.
+- The generic loader's validation and test loaders no longer fill shared memory
+  (`/dev/shm`). Their workers started when the fold began and each read whole
+  volumes ahead, holding them until validation ran: about 10 GiB per GPU for
+  LiTS, enough to crash a 2-GPU run in a container with a 10 GiB `/dev/shm`. They
+  now start at the first batch, stop after each pass, and use at most 2 workers,
+  each reading one volume ahead. This affects ROCm, CPU, and NVIDIA runs that
+  use `"data_loader": "generic"`; DALI is the NVIDIA default.
 - The transfer summary printed at the start of training no longer double-counts
   parameters registered under two names (e.g., `resenc`'s convolutions), which
   made nnFoundationCNN report about 180.6M loaded parameters instead of about
