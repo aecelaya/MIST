@@ -110,11 +110,6 @@ All notable changes to MIST are listed here, newest first. MIST follows
 - Augmentation runs in PyTorch on each batch on the training device, so the
   DALI and generic loaders now apply identical transforms. The loaders only
   extract patches.
-- The generic loader's training workers now last the whole fold instead of
-  restarting at every pass over the data and every epoch, and each worker
-  remembers where each case's foreground is (up to 10,000 voxels per class)
-  after scanning its label once. Patches that run past the image edge no longer
-  read the whole case. DALI is unaffected.
 - New config keys under `training.augmentation.transforms`: `rotation`,
   `scaling`, `low_resolution`, and `gamma`. Missing keys mean enabled, so older
   configs get the new transforms; their `zoom` key is read as `scaling`.

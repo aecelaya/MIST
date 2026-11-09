@@ -1460,9 +1460,8 @@ Two things get resolved this way:
   machines, or a CUDA machine that skipped installing DALI — MIST falls back to
   its own generic, pure-PyTorch data loader automatically. Both loaders feed the
   same augmentation, which runs on the training device; the generic loader
-  reads and crops patches on the CPU in worker processes that last for the whole
-  fold, so it's slower per batch than DALI but requires no NVIDIA-specific
-  dependencies. If
+  reads and crops patches on the CPU, so it's slower per batch than DALI but
+  requires no NVIDIA-specific dependencies. If
   your hardware is CUDA but DALI isn't installed, MIST warns and falls back to
   the generic loader rather than failing outright — install
   `pip install "mist-medical[dali]"` to get DALI's acceleration back

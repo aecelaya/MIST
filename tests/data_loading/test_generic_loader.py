@@ -20,25 +20,15 @@ augmentations matching data_loading_constants.py's probabilities/ranges (not
 DALI's exact numerical output).
 """
 
-import gc
-import multiprocessing
-import os
-import subprocess
-import sys
-import time
 import warnings
-from itertools import islice
-from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, Dataset
 
 from mist.data_loading import augmentation
 from mist.data_loading import generic_loader as gl
-from mist.preprocessing import foreground_locations as fl
 from mist.utils import hardware
 from tests.regression.ants_sitk.fixtures import generate_dataset
 from tests.regression.ants_sitk.harness import run_pipeline
@@ -61,6 +51,31 @@ def test_shard_indices_partitions_with_no_drops_or_duplicates(num_examples, worl
 
     sizes = [len(shard) for shard in shards]
     assert max(sizes) - min(sizes) <= 1
+
+
+# --------------------------------------------------------------------------- #
+# _pad_to_roi
+# --------------------------------------------------------------------------- #
+
+
+def test_pad_to_roi_is_noop_when_already_large_enough():
+    """No padding is applied when every spatial axis already meets roi_size."""
+    array = np.random.default_rng(0).random((8, 8, 8, 2)).astype(np.float32)
+    padded = gl._pad_to_roi(array, (4, 4, 4))
+    assert padded is array  # Literally the same object, not just equal.
+
+
+def test_pad_to_roi_pads_smaller_axes_with_zeros():
+    """Smaller axes are zero-padded up to roi_size; original data is preserved."""
+    array = np.ones((4, 5, 6, 2), dtype=np.float32)
+    padded = gl._pad_to_roi(array, (8, 8, 8))
+    assert padded.shape == (8, 8, 8, 2)
+    # Original data preserved at the origin corner.
+    assert np.array_equal(padded[:4, :5, :6, :], array)
+    # Padded region is zero-filled.
+    assert np.all(padded[4:, :, :, :] == 0)
+    assert np.all(padded[:, 5:, :, :] == 0)
+    assert np.all(padded[:, :, 6:, :] == 0)
 
 
 # --------------------------------------------------------------------------- #
@@ -95,9 +110,7 @@ def test_foreground_anchor_center_returns_none_without_foreground():
     """No foreground voxels anywhere -> None (caller falls back to random)."""
     label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
     rng = np.random.default_rng(0)
-    locations = fl.find(label, [1, 2], rng)
-    assert locations == {}
-    assert gl._foreground_anchor_center(locations, labels=[1, 2], rng=rng) is None
+    assert gl._foreground_anchor_center(label, labels=[1, 2], rng=rng) is None
 
 
 def test_foreground_anchor_center_finds_the_only_voxel():
@@ -105,8 +118,7 @@ def test_foreground_anchor_center_finds_the_only_voxel():
     label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
     label[3, 4, 5, 0] = 1
     rng = np.random.default_rng(0)
-    locations = fl.find(label, [1, 2], rng)
-    assert gl._foreground_anchor_center(locations, labels=[1, 2], rng=rng) == (3, 4, 5)
+    assert gl._foreground_anchor_center(label, labels=[1, 2], rng=rng) == (3, 4, 5)
 
 
 def test_foreground_anchor_center_falls_back_to_any_nonzero_voxel():
@@ -114,70 +126,7 @@ def test_foreground_anchor_center_falls_back_to_any_nonzero_voxel():
     label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
     label[1, 2, 3, 0] = 9  # Not in the configured `labels` list below.
     rng = np.random.default_rng(0)
-    locations = fl.find(label, [1, 2], rng)
-    assert gl._foreground_anchor_center(locations, labels=[1, 2], rng=rng) == (1, 2, 3)
-
-
-def test_foreground_locations_caps_each_class(monkeypatch):
-    """Large classes keep a bounded subset of real, distinct locations."""
-    monkeypatch.setattr(fl, "MAX_LOCATIONS", 50)
-    label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
-    label[:5] = 1  # 500 voxels, over the cap.
-    label[9, 9, 9, 0] = 2  # One voxel, under it.
-    locations = fl.find(label, [1, 2], np.random.default_rng(0))
-    assert locations[1].shape == (50, 3)
-    assert len({tuple(c) for c in locations[1].tolist()}) == 50
-    assert np.all(locations[1][:, 0] < 5)
-    assert locations[2].tolist() == [[9, 9, 9]]
-
-
-def test_foreground_anchor_center_weights_classes_equally():
-    """A tiny class is picked as often as a huge one, as in dali_loader.py."""
-    label = np.zeros((20, 20, 20, 1), dtype=np.uint8)
-    label[:10] = 1
-    label[19, 19, 19, 0] = 2
-    rng = np.random.default_rng(0)
-    locations = fl.find(label, [1, 2], rng)
-    picks = [gl._foreground_anchor_center(locations, [1, 2], rng) for _ in range(1000)]
-    assert 0.4 < np.mean([p == (19, 19, 19) for p in picks]) < 0.6
-
-
-def test_dataset_scans_each_label_once(tmp_path, monkeypatch):
-    """Foreground locations are found once per case, then reused."""
-    array = np.zeros((10, 10, 10, 1), dtype=np.float32)
-    array[5, 5, 5, 0] = 1
-    paths = [str(tmp_path / f"{i}.npy") for i in range(2)]
-    for path in paths:
-        np.save(path, array)
-
-    calls = []
-    real = fl.find
-    monkeypatch.setattr(fl, "find", lambda *a, **k: calls.append(1) or real(*a, **k))
-    dataset = gl._PatchTrainingDataset(paths, paths, None, (4, 4, 4), [1], 1.0, True)
-    for _ in range(5):
-        dataset[0]
-        dataset[1]
-    assert len(calls) == 2
-
-
-def test_dataset_uses_saved_foreground_locations(tmp_path, monkeypatch):
-    """Locations saved by mist_preprocess are used instead of scanning the label."""
-    (tmp_path / "labels").mkdir()
-    (tmp_path / fl.FOLDER).mkdir()
-    label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
-    label[5, 5, 5, 0] = 1
-    path = tmp_path / "labels" / "case.npy"
-    np.save(path, label)
-    # A saved location that differs from the label's shows which one was used.
-    fl.save(fl.path_for(path), {1: np.array([[2, 2, 2]], dtype=np.uint16)}, [1])
-
-    def no_scan(*_args, **_kwargs):
-        raise AssertionError("The label was scanned.")
-
-    monkeypatch.setattr(fl, "find", no_scan)
-    dataset = gl._PatchTrainingDataset([str(path)], [str(path)], None, (4, 4, 4), [1], 1.0, True)
-    dataset[0]
-    assert dataset._foreground_cache[0][1].tolist() == [[2, 2, 2]]
+    assert gl._foreground_anchor_center(label, labels=[1, 2], rng=rng) == (1, 2, 3)
 
 
 # --------------------------------------------------------------------------- #
@@ -399,120 +348,6 @@ def test_prefetch_factor_set_when_workers_present():
 
 
 # --------------------------------------------------------------------------- #
-# Long-lived training workers
-# --------------------------------------------------------------------------- #
-
-
-def test_endless_sampler_covers_every_index_each_pass():
-    """Each pass holds every index once, and passes keep coming in new orders."""
-    sampler = gl._EndlessShuffleSampler(5, torch.Generator().manual_seed(0))
-    drawn = list(islice(iter(sampler), 15))
-    passes = [drawn[:5], drawn[5:10], drawn[10:]]
-    assert all(sorted(p) == list(range(5)) for p in passes)
-    assert passes[0] != passes[1] or passes[1] != passes[2]
-
-
-class _PidDataset(Dataset):
-    """Report which process produced each item."""
-
-    def __len__(self):
-        return 3
-
-    def __getitem__(self, index):
-        return {"pid": torch.tensor(os.getpid())}
-
-
-def _endless_iterator(num_workers):
-    return gl.GenericIterator(
-        DataLoader(
-            _PidDataset(),
-            batch_size=2,
-            sampler=gl._EndlessShuffleSampler(3, torch.Generator().manual_seed(0)),
-            num_workers=num_workers,
-            multiprocessing_context=gl._multiprocessing_context(num_workers),
-        ),
-        device=torch.device("cpu"),
-        endless=True,
-    )
-
-
-def test_endless_iterator_keeps_its_workers_across_passes_and_resets():
-    """The same worker processes serve many passes and epoch boundaries."""
-    iterator = _endless_iterator(num_workers=2)
-    pids = set()
-    for _ in range(3):
-        for _ in range(6):  # Two passes' worth of batches.
-            pids.update(iterator.next()[0]["pid"].tolist())
-        iterator.reset()
-    assert 1 <= len(pids) <= 2
-    assert os.getpid() not in pids
-
-
-def test_endless_iterator_works_without_workers():
-    """With no workers, batches come from this process and stay full-sized."""
-    iterator = _endless_iterator(num_workers=0)
-    for _ in range(5):
-        batch = iterator.next()[0]
-        assert batch["pid"].tolist() == [os.getpid()] * 2
-    iterator.reset()
-    assert iterator.next()[0]["pid"].shape == (2,)
-
-
-def test_dropping_an_endless_iterator_stops_its_workers():
-    """Workers don't outlive their fold's iterator."""
-    before = set(multiprocessing.active_children())
-    iterator = _endless_iterator(num_workers=2)
-    iterator.next()
-    assert set(multiprocessing.active_children()) - before
-    del iterator
-    gc.collect()
-    deadline = time.monotonic() + 20
-    while set(multiprocessing.active_children()) - before and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert not set(multiprocessing.active_children()) - before
-
-
-def test_process_with_endless_workers_exits_cleanly(tmp_path):
-    """Two folds' worth of workers, then a normal exit: no hang at shutdown."""
-    script = tmp_path / "folds.py"
-    script.write_text(
-        """
-import numpy as np
-from mist.data_loading import generic_loader as gl
-
-array = np.zeros((10, 10, 10, 1), dtype=np.float32)
-array[5, 5, 5, 0] = 1
-paths = []
-for i in range(3):
-    paths.append(f"case{i}.npy")
-    np.save(paths[-1], array)
-
-for fold in range(2):
-    loader = gl.get_training_dataset(
-        paths, paths, None, 2, (4, 4, 4), [1], 0.5, fold, 2, 0, 1
-    )
-    for _ in range(5):
-        loader.next()
-    loader.reset()
-    loader.next()
-print("done")
-"""
-    )
-    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2])}
-    result = subprocess.run(
-        [sys.executable, str(script)],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "done" in result.stdout
-
-
-# --------------------------------------------------------------------------- #
 # _extract_patch with a spatial-augmentation margin
 # --------------------------------------------------------------------------- #
 
@@ -525,34 +360,6 @@ def test_slice_with_padding_zero_pads_outside_bounds():
     np.testing.assert_array_equal(out[2:6, :, :2], array[0:4, 1:3, 2:4])
     assert np.all(out[:2] == 0)
     assert np.all(out[:, :, 2:] == 0)
-
-
-def test_slice_with_padding_never_reads_outside_the_slice(monkeypatch):
-    """A patch past the edge of a case neither pads nor reads the whole array."""
-
-    def fail(*args, **kwargs):
-        raise AssertionError("np.pad would read the whole memory-mapped case")
-
-    monkeypatch.setattr(gl.np, "pad", fail)
-    array = np.ones((4, 4, 4, 2), dtype=np.float32)
-    out = gl._slice_with_padding(array, starts=(2, -1, 0), shape=(4, 4, 4))
-    assert out.shape == (4, 4, 4, 2)
-    assert out.dtype == array.dtype
-    assert out.sum() == 2 * 3 * 4 * 2
-
-
-def test_slice_with_padding_inside_bounds_returns_a_view():
-    """A slice inside the array copies nothing."""
-    array = np.ones((4, 4, 4, 1), dtype=np.float32)
-    out = gl._slice_with_padding(array, starts=(0, 1, 1), shape=(2, 2, 2))
-    assert np.shares_memory(out, array)
-
-
-def test_slice_with_padding_entirely_outside_is_all_zeros():
-    """A slice that misses the array comes back as zeros of the right shape."""
-    array = np.ones((4, 4, 4, 1), dtype=np.float32)
-    assert not gl._slice_with_padding(array, starts=(9, 0, 0), shape=(2, 2, 2)).any()
-    assert not gl._slice_with_padding(array, starts=(-5, 0, 0), shape=(2, 2, 2)).any()
 
 
 def test_extract_patch_with_margin_centers_the_unmargined_patch():
@@ -701,7 +508,7 @@ def test_a_pass_starts_at_the_first_batch_and_ends_at_reset():
     """Validation workers don't read ahead before a pass, or after it until the next."""
     batches = [{"image": torch.zeros(1)}, {"image": torch.ones(1)}]
     loader = _CountingLoader(batches)
-    iterator = gl.GenericIterator(loader, torch.device("cpu"))
+    iterator = gl.GenericIterator(loader, torch.device("cpu"), lazy=True)
     assert loader.started == 0
     assert iterator.next()[0]["image"].item() == 0
     assert iterator.next()[0]["image"].item() == 1
@@ -712,10 +519,10 @@ def test_a_pass_starts_at_the_first_batch_and_ends_at_reset():
     assert loader.started == 2
 
 
-def test_an_endless_iterator_starts_its_workers_up_front():
+def test_a_training_iterator_starts_its_workers_up_front():
     """Training workers start reading as soon as the loader is built."""
     loader = _CountingLoader([{"image": torch.zeros(1)}])
-    gl.GenericIterator(loader, torch.device("cpu"), endless=True)
+    gl.GenericIterator(loader, torch.device("cpu"))
     assert loader.started == 1
 
 
