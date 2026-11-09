@@ -114,10 +114,7 @@ All notable changes to MIST are listed here, newest first. MIST follows
   restarting at every pass over the data and every epoch, and each worker
   remembers where each case's foreground is (up to 10,000 voxels per class)
   after scanning its label once. Patches that run past the image edge no longer
-  read the whole case, and only their part inside the image is sent from the
-  workers; the GPU adds the zero padding. Patches enlarged for spatial
-  augmentation are often mostly padding on small images such as BraTS, so this
-  sends much less data per batch. DALI is unaffected.
+  read the whole case. DALI is unaffected.
 - New config keys under `training.augmentation.transforms`: `rotation`,
   `scaling`, `low_resolution`, and `gamma`. Missing keys mean enabled, so older
   configs get the new transforms; their `zoom` key is read as `scaling`.
