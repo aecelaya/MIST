@@ -38,9 +38,11 @@ def test_full_cpu_pipeline_trains_and_predicts_with_generic_loader(
     results_dir, numpy_dir = outputs.results_dir, outputs.numpy_dir
     config_path = results_dir / "config.json"
 
-    # analyze writes the generic loader on every machine.
+    # analyze's default is unresolved -- confirms the resolution below is
+    # actually doing something, not just reflecting an already-"generic"
+    # default.
     config = io.read_json_file(str(config_path))
-    assert config["training"]["hardware"]["data_loader"] == "generic"
+    assert config["training"]["hardware"]["data_loader"] == "auto"
 
     # Keep the run fast: a handful of steps per epoch instead of the
     # min_steps_per_epoch=250 default. There's no CLI flag for this --
@@ -68,8 +70,10 @@ def test_full_cpu_pipeline_trains_and_predicts_with_generic_loader(
         ]
     )
 
-    # The loader is persisted at train time, once, in the parent process --
-    # confirm it's still "generic" when read back from disk.
+    # The resolved loader is persisted at train time, once, in the parent
+    # process -- confirm it actually picked "generic" on this CPU-only host,
+    # and that it's the same value read back from disk (not just an
+    # in-memory artifact of this process).
     trained_config = io.read_json_file(str(config_path))
     assert trained_config["training"]["hardware"]["data_loader"] == "generic"
     assert trained_config["model"]["architecture"] == (model or "nnunet-plain")

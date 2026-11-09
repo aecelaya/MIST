@@ -24,10 +24,17 @@ Works on Mac):
 pip install mist-medical
 ```
 
-The same command works on an **NVIDIA GPU**. The `[dali]` extra
-(`pip install "mist-medical[dali]"`, also available as `[train]`) installs NVIDIA
-DALI, which MIST only uses when `training.hardware.data_loader` is set to
-`"dali"`.
+**NVIDIA GPU** (recommended — adds DALI-accelerated data loading):
+
+```console
+pip install "mist-medical[dali]"
+```
+
+!!! note
+
+    Upgrading from an older MIST release? `pip install "mist-medical[train]"`
+    still works too — it's kept as an identical alias for `[dali]`, so
+    nothing in an existing script or notebook breaks.
 
 **AMD ROCm GPU** (install a ROCm-enabled PyTorch build first — PyPI's default
 `torch` wheel has no ROCm support — matching your driver's ROCm version, then
@@ -50,9 +57,9 @@ for details and how to pick the right `rocmX.Y` version for your machine.
 - **Five-fold cross-validation** by default, with custom fold assignment support
 - **Multi-GPU training** via PyTorch DDP on NVIDIA CUDA or AMD ROCm; uses all
   visible GPUs automatically
-- **Fast data loading** that reads only each training patch, with augmentation
-  on the GPU — on NVIDIA, AMD ROCm, or CPU-only hardware, with no
-  NVIDIA-specific dependencies
+- **GPU-accelerated data loading** via NVIDIA DALI during training, with a
+  generic CPU-based data loader used automatically on AMD ROCm or CPU-only
+  hardware — no NVIDIA-specific dependencies required to train at all
 - **Sliding window inference** with configurable overlap and patch blending
 - **Test-time augmentation** and **multi-model ensembling** at inference
 - **Transfer learning** — initialize encoders from pretrained weights

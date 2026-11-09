@@ -112,23 +112,34 @@ def resolve_communication_backend(requested: str) -> str:
 
 
 def resolve_data_loader(requested: str) -> str:
-    """Resolve a requested data loader implementation.
+    """Resolve a requested data loader implementation against hardware.
 
-    ``"auto"`` means MIST's generic loader on every machine. It matched or beat
-    DALI in benchmarks: about 4 times faster on LiTS-sized images, where DALI reads
-    whole volumes for each patch, and as fast or faster on BraTS-sized ones. DALI
-    is only used when ``training.hardware.data_loader`` is ``"dali"``, which needs
-    an NVIDIA GPU and ``pip install "mist-medical[dali]"``. Configs written before
-    2.5.0 may still say ``"auto"``; they get the generic loader too.
+    Mirrors ``resolve_communication_backend``'s "auto" sentinel contract.
+    DALI requires an NVIDIA GPU (``nvidia-dali-cuda120``), so it's only
+    selected automatically on CUDA; ROCm and CPU-only hardware fall back to
+    MIST's generic, accelerator-agnostic loader (see Stage 2-4 of
+    ``cpu_rocm_support_plan.md``). An explicit, non-``"auto"`` value always
+    passes through unchanged.
+
+    On CUDA, "dali" is only returned if it's actually *installed* (i.e.
+    registered in ``mist.data_loading.data_loader_registry``) — a CUDA
+    machine that skipped ``pip install "mist-medical[dali]"`` still detects
+    as CUDA hardware, but has no working "dali" entry to resolve to.
+    Rather than fail training outright over a plausible installation
+    mistake, this warns and falls back to "generic" instead, the same way
+    ``resolve_amp`` warns and downgrades rather than raising.
 
     Args:
-        requested: The configured loader, or ``"auto"``.
+        requested: The configured loader, or ``"auto"`` to detect one.
 
     Returns:
-        The data loader name, as registered in
+        The resolved data loader name, as registered in
         ``mist.data_loading.data_loader_registry``.
     """
-    return "generic" if requested == "auto" else requested
+    if requested != "auto":
+        return requested
+    if get_accelerator_type() != "cuda":
+        return "generic"
 
     # Local import: avoids a hardware.py <-> mist.data_loading import cycle
     # (mist.data_loading's own __init__.py imports generic_loader, which

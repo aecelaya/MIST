@@ -30,10 +30,17 @@ everything):
 pip install mist-medical
 ```
 
-The same command works on an **NVIDIA GPU**. The `[dali]` extra
-(`pip install "mist-medical[dali]"`, also available as `[train]`) installs NVIDIA
-DALI, which MIST only uses when `training.hardware.data_loader` is set to
-`"dali"`.
+**NVIDIA GPU** (recommended — adds DALI-accelerated data loading):
+
+```bash
+pip install "mist-medical[dali]"
+```
+
+<!-- prettier-ignore -->
+> [!NOTE]
+> Upgrading from an older MIST release? `pip install "mist-medical[train]"`
+> still works too — it's kept as an identical alias for `[dali]`, so nothing
+> in an existing script or notebook breaks.
 
 **AMD ROCm GPU** (install a ROCm-enabled PyTorch build first — PyPI's default
 `torch` wheel has no ROCm support — matching your driver's ROCm version, then
@@ -51,8 +58,8 @@ pip install mist-medical
 ```bash
 git clone https://github.com/mist-medical/MIST.git
 cd MIST
-pip install -e .            # CPU or NVIDIA GPU
-pip install -e ".[dali]"    # Adds NVIDIA DALI, for "data_loader": "dali"
+pip install -e .            # CPU
+pip install -e ".[dali]"    # NVIDIA GPU acceleration (recommended on CUDA)
 ```
 
 **Docker** (NVIDIA GPU required, driver ≥ 525.x):
@@ -107,9 +114,9 @@ mist_predict --models-dir /path/to/results/models \
 - **Five-fold cross-validation** by default, with custom fold assignment support
 - **Multi-GPU training** via PyTorch DDP on NVIDIA CUDA or AMD ROCm; uses all
   visible GPUs automatically
-- **Fast data loading** that reads only each training patch, with augmentation
-  on the GPU — on NVIDIA, AMD ROCm, or CPU-only hardware, with no
-  NVIDIA-specific dependencies
+- **GPU-accelerated data loading** via NVIDIA DALI during training, with a
+  generic CPU-based data loader used automatically on AMD ROCm or CPU-only
+  hardware — no NVIDIA-specific dependencies required to train at all
 - **Sliding window inference** with configurable overlap and patch blending
 - **Test-time augmentation** and **multi-model ensembling** at inference
 - **Postprocessing** with learnable, per-class morphological strategies

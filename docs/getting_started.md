@@ -15,8 +15,10 @@ MIST runs the full pipeline — analyze, preprocess, **train**, predict, evaluat
 handle 3D medical images. CPU training is slower than GPU-accelerated training,
 so scale patch size, batch size, and epochs accordingly.
 
-An **NVIDIA GPU** is optional but recommended. An **AMD ROCm GPU** also works
-(see
+An **NVIDIA GPU** is optional but recommended: install the `dali` extra for
+DALI-accelerated data loading, which is substantially faster than the base CPU
+data loader. An **AMD ROCm GPU** also works, using the same generic data loader
+as CPU (see
 [Accelerator support](advanced_topics.md#accelerator-support-nvidia-amd-rocm-cpu)).
 
 ### Install
@@ -30,25 +32,25 @@ Linux workstations, HPC nodes without a GPU:
 pip install mist-medical
 ```
 
-#### NVIDIA GPU
-
-The same command as for CPU works:
+#### NVIDIA GPU (recommended: DALI-accelerated data loading)
 
 ```console
-pip install mist-medical
+pip install "mist-medical[dali]"
 ```
 
-The `[dali]` extra (`pip install "mist-medical[dali]"`, also available as
-`[train]`) installs NVIDIA DALI, which MIST only uses when
-`training.hardware.data_loader` is set to `"dali"`. MIST's default data loader
-needs no extra.
+!!! note
+
+    Upgrading from an older MIST release? `pip install "mist-medical[train]"`
+    still works too — it's kept as an identical alias for `[dali]`, so
+    nothing in an existing script or notebook breaks.
 
 #### AMD ROCm GPU
 
 PyPI's default `torch` wheel has no ROCm support, so install a ROCm-enabled
 PyTorch build _first_ — matching your machine's installed ROCm version, which
 you can check with `cat /opt/rocm/.info/version` — then install MIST on top of
-it. No install extra is needed:
+it. No install extra is needed; DALI (`dali`) is CUDA-only, and ROCm uses MIST's
+built-in generic data loader automatically:
 
 ```console
 pip install torch --index-url https://download.pytorch.org/whl/rocm6.4
@@ -70,14 +72,16 @@ detection checks for.
 #### Development install
 
 To install MIST and customize the underlying code (e.g., add a loss function or
-new architecture), clone the repo and install in editable mode. On AMD ROCm,
-install the ROCm PyTorch wheel first, as above:
+new architecture), clone the repo and install in editable mode. Add `[dali]` if
+you want DALI-accelerated data loading (recommended on NVIDIA GPUs; on AMD ROCm,
+install the ROCm PyTorch wheel first, as above, then install in editable mode
+with no extra):
 
 ```console
 git clone https://github.com/mist-medical/MIST.git
 cd MIST
-pip install -e .          # CPU, NVIDIA, or AMD ROCm
-pip install -e ".[dali]"  # Adds NVIDIA DALI, for "data_loader": "dali"
+pip install -e .          # CPU / AMD ROCm
+pip install -e ".[dali]"  # NVIDIA GPU acceleration
 ```
 
 ### Data Format

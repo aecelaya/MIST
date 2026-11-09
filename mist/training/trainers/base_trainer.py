@@ -280,9 +280,11 @@ class BaseTrainer(ABC):
             hw["communication_backend"]
         )
 
-        # "auto", from configs written before 2.5.0, becomes the generic loader;
-        # an explicit value is left untouched. `.get(..., "auto")` tolerates a
-        # config.json written before this key existed at all.
+        # Resolve the data loader backend the same way: "auto" becomes
+        # "dali" on CUDA or "generic" on ROCm/CPU, while an explicit value is
+        # left untouched. `.get(..., "auto")` tolerates a config.json written
+        # before this key existed at all, not just one that already says
+        # "auto" -- both are treated as "not yet resolved".
         hw["data_loader"] = hardware.resolve_data_loader(hw.get("data_loader", "auto"))
 
         # Write the updated configuration to the config.json file.

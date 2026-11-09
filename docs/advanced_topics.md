@@ -112,7 +112,7 @@ Below is an example of a valid `config.json` file.
       "master_addr": "localhost",
       "master_port": 12345,
       "communication_backend": "nccl",
-      "data_loader": "generic"
+      "data_loader": "dali"
     }
   },
 
@@ -1405,8 +1405,13 @@ Disable noise and blur while keeping other augmentations active:
 
 ## Foreground sampling probability
 
+MIST uses NVIDIA DALI (Data Loading Library) for GPU-accelerated data loading
+and patch sampling during training. DALI pipelines run data preprocessing
+directly on the GPU, overlapping with model computation to reduce per-epoch
+overhead.
+
 The `training.dali_foreground_prob` key controls the probability that a sampled
-training patch contains foreground (non-zero labels). Despite its name, it applies to both data loaders. This is useful in medical
+training patch contains foreground (non-zero labels). This is useful in medical
 segmentation tasks where most voxels are background, ensuring the model sees a
 balanced mix of positive and negative regions during training.
 
@@ -1447,27 +1452,35 @@ this to work; it's resolved once, the first time you run `mist_train`, and the
 resolved values are written back to `config.json` so every later run and all
 downstream inference read the same settings.
 
-**`training.hardware.communication_backend`** is resolved this way: the
-`torch.distributed` backend used for multi-GPU coordination. It resolves to
-`"nccl"` on both NVIDIA CUDA and AMD ROCm (on ROCm, the `"nccl"` backend name
-transparently routes to RCCL, AMD's NCCL-compatible collective communications
-library — no code or config change needed), and to `"gloo"` on CPU-only
-hardware. It defaults to `"auto"` in a freshly analyzed `config.json` and is
-resolved the first time you run `mist_train`. If you set it explicitly instead,
-MIST respects that choice and never overrides it. Because resolution happens
-once and is persisted, moving an already-resolved `config.json` to a different
-kind of machine (say, from a CUDA node to a CPU-only one) means you'll need to
-edit it by hand, or restore `"auto"`, to get it to re-resolve.
+Two things get resolved this way:
 
-**`training.hardware.data_loader`** is `"generic"`: MIST's own pure-PyTorch data
-loader, on every machine. It reads only each patch from memory-mapped files, in
-CPU worker processes that last for the whole fold, and pads patches that run
-past the image edge on the GPU. Configs from before 2.5.0 that say `"auto"` get
-it too. Setting `"dali"` uses NVIDIA DALI instead, which needs an NVIDIA GPU and
-`pip install "mist-medical[dali]"`. In benchmarks the generic loader matched or
-beat DALI: about 4 times faster on LiTS-sized images, where DALI reads whole
-volumes for each patch, and as fast or faster on BraTS-sized ones. Both loaders
-feed the same augmentation, which runs on the training device.
+- **`training.hardware.data_loader`** — which data-loading backend to use.
+  `"dali"` (NVIDIA's GPU-accelerated data loading library) is used automatically
+  on CUDA hardware where it's installed; everywhere else — AMD ROCm, CPU-only
+  machines, or a CUDA machine that skipped installing DALI — MIST falls back to
+  its own generic, pure-PyTorch data loader automatically. Both loaders feed the
+  same augmentation, which runs on the training device; the generic loader
+  reads and crops patches on the CPU in worker processes that last for the whole
+  fold, so it's slower per batch than DALI but requires no NVIDIA-specific
+  dependencies. If
+  your hardware is CUDA but DALI isn't installed, MIST warns and falls back to
+  the generic loader rather than failing outright — install
+  `pip install "mist-medical[dali]"` to get DALI's acceleration back
+  (recommended whenever training on an NVIDIA GPU).
+- **`training.hardware.communication_backend`** — the `torch.distributed`
+  backend used for multi-GPU coordination. Resolves to `"nccl"` on both NVIDIA
+  CUDA and AMD ROCm (on ROCm, the `"nccl"` backend name transparently routes to
+  RCCL, AMD's NCCL-compatible collective communications library — no code or
+  config change needed), and to `"gloo"` on CPU-only hardware.
+
+Both fields default to `"auto"` in a freshly analyzed `config.json` and are
+resolved the first time you run `mist_train`. If you set either one explicitly
+instead (e.g. `"data_loader": "generic"` to force the generic loader even on a
+CUDA machine), MIST respects that choice and never overrides it automatically.
+Because resolution happens once and is persisted, moving an already-resolved
+`config.json` to a different kind of machine (say, from a CUDA analyze node to a
+CPU-only training node) means you'll need to edit these two fields by hand, or
+restore the `"auto"` sentinel, to get them to re-resolve for the new hardware.
 
 CPU-only training is single-process — MIST does not (yet) support distributed
 training across multiple CPU processes, only across multiple GPUs (see
@@ -1610,13 +1623,18 @@ number of patients in the dataset.
 ### Training data-loading parallelism
 
 Training uses a different mechanism from analysis/preprocessing/evaluation, and
-it depends on the data loader (see
+it depends on which data loader backend was resolved (see
 [Accelerator support](#accelerator-support-nvidia-amd-rocm-cpu) above).
 
-MIST's generic data loader, the default, is a `torch.utils.data.DataLoader` that
-reads patches in separate worker processes while the accelerator trains on the
-current batch. With `"data_loader": "dali"`, DALI's parallelism comes from CPU
-threads _within_ its pipeline instead.
+On NVIDIA GPUs with DALI installed, MIST builds a GPU-accelerated data pipeline
+that reads, augments, and assembles batches while the GPU is busy computing
+gradients. DALI's parallelism is controlled by CPU threads _within_ the
+pipeline, not by Python worker processes.
+
+On AMD ROCm, CPU-only hardware, or a CUDA machine without DALI installed, MIST
+uses its generic data loader instead — a plain `torch.utils.data.DataLoader`
+that reads patches in separate worker processes rather than pipeline threads.
+Augmentation runs on the training device with either loader.
 
 Either way, the number of workers/threads is set via
 `training.hardware.num_cpu_workers` in `config.json` (default: `8`). With the
