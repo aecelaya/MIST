@@ -221,6 +221,25 @@ def resolve_amp(requested: bool, *, warn: bool = True) -> bool:
     return False
 
 
+def tune_gpu_math() -> None:
+    """Turn on the faster math that training uses, including TF32 convolutions.
+
+    These tune cuDNN (CUDA) or its MIOpen equivalent (ROCm, via the same
+    ``torch.backends.cudnn`` compatibility shim). They mean nothing on CPU-only
+    hardware, so they're skipped there.
+    """
+    if get_accelerator_type() == "cpu":
+        return
+    torch.set_float32_matmul_precision("high")
+    # torch.backends.cudnn.conv.fp32_precision was added in PyTorch 2.5; fall back
+    # to allow_tf32, which does the same on older builds.
+    if hasattr(torch.backends.cudnn, "conv"):
+        torch.backends.cudnn.conv.fp32_precision = "tf32"
+    else:
+        torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True
+
+
 def autocast_context(enabled: bool):
     """Return a BF16 autocast context for the current accelerator, or null.
 

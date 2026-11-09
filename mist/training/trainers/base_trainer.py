@@ -995,6 +995,10 @@ class BaseTrainer(ABC):
 
     def run_cross_validation(self, rank: int, world_size: int) -> None:
         """Run cross-validation for selected folds."""
+        # These settings belong to each process, and mp.spawn's processes don't
+        # inherit them, so every rank sets its own here.
+        hardware.tune_gpu_math()
+
         # Display the start of training message and a run summary.
         if rank == 0:
             print_section_header("Starting training")
@@ -1031,22 +1035,6 @@ class BaseTrainer(ABC):
         instances of the training function, each on a separate GPU.
         """
         accelerator = hardware.get_accelerator_type()
-
-        # Enable some performance optimizations. These tune cuDNN (CUDA) /
-        # its MIOpen equivalent (ROCm, via the same torch.backends.cudnn
-        # compatibility shim) and are meaningless on CPU-only hardware --
-        # empirically confirmed harmless no-ops there today, but skipped
-        # explicitly rather than relying on that continuing to hold.
-        if accelerator != "cpu":
-            torch.set_float32_matmul_precision("high")
-            # torch.backends.cudnn.conv.fp32_precision was added in PyTorch
-            # 2.5; fall back to allow_tf32 which achieves the same effect on
-            # older builds.
-            if hasattr(torch.backends.cudnn, "conv"):
-                torch.backends.cudnn.conv.fp32_precision = "tf32"
-            else:
-                torch.backends.cudnn.allow_tf32 = True
-            torch.backends.cudnn.benchmark = True
 
         # Train model. torch.cuda.device_count() is 0 on CPU-only hardware
         # (there are no CUDA/ROCm devices to count), so it can't be used
