@@ -3,6 +3,41 @@
 All notable changes to MIST are listed here, newest first. MIST follows
 [semantic versioning](https://semver.org/) from 2.3.0 onward.
 
+## 2.4.1 — 2026-11-08
+
+Bug fixes only, backported from the 2.5.0 work.
+
+### Fixed
+
+- Multi-GPU training with `resenc` no longer crashes on the second step with
+  "Expected to have finished reduction in the prior iteration" when the network
+  has more decoder stages than it uses for deep supervision. Those segmentation
+  layers are now frozen; they stay in the state dict, so checkpoints still load.
+- Multi-GPU training now applies MIST's GPU math settings (cuDNN benchmark mode,
+  fast matmul, and TF32 convolutions). They were only set in the parent process,
+  so the spawned training processes ran with PyTorch's defaults. Multi-GPU speed
+  and first-step memory may change.
+- **Training on large images is much faster with DALI.** `mist_preprocess` saved
+  labels in Fortran order, which made the DALI loader rearrange each whole label
+  for every patch. On an A100 with LiTS-sized CT (about 512 × 512 × 480 voxels),
+  this made DALI wait about 1.9 seconds per training step for data. Labels are
+  now saved in C order. Data preprocessed the old way still trains, with a
+  warning; run `mist_preprocess` again to speed it up.
+- `mist_analyze` computes `median_resampled_image_size` in the target spacing's
+  axis order. For images whose axes aren't stored in RAI order, the estimate,
+  and with it the memory warning and the patch size, came out wrong.
+- The generic loader's validation and test loaders no longer fill shared memory
+  (`/dev/shm`). Their workers started when the fold began and each read whole
+  volumes ahead, holding them until validation ran: about 10 GiB per GPU for
+  LiTS, enough to crash a 2-GPU run in a container with a 10 GiB `/dev/shm`. They
+  now start at the first batch, stop after each pass, and use at most 2 workers,
+  each reading one volume ahead. This affects ROCm, CPU, and NVIDIA runs that
+  use `"data_loader": "generic"`; DALI is the NVIDIA default.
+- The transfer summary printed at the start of training no longer double-counts
+  parameters registered under two names (e.g., `resenc`'s convolutions), which
+  made nnFoundationCNN report about 180.6M loaded parameters instead of about
+  90.3M. Only the printout was affected.
+
 ## 2.4.0 — 2026-11-02
 
 ### Added
