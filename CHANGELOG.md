@@ -3,7 +3,7 @@
 All notable changes to MIST are listed here, newest first. MIST follows
 [semantic versioning](https://semver.org/) from 2.3.0 onward.
 
-## 2.4.1 — 2026-11-08
+## 2.4.1 — 2026-11-09
 
 Bug fixes only, backported from the 2.5.0 work.
 
