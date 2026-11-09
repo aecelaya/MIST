@@ -803,9 +803,12 @@ def test_preprocess_single_patient_happy_path_saves_arrays(tmp_path, monkeypatch
         d.mkdir()
 
     def _pe(config, image_paths_list, mask_path, fg_bbox):
+        # A transposed mask is in Fortran order, as MIST's conversion makes it.
+        mask = np.zeros((2, 2, 3), dtype=np.uint8)
+        mask[1, 0, 2] = 1
         return {
             "image": np.ones((2, 2, 2, 1), dtype=np.float32),
-            "mask": np.zeros((2, 2, 2, 1), dtype=np.uint8),
+            "mask": np.expand_dims(mask.T, axis=-1),
             "dtm": np.full((2, 2, 2, 2), 3.0, dtype=np.float32),
             "fg_bbox": fg_bbox,
         }
@@ -835,6 +838,12 @@ def test_preprocess_single_patient_happy_path_saves_arrays(tmp_path, monkeypatch
         np.load(output_dirs["images"] / "pat_01.npy"),
         np.ones((2, 2, 2, 1), dtype=np.float32),
     )
+
+    # Labels are saved in C order with the same voxels.
+    label = np.load(output_dirs["labels"] / "pat_01.npy")
+    assert label.flags.c_contiguous
+    assert label.shape == (3, 2, 2, 1)
+    assert label[2, 0, 1, 0] == 1
 
 
 def test_preprocess_single_patient_returns_error_on_exception(tmp_path, monkeypatch):

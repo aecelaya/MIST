@@ -60,6 +60,7 @@ worker parallelism.
 
 import platform
 from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 import torch
@@ -68,6 +69,14 @@ from torch.utils.data import DataLoader, Dataset
 
 from mist.data_loading.data_loading_constants import DataLoadingConstants as constants
 from mist.utils import hardware
+
+# Validation and test loaders read whole volumes, which for LiTS-sized images
+# are about 600 MiB each, image and label. Every volume a worker reads ahead sits
+# in shared memory (/dev/shm), so these loaders use at most this many workers,
+# each reading one volume ahead. Predicting a volume takes seconds, so two
+# workers keep up.
+_FULL_VOLUME_MAX_WORKERS = 2
+_FULL_VOLUME_PREFETCH = 1
 
 # Deliberately not imported from data_loading_utils.py: that module imports
 # nvidia.dali at the top for its DALI-graph-building helpers, so importing it
@@ -148,6 +157,16 @@ def _prefetch_factor(num_workers: int) -> int | None:
     prefetch ahead of the main process in that case.
     """
     return 4 if num_workers > 0 else None
+
+
+def _full_volume_workers(num_workers: int) -> dict[str, Any]:
+    """DataLoader worker settings for whole volumes, limiting shared memory."""
+    workers = min(max(num_workers, 0), _FULL_VOLUME_MAX_WORKERS)
+    return {
+        "num_workers": workers,
+        "multiprocessing_context": _multiprocessing_context(workers),
+        "prefetch_factor": _FULL_VOLUME_PREFETCH if workers > 0 else None,
+    }
 
 
 def _target_device(rank: int) -> torch.device:
@@ -632,12 +651,17 @@ class GenericIterator:
     place a CPU-loaded batch is moved to the target accelerator -- which is
     what keeps `patch_3d_trainer.py` and `inference_runners.py` backend-
     agnostic.
+
+    With `lazy=True`, as for validation and test, workers start at the first
+    `.next()` and stop at `.reset()`, so nothing they read ahead sits in shared
+    memory between passes.
     """
 
-    def __init__(self, data_loader: DataLoader, device: torch.device):
+    def __init__(self, data_loader: DataLoader, device: torch.device, lazy: bool = False):
         self._data_loader = data_loader
         self._device = device
-        self._iterator = iter(self._data_loader)
+        self._lazy = lazy
+        self._iterator = None if lazy else iter(self._data_loader)
 
     def next(self) -> list[dict[str, torch.Tensor]]:
         """Return the next batch, auto-restarting when the pass is exhausted.
@@ -649,6 +673,8 @@ class GenericIterator:
         raise `StopIteration` on its own -- only an explicit `.reset()` call
         marks an epoch boundary.
         """
+        if self._iterator is None:
+            self._iterator = iter(self._data_loader)
         try:
             batch = next(self._iterator)
         except StopIteration:
@@ -657,8 +683,12 @@ class GenericIterator:
         return [{key: value.to(self._device, non_blocking=True) for key, value in batch.items()}]
 
     def reset(self) -> None:
-        """Start a fresh pass over the dataset (reshuffles a shuffling loader)."""
-        self._iterator = iter(self._data_loader)
+        """Start a fresh pass over the dataset (reshuffles a shuffling loader).
+
+        A lazy iterator stops its workers here instead; the next `.next()`
+        starts the fresh pass.
+        """
+        self._iterator = None if self._lazy else iter(self._data_loader)
 
 
 def get_training_dataset(
@@ -797,11 +827,10 @@ def get_validation_dataset(
         dataset,
         batch_size=1,
         shuffle=False,
-        num_workers=num_workers,
-        multiprocessing_context=_multiprocessing_context(num_workers),
+        **_full_volume_workers(num_workers),
         pin_memory=_pin_memory(),
     )
-    return GenericIterator(data_loader, device=_target_device(rank))
+    return GenericIterator(data_loader, device=_target_device(rank), lazy=True)
 
 
 def get_test_dataset(
@@ -841,8 +870,7 @@ def get_test_dataset(
         dataset,
         batch_size=1,
         shuffle=False,
-        num_workers=num_workers,
-        multiprocessing_context=_multiprocessing_context(num_workers),
+        **_full_volume_workers(num_workers),
         pin_memory=_pin_memory(),
     )
-    return GenericIterator(data_loader, device=_target_device(rank))
+    return GenericIterator(data_loader, device=_target_device(rank), lazy=True)

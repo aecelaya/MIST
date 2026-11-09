@@ -298,6 +298,21 @@ class UNetDecoder(nn.Module):
         self.transpconvs = nn.ModuleList(transpconvs)
         self.seg_layers = nn.ModuleList(seg_layers)
 
+    def freeze_unused_seg_layers(self, num_used: int) -> None:
+        """Freeze segmentation layers that training won't use.
+
+        Every stage has a segmentation layer so that weights load by key, but
+        only the highest-resolution ones produce outputs. DistributedDataParallel
+        raises an error on trainable parameters that get no gradient, so the rest
+        stop being trainable. They stay in the state dict.
+
+        Args:
+            num_used: How many layers training uses, counted from the
+                full-resolution one.
+        """
+        for seg_layer in self.seg_layers[:-num_used]:
+            seg_layer.requires_grad_(False)
+
     def forward(self, skips: list[torch.Tensor]) -> list[torch.Tensor]:
         """Decode the encoder skips.
 

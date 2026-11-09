@@ -68,6 +68,11 @@ class BaseTrainer(ABC):
         self.config_json = self.results_dir / "config.json"
         self.config = io.read_json_file(self.config_json)
 
+        # Point out data preprocessed in a slow layout. This runs once, since
+        # spawned training processes don't rerun __init__.
+        for problem in training_utils.preprocessed_data_problems(self.numpy_dir):
+            print_warning(problem)
+
         # Snapshot config before CLI overrides so resume checks can compare.
         _original_config = copy.deepcopy(self.config)
 
@@ -549,8 +554,17 @@ class BaseTrainer(ABC):
                 transferred_keys = set(
                     transfer_summary["loaded"] + transfer_summary["channel_strategy_applied"]
                 )
+                # Count each tensor once: some models register the same
+                # parameter under two names (e.g., ResEnc's ConvNormAct holds
+                # its convolution as both "conv" and "all_modules.0"), and
+                # those keys share storage.
                 model_sd = model.state_dict()
-                loaded_scalars = sum(model_sd[k].numel() for k in transferred_keys if k in model_sd)
+                unique_tensors = {
+                    model_sd[k].data_ptr(): model_sd[k].numel()
+                    for k in transferred_keys
+                    if k in model_sd
+                }
+                loaded_scalars = sum(unique_tensors.values())
                 print_info(
                     f"Pretrained encoder loaded from {pretrained_weights}\n"
                     f"  Loaded:                   {n_loaded} tensors "
@@ -995,6 +1009,10 @@ class BaseTrainer(ABC):
 
     def run_cross_validation(self, rank: int, world_size: int) -> None:
         """Run cross-validation for selected folds."""
+        # These settings belong to each process, and mp.spawn's processes don't
+        # inherit them, so every rank sets its own here.
+        hardware.tune_gpu_math()
+
         # Display the start of training message and a run summary.
         if rank == 0:
             print_section_header("Starting training")
@@ -1031,22 +1049,6 @@ class BaseTrainer(ABC):
         instances of the training function, each on a separate GPU.
         """
         accelerator = hardware.get_accelerator_type()
-
-        # Enable some performance optimizations. These tune cuDNN (CUDA) /
-        # its MIOpen equivalent (ROCm, via the same torch.backends.cudnn
-        # compatibility shim) and are meaningless on CPU-only hardware --
-        # empirically confirmed harmless no-ops there today, but skipped
-        # explicitly rather than relying on that continuing to hold.
-        if accelerator != "cpu":
-            torch.set_float32_matmul_precision("high")
-            # torch.backends.cudnn.conv.fp32_precision was added in PyTorch
-            # 2.5; fall back to allow_tf32 which achieves the same effect on
-            # older builds.
-            if hasattr(torch.backends.cudnn, "conv"):
-                torch.backends.cudnn.conv.fp32_precision = "tf32"
-            else:
-                torch.backends.cudnn.allow_tf32 = True
-            torch.backends.cudnn.benchmark = True
 
         # Train model. torch.cuda.device_count() is 0 on CPU-only hardware
         # (there are no CUDA/ROCm devices to count), so it can't be used

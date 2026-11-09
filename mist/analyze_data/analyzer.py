@@ -325,6 +325,12 @@ class Analyzer:
         `get_fg_mask_bbox`, which uses an Otsu threshold method to find the
         foreground mask and then computes the bounding box around the
         non-zero voxels of the foreground mask.
+
+        Returns:
+            Whether to crop, and each image's size after cropping in RAI axis
+            order, which is the order of the target spacing. The bounding boxes
+            in the CSV stay in the image's stored axis order, because
+            preprocessing crops before it reorients.
         """
 
         def _process(patient):
@@ -332,11 +338,8 @@ class Analyzer:
                 image_list = list(patient.values())[3:]
                 image = sitk_io.read_image(image_list[0])
                 fg_bbox = preprocessing_utils.get_fg_mask_bbox(image)
-                cropped_dims_i = [
-                    fg_bbox["x_end"] - fg_bbox["x_start"] + 1,
-                    fg_bbox["y_end"] - fg_bbox["y_start"] + 1,
-                    fg_bbox["z_end"] - fg_bbox["z_start"] + 1,
-                ]
+                cropped = preprocessing_utils.crop_to_fg(image, fg_bbox)
+                cropped_dims_i = sitk_io.reorient_image(cropped, "RAI").GetSize()
                 # GetSize() is (x, y, z), matching ants' .shape convention.
                 vol_reduction_i = 1.0 - (np.prod(cropped_dims_i) / np.prod(image.GetSize()))
                 fg_bbox["id"] = patient["id"]
@@ -496,10 +499,11 @@ class Analyzer:
 
         def _process(patient, cropped_dims_i):
             try:
-                mask_header = sitk_io.read_image_header(patient["mask"])
+                # Reorient so the size and spacing match the target spacing's axes.
+                mask = sitk_io.reorient_image(sitk_io.read_image(patient["mask"]), "RAI")
                 image_list = list(patient.values())[3:]
-                current_dims = cropped_dims_i if crop_to_fg else mask_header["dimensions"]
-                current_spacing = mask_header["spacing"]
+                current_dims = cropped_dims_i if crop_to_fg else mask.GetSize()
+                current_spacing = mask.GetSpacing()
                 new_dims = analyzer_utils.get_resampled_image_dimensions(
                     current_dims, current_spacing, tgt_spacing
                 )
