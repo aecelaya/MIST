@@ -78,6 +78,9 @@ class ResEncUNet(MISTModel):
         self.use_deep_supervision = use_deep_supervision
 
         self.apply(self.initialize_weights)
+        self.decoder.freeze_unused_seg_layers(
+            1 + constants.NUM_DEEP_SUPERVISION_HEADS if use_deep_supervision else 1
+        )
 
     @staticmethod
     def initialize_weights(module: nn.Module) -> None:
