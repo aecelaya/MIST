@@ -14,7 +14,6 @@ import pytest
 import SimpleITK as sitk
 
 # MIST imports.
-from mist.preprocessing import foreground_locations as fl
 from mist.preprocessing import preprocess as pp
 from mist.utils import console as console_mod
 from mist.utils import sitk_io
@@ -799,7 +798,6 @@ def test_preprocess_single_patient_happy_path_saves_arrays(tmp_path, monkeypatch
         "images": tmp_path / "images",
         "labels": tmp_path / "labels",
         "dtms": tmp_path / "dtms",
-        "foreground": tmp_path / "foreground",
     }
     for d in output_dirs.values():
         d.mkdir()
@@ -846,10 +844,6 @@ def test_preprocess_single_patient_happy_path_saves_arrays(tmp_path, monkeypatch
     assert label.flags.c_contiguous
     assert label.shape == (3, 2, 2, 1)
     assert label[2, 0, 1, 0] == 1
-
-    # Foreground locations are saved for the configured classes.
-    locations = fl.load(output_dirs["foreground"] / "pat_01.npz", [1])
-    assert locations[1].tolist() == [[2, 0, 1]]
 
 
 def test_preprocess_single_patient_returns_error_on_exception(tmp_path, monkeypatch):

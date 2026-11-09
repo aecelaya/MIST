@@ -151,11 +151,10 @@ To run the preprocessing portion of the MIST pipeline only, use the
     `--compute-dtms` is also passed.
 
 The output folder has `images`, `labels`, and, with `--compute-dtms`, `dtms`
-folders of NumPy arrays, one per case. It also has a `foreground` folder with the
-locations of each label class in each case, which training uses to center patches
-on foreground without scanning every label. Data preprocessed before MIST 2.5.0
-lacks this folder and stores labels in a slower layout; training still works, but
-warns, and runs faster after `mist_preprocess` is run again.
+folders of NumPy arrays, one per case. Data preprocessed before MIST 2.4.1 stores
+labels in a layout that makes the DALI loader much slower on large images;
+training still works, but warns, and runs faster after `mist_preprocess` is run
+again.
 
 ### Example
 

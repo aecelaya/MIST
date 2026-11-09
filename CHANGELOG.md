@@ -138,10 +138,6 @@ All notable changes to MIST are listed here, newest first. MIST follows
 ### Fixed
 
 - Includes every fix in 2.4.1.
-- **The generic loader no longer scans labels in every worker.** `mist_preprocess`
-  saves each case's foreground locations in a new `foreground` folder, and the
-  generic loader uses them. Training warns about data without them; run
-  `mist_preprocess` again to save them.
 
 ## 2.4.1 — 2026-11-09
 
