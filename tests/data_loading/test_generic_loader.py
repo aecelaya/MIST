@@ -813,6 +813,65 @@ def test_padding_on_the_device_matches_padding_in_the_workers():
         np.testing.assert_array_equal(padded.numpy(), gl._to_channels_first(expected).numpy())
 
 
+@pytest.mark.parametrize(
+    ("dtype", "channels"),
+    [(np.float32, 1), (np.float32, 4), (np.uint8, 1), (np.float16, 2)],
+)
+def test_reading_a_patch_from_the_file_matches_slicing_the_memory_map(tmp_path, dtype, channels):
+    """Positioned reads give the memory map's slice and padding, at any window."""
+    rng = np.random.default_rng(2)
+    path = tmp_path / "case.npy"
+    np.save(path, (rng.random((9, 7, 11, channels)) * 100).astype(dtype))
+    array = gl._load_case(str(path))
+    windows = [([0, 0, 0], [9, 7, 11]), ([2, 1, 3], [4, 4, 4]), ([-3, 5, 9], [6, 6, 6])]
+    windows += [([-20, 0, 0], [5, 5, 5]), ([0, 0, 0], [20, 20, 20])]
+    for _ in range(100):
+        windows.append(
+            (
+                [int(s) for s in rng.integers(-8, 12, size=3)],
+                [int(s) for s in rng.integers(1, 14, size=3)],
+            )
+        )
+    for starts, shape in windows:
+        expected, expected_pad = gl._slice_inside(array, starts, shape)
+        read, pad = gl._read_inside(array, starts, shape)
+        assert pad == expected_pad
+        assert read.dtype == array.dtype
+        assert not isinstance(read, np.memmap)
+        np.testing.assert_array_equal(read, expected)
+
+
+@pytest.mark.parametrize("source", ["fortran", "in_memory"])
+def test_reading_a_patch_falls_back_to_slicing(tmp_path, source):
+    """Fortran-order files and in-memory arrays are sliced, with the same result."""
+    rng = np.random.default_rng(3)
+    data = rng.integers(0, 3, (9, 7, 11, 1)).astype(np.uint8)
+    if source == "fortran":
+        path = tmp_path / "label.npy"
+        np.save(path, np.asfortranarray(data))
+        array = gl._load_case(str(path))
+        assert not array.flags["C_CONTIGUOUS"]
+    else:
+        array = data
+    read, pad = gl._read_inside(array, [-2, 3, 4], [6, 6, 6])
+    expected, expected_pad = gl._slice_inside(data, [-2, 3, 4], [6, 6, 6])
+    assert pad == expected_pad
+    np.testing.assert_array_equal(read, expected)
+    read[...] = 0  # A new, writable array, never a view of the caller's data.
+    assert data.any()
+
+
+def test_reading_a_patch_from_a_truncated_file_raises(tmp_path):
+    """A file shorter than its header says fails clearly instead of returning garbage."""
+    path = tmp_path / "case.npy"
+    np.save(path, np.ones((9, 7, 11, 1), np.float32))
+    array = gl._load_case(str(path))
+    with open(path, "r+b") as file:
+        file.truncate(array.offset + 100)
+    with pytest.raises(OSError, match="Unexpected end of file"):
+        gl._read_inside(array, [5, 0, 0], [3, 7, 11])
+
+
 def test_patches_past_the_edge_are_padded_after_batching(tmp_path, monkeypatch):
     """A batch of patches larger than their images matches the old worker padding."""
     rng = np.random.default_rng(1)

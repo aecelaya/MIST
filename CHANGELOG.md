@@ -42,6 +42,12 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ### Changed
 
+- The generic loader reads each training patch with one positioned read per
+  position along the first axis, instead of copying it through a memory map of
+  the file. On NFS, the memory map turned each LiTS-sized patch into tens of
+  thousands of page faults, and training on two Quadro RTX 6000s took over 5
+  seconds per step. On a local disk, reads take a few milliseconds longer per
+  patch. `benchmarks/check_patch_reads.py` times both on a machine's own data.
 - **MIST's generic data loader is now the default on every machine,** including
   NVIDIA GPUs with DALI installed. New configs set `training.hardware.data_loader`
   to `"generic"`, and older configs that say `"auto"` get it too. In benchmarks it

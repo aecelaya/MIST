@@ -303,6 +303,57 @@ def _slice_inside(
     return array[tuple(inside)], pad
 
 
+def _read_inside(
+    array: np.ndarray,
+    starts: Sequence[int],
+    shape: Sequence[int],
+) -> tuple[np.ndarray, list[tuple[int, int]]]:
+    """Read the part of a (D, H, W, C) patch inside a memory-mapped array.
+
+    Gives the same result as _slice_inside, but reads the file with one
+    positioned read per position along the first axis instead of copying
+    through the memory map. Each read covers the patch's rows of the second axis
+    in full, a contiguous block, and the third axis is cut afterward. Copying
+    through the memory map turns a patch into tens of thousands of page faults,
+    which on network filesystems such as NFS made LiTS-sized patches take
+    seconds; a few hundred large reads don't. Arrays that aren't a C-ordered
+    memory map (Fortran-order labels from before 2.5.0, or in-memory arrays)
+    are sliced as before.
+
+    Returns:
+        The slice inside the array, as a new in-memory array, and (before,
+        after) zero padding per axis.
+    """
+    view, pad = _slice_inside(array, starts, shape)
+    if not (
+        isinstance(array, np.memmap)
+        and array.filename
+        and array.ndim == 4
+        and array.flags["C_CONTIGUOUS"]
+        and view.size
+    ):
+        return np.array(view), pad
+
+    depth, rows, cols = view.shape[:3]
+    _, height, width, channels = array.shape
+    d0 = int(np.clip(starts[0], 0, array.shape[0]))
+    h0 = int(np.clip(starts[1], 0, height))
+    w0 = int(np.clip(starts[2], 0, width))
+    row_bytes = width * channels * array.itemsize
+    block = np.empty((depth, rows, width, channels), dtype=array.dtype)
+    with open(array.filename, "rb", buffering=0) as file:
+        for i in range(depth):
+            file.seek(array.offset + ((d0 + i) * height + h0) * row_bytes)
+            target = memoryview(block[i]).cast("B")
+            done = 0
+            while done < len(target):  # A read may return fewer bytes than asked.
+                count = file.readinto(target[done:])
+                if not count:
+                    raise OSError(f"Unexpected end of file reading {array.filename}.")
+                done += count
+    return block[:, :, w0 : w0 + cols], pad
+
+
 def _pad_on_device(array: torch.Tensor, pad: torch.Tensor) -> torch.Tensor:
     """Zero-pad a (C, D, H, W) tensor by (before, after) amounts per spatial axis."""
     widths = [int(amount) for axis in reversed(range(3)) for amount in pad[axis]]
@@ -460,15 +511,15 @@ class _PatchTrainingDataset(Dataset):
                 self._patch_margin,
                 lambda: self._cached_locations(index, label, rng),
             )
-            image, pad = _slice_inside(image, starts, shape)
-            label, _ = _slice_inside(label, starts, shape)
+            image, pad = _read_inside(image, starts, shape)
+            label, _ = _read_inside(label, starts, shape)
             batch = {
                 "image": _to_channels_first(image),
                 "label": _to_channels_first(label),
                 "pad": torch.tensor(pad, dtype=torch.int64),
             }
             if dtm is not None:
-                batch["dtm"] = _to_channels_first(_slice_inside(dtm, starts, shape)[0])
+                batch["dtm"] = _to_channels_first(_read_inside(dtm, starts, shape)[0])
             return batch
 
         if self._extract_patches:
