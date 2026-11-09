@@ -15,7 +15,7 @@ downloads it.
 | --- | --- | --- |
 | [`mist_compile_benchmark.ipynb`](mist_compile_benchmark.ipynb) | Speed, memory, and compile time of `torch.compile` for each network and precision, and the effect of cuDNN's algorithm search | After changing networks or upgrading PyTorch |
 | [`mist_planning_calibration.ipynb`](mist_planning_calibration.ipynb) | Real GPU memory against the patch planner's estimate, for each network and precision | After changing a network or the planner's constants, once per GPU |
-| [`mist_data_loading_benchmark.ipynb`](mist_data_loading_benchmark.ipynb) | Data loader speed (DALI, generic, and nnU-Net's) and training steps on synthetic LiTS- and BraTS-sized data | After changing data loading, preprocessing, or augmentation |
+| [`mist_data_loading_benchmark.ipynb`](mist_data_loading_benchmark.ipynb) | Data loader speed (DALI, generic, and nnU-Net's) and training steps on synthetic LiTS- and BraTS-sized data. Installs the `generic-loader` branch, whose loader changes it compares are planned for 2.6.0 | After changing data loading, preprocessing, or augmentation |
 | [`mist_precision_memory.ipynb`](mist_precision_memory.ipynb) | GPU memory and speed of FP32, BF16, and FP16 training, one setting changed at a time | After changing mixed precision or the loss path |
 
 ## Scripts
