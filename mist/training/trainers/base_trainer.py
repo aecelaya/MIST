@@ -68,6 +68,11 @@ class BaseTrainer(ABC):
         self.config_json = self.results_dir / "config.json"
         self.config = io.read_json_file(self.config_json)
 
+        # Point out data preprocessed in a slow layout. This runs once, since
+        # spawned training processes don't rerun __init__.
+        for problem in training_utils.preprocessed_data_problems(self.numpy_dir):
+            print_warning(problem)
+
         # Snapshot config before CLI overrides so resume checks can compare.
         _original_config = copy.deepcopy(self.config)
 

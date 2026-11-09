@@ -7,6 +7,7 @@ import pickle
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 import rich
@@ -763,6 +764,33 @@ def test_run_cross_validation_skips_cudnn_tuning_on_cpu(tmp_pipeline, mist_args,
     trainer.run_cross_validation(rank=0, world_size=1)
     assert fake_conv.fp32_precision is None
     assert torch.backends.cudnn.benchmark is False
+
+
+def test_init_warns_about_fortran_order_labels(tmp_pipeline, mist_args, monkeypatch):
+    """Labels saved in Fortran order by an older mist_preprocess get a warning."""
+    _, numpy_dir = tmp_pipeline
+    (numpy_dir / "labels").mkdir(exist_ok=True)
+    label = np.expand_dims(np.zeros((4, 5, 6), dtype=np.uint8).T, axis=-1)
+    np.save(numpy_dir / "labels" / "case.npy", label)
+    warnings = []
+    monkeypatch.setattr(bt, "print_warning", warnings.append)
+
+    DummyTrainer(mist_args)
+
+    assert any("Fortran order" in warning for warning in warnings)
+
+
+def test_init_is_quiet_about_c_order_labels(tmp_pipeline, mist_args, monkeypatch):
+    """C-order labels get no data warning."""
+    _, numpy_dir = tmp_pipeline
+    (numpy_dir / "labels").mkdir(exist_ok=True)
+    np.save(numpy_dir / "labels" / "case.npy", np.zeros((4, 5, 6, 1), dtype=np.uint8))
+    warnings = []
+    monkeypatch.setattr(bt, "print_warning", warnings.append)
+
+    DummyTrainer(mist_args)
+
+    assert not any("mist_preprocess again" in warning for warning in warnings)
 
 
 @pytest.mark.parametrize("rank", [0, 1])

@@ -4,6 +4,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 
 def _format_parameter_count(num_params: int) -> str:
     """Format a parameter count as e.g. '0.68M (683,412)'."""
@@ -213,3 +215,26 @@ def get_npy_paths(
                 f"Missing {len(missing)} expected files under {base}: {preview}{more}"
             )
     return paths
+
+
+def preprocessed_data_problems(numpy_dir: Path) -> list[str]:
+    """Find signs that the data was preprocessed by a MIST before 2.4.1.
+
+    Checks one label file, since mist_preprocess saves them all the same way.
+
+    Args:
+        numpy_dir: The folder mist_preprocess wrote to.
+
+    Returns:
+        Sentences describing each problem found, to print as warnings.
+    """
+    labels = sorted((numpy_dir / "labels").glob("*.npy"))
+    if not labels:
+        return []
+    label = np.load(labels[0], mmap_mode="r")
+    if label.flags.f_contiguous and not label.flags.c_contiguous:
+        return [
+            "Labels are saved in Fortran order, which makes the DALI loader much "
+            "slower on large images. Run mist_preprocess again to fix this."
+        ]
+    return []

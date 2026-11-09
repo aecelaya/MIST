@@ -486,11 +486,14 @@ def _preprocess_single_patient(
             fg_bbox=fg_bbox,
         )
 
+        # Save every array in C order. Converting labels to MIST's (x, y, z)
+        # order transposes them, and DALI reorders a Fortran-order file in full
+        # for every patch, which is slow for large images.
         patient_npy = f"{patient_id}.npy"
-        np.save(output_dirs["images"] / patient_npy, result["image"])
-        np.save(output_dirs["labels"] / patient_npy, result["mask"])
+        np.save(output_dirs["images"] / patient_npy, np.ascontiguousarray(result["image"]))
+        np.save(output_dirs["labels"] / patient_npy, np.ascontiguousarray(result["mask"]))
         if compute_dtms and result["dtm"] is not None:
-            np.save(output_dirs["dtms"] / patient_npy, result["dtm"])
+            np.save(output_dirs["dtms"] / patient_npy, np.ascontiguousarray(result["dtm"]))
 
         return None
     except Exception as exc:  # pylint: disable=broad-except
