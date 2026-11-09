@@ -25,7 +25,6 @@ Run these on a machine with a GPU and MIST installed.
 | Script | What it checks |
 | --- | --- |
 | [`calibrate_planning.py`](calibrate_planning.py) | The planner's memory estimate against peak memory, for every network |
-| [`check_patch_reads.py`](check_patch_reads.py) | How fast training patches read from preprocessed data on this machine's filesystem, through a memory map and with positioned reads |
 | [`check_augmentation.py`](check_augmentation.py) | Training augmentation with each data loader on real preprocessed data, with patches saved to inspect |
 | [`check_training.py`](check_training.py) | That the default pipeline analyzes, preprocesses, trains, and predicts on a real dataset |
 
