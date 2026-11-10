@@ -24,9 +24,9 @@ def predict_with_fallback(
 
     Memory depends on the image as well as the batch, so no plan can guarantee a
     fit. On running out of memory this halves the batch and tries again, which
-    doesn't change the predictions. At a batch of 1 it stitches the result on the
-    CPU, as nnU-Net does for large images, which is slower but takes far less GPU
-    memory.
+    changes the predictions only by floating-point rounding. At a batch of 1 it
+    stitches the result on the CPU, as nnU-Net does for large images, which is
+    slower but takes far less GPU memory.
 
     Args:
         inputs: Image tensor of shape (1, C, D, H, W).

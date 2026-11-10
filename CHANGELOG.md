@@ -85,8 +85,9 @@ All notable changes to MIST are listed here, newest first. MIST follows
 - Later `mist_train` runs warn if the saved plan doesn't suit their GPU, and plan
   again if `--model` changes the network, keeping values set by hand.
 - **Validation and inference predict up to 4 patches at once,** or fewer if the
-  network wouldn't fit, instead of `2 × batch_size_per_gpu`. This doesn't change
-  predictions. Validation now honors `inference.inferer.params.sw_batch_size`.
+  network wouldn't fit, instead of `2 × batch_size_per_gpu`. This changes
+  predictions only by floating-point rounding. Validation now honors
+  `inference.inferer.params.sw_batch_size`.
 - **Inference recovers from running out of GPU memory** by halving its batch, then
   stitching on the CPU, and holds results for each test-time flip on the CPU until
   they're averaged.

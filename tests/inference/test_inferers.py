@@ -207,7 +207,11 @@ def test_fallback_gives_up_when_nothing_is_left_to_try(mock_swi, fake_empty_cach
 
 
 def test_batch_size_does_not_change_predictions():
-    """Falling back to a smaller batch is safe because results stay identical."""
+    """Falling back to a smaller batch changes results only by float rounding.
+
+    They aren't bit-for-bit identical: on x86 CPUs PyTorch can pick a different
+    convolution algorithm for each batch size.
+    """
     model = torch.nn.Sequential(
         torch.nn.Conv3d(1, 2, 3, padding=1), torch.nn.InstanceNorm3d(2)
     ).eval()
@@ -225,4 +229,5 @@ def test_batch_size_does_not_change_predictions():
             )
             for batch in (1, 2, 4)
         ]
-    assert torch.equal(results[0], results[1]) and torch.equal(results[0], results[2])
+    for result in results[1:]:
+        torch.testing.assert_close(result, results[0], rtol=1e-5, atol=1e-5)
