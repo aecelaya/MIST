@@ -3,7 +3,7 @@
 All notable changes to MIST are listed here, newest first. MIST follows
 [semantic versioning](https://semver.org/) from 2.3.0 onward.
 
-## 2.5.0 — Unreleased
+## 2.5.0rc0 — Unreleased
 
 ### Added
 
