@@ -6,7 +6,7 @@ from collections import OrderedDict
 import torch
 
 # MIST imports.
-from mist.models.model_registry import get_model_from_registry
+from mist.models.model_registry import canonical_architecture, get_model_from_registry
 
 
 def average_fold_weights(
@@ -63,14 +63,21 @@ def average_fold_weights(
 
 # Architectures whose encoder structure is computed from patch_size and
 # target_spacing. Both must match for encoder weights to be compatible.
-_ADAPTIVE_ARCHITECTURES = {"nnunet", "nnunet-pocket", "resenc", "fmgnet", "wnet"}
+_ADAPTIVE_ARCHITECTURES = {
+    "nnunet-plain",
+    "nnunet-res",
+    "nnunet-pocket",
+    "resenc",
+    "fmgnet",
+    "wnet",
+}
 
 # Adaptive architectures whose parameter shapes depend only on the stage index
 # and kernel size. A patch_size or target_spacing mismatch only adds or removes
 # stages or changes some kernels, so the shared stages still transfer exactly
 # and the rest keep their random initialization. Mismatches warn instead of
 # raising for these.
-_STAGEWISE_ARCHITECTURES = {"resenc"}
+_STAGEWISE_ARCHITECTURES = {"resenc", "nnunet-plain"}
 
 
 def validate_encoder_compatibility(
@@ -81,8 +88,9 @@ def validate_encoder_compatibility(
     """Validate that source and target configs have compatible encoder structure.
 
     For adaptive architectures, patch_size and target_spacing must also match.
-    For stagewise architectures (resenc), a spatial mismatch only warns, since
-    the shared stages still transfer exactly.
+    For stagewise architectures (resenc, nnunet-plain), a spatial mismatch only
+    warns, since the shared stages still transfer exactly. An alias and the name
+    it stands for (nnunet and nnunet-res) count as the same architecture.
 
     Args:
         source_config: MIST config dict for the pretrained source model.
@@ -99,8 +107,8 @@ def validate_encoder_compatibility(
         else:
             raise ValueError(msg)
 
-    source_arch = source_config["model"]["architecture"]
-    target_arch = target_config["model"]["architecture"]
+    source_arch = canonical_architecture(source_config["model"]["architecture"])
+    target_arch = canonical_architecture(target_config["model"]["architecture"])
 
     if source_arch != target_arch:
         _fail(

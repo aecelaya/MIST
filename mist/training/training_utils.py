@@ -6,6 +6,8 @@ from typing import Any
 
 import numpy as np
 
+from mist.utils import hardware
+
 
 def _format_parameter_count(num_params: int) -> str:
     """Format a parameter count as e.g. '0.68M (683,412)'."""
@@ -32,15 +34,40 @@ def training_summary_rows(
     per_gpu = training["batch_size_per_gpu"]
     global_batch = per_gpu * num_gpus
     patch_size = " × ".join(str(dim) for dim in config["spatial_config"]["patch_size"])
+    compile_requested = training.get("compile", False)
     return [
         ("Model", str(config["model"]["architecture"])),
         ("Parameters", _format_parameter_count(num_params)),
-        ("AMP", "BF16" if training["amp"] else "off (FP32)"),
+        ("AMP", _precision_name(training["amp"])),
+        (
+            "torch.compile",
+            "on" if hardware.resolve_compile(compile_requested) else "off",
+        ),
         ("GPUs", str(num_gpus)),
         ("Global batch size", f"{global_batch} ({per_gpu}/GPU × {num_gpus})"),
         ("Patch size", patch_size),
         ("Epochs", str(training["epochs"])),
+        ("Saved model", _saved_model_description(training)),
     ]
+
+
+def _precision_name(amp: bool | str) -> str:
+    """Describe a resolved training.amp setting."""
+    if amp == hardware.FP16:
+        return "FP16"
+    return "BF16" if amp else "off (FP32)"
+
+
+def _saved_model_description(training: dict[str, Any]) -> str:
+    """Describe which model is saved for inference and how often validation runs."""
+    validate_every = training.get("validate_every", 1)
+    every = "every epoch" if validate_every == 1 else f"every {validate_every} epochs"
+    if training.get("val_percent", 0.0) > 0.0:
+        return (
+            f"best smoothed validation loss ({training['val_percent'] * 100:g}% "
+            f"of training cases, validated {every})"
+        )
+    return f"final epoch (held-out fold validated {every})"
 
 
 class RunningMean:

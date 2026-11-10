@@ -190,11 +190,49 @@ def test_bf16_supported_false_on_rdna2(monkeypatch) -> None:
     assert hardware.bf16_supported() is False
 
 
+@pytest.mark.parametrize("accelerator", ["cpu", "cuda", "rocm"])
+def test_resolve_compile_not_requested_returns_false(monkeypatch, accelerator) -> None:
+    """Without a request, compile stays off everywhere and nothing warns."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert hardware.resolve_compile(False) is False
+
+
+@pytest.mark.parametrize("accelerator", ["cuda", "rocm"])
+def test_resolve_compile_on_a_gpu(monkeypatch, accelerator) -> None:
+    """A request on a GPU is met."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    monkeypatch.setattr(hardware.os, "name", "posix")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert hardware.resolve_compile(True) is True
+
+
+@pytest.mark.parametrize("accelerator, os_name", [("cpu", "posix"), ("cuda", "nt")])
+def test_resolve_compile_unsupported_is_quiet(monkeypatch, accelerator, os_name) -> None:
+    """Where compile isn't supported, it stays off without a warning, since it's the default."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    monkeypatch.setattr(hardware.os, "name", os_name)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert hardware.resolve_compile(True) is False
+
+
 def test_resolve_amp_not_requested_returns_false() -> None:
     """A False request always resolves to False and never warns."""
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         assert hardware.resolve_amp(False) is False
+
+
+@pytest.mark.parametrize("supported", [True, False])
+def test_resolve_amp_auto_follows_the_hardware_without_warning(monkeypatch, supported) -> None:
+    """ "auto" didn't ask for BF16, so getting FP32 isn't worth a warning."""
+    monkeypatch.setattr(hardware, "bf16_supported", lambda: supported)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert hardware.resolve_amp("auto") is supported
 
 
 def test_resolve_amp_supported_returns_true(monkeypatch) -> None:
@@ -269,3 +307,29 @@ def test_autocast_context_enabled_uses_cpu_device_type_on_cpu(monkeypatch) -> No
     monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cpu")
     ctx = hardware.autocast_context(True)
     assert ctx.device == "cpu"
+
+
+def test_resolve_amp_keeps_fp16_on_a_gpu(monkeypatch) -> None:
+    """FP16 runs on any GPU, so it's kept quietly, even on a pre-Ampere card."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (7, 5))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert hardware.resolve_amp("fp16") == hardware.FP16
+
+
+def test_resolve_amp_fp16_falls_back_to_fp32_without_a_gpu(monkeypatch) -> None:
+    """FP16 on a CPU-only machine becomes FP32, with a warning."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cpu")
+    with pytest.warns(UserWarning, match="FP16"):
+        assert hardware.resolve_amp("fp16") is False
+
+
+def test_autocast_context_uses_fp16_or_bf16(monkeypatch) -> None:
+    """ "fp16" autocasts to FP16, and True to BF16."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
+    created = []
+    monkeypatch.setattr(torch, "autocast", lambda **kwargs: created.append(kwargs))
+    hardware.autocast_context("fp16")
+    hardware.autocast_context(True)
+    assert [kwargs["dtype"] for kwargs in created] == [torch.float16, torch.bfloat16]

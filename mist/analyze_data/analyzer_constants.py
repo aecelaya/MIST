@@ -19,14 +19,18 @@ class AnalyzeConstants:
     # Minimum sparsity expressed as a fraction.
     MIN_SPARSITY_FRACTION = 0.2
 
-    # Maximum ratio of the maximum and minimum components of the target spacing
-    # for an image to be considered anisotropic.
-    MAX_DIVIDED_BY_MIN_SPACING_THRESHOLD = 3.0
+    # A dataset is anisotropic if its coarsest axis has more than this many times
+    # the spacing of the next coarsest axis, and fewer than one over this many
+    # times the voxels of the smallest other axis.
+    ANISOTROPY_THRESHOLD = 3.0
 
-    # If the median target spacing of a dataset is anisotropic, then we
-    # take this percentile of the coarsest axis and replace that value with
-    # the resulting percentile value.
+    # If a dataset is anisotropic, the target spacing of its coarsest axis is this
+    # percentile of that axis's spacings across the dataset.
     ANISOTROPIC_LOW_RESOLUTION_AXIS_PERCENTILE = 10
+
+    # If that percentile is finer than the next coarsest axis, the coarsest axis
+    # is set to the next coarsest axis's spacing plus this, so it stays coarsest.
+    ANISOTROPIC_SPACING_MARGIN = 1e-5
 
     # For CT images only. We gather every i-th voxel in the image where the
     # ground truth mask is non-zero. We use the resulting list of values
@@ -48,34 +52,6 @@ class AnalyzeConstants:
 
     # How many digits are printed for floating point numbers.
     PRINT_FLOATING_POINT_PRECISION = 4
-
-    # Minimum patch size along the low-resolution (anisotropic) axis in the
-    # quasi-2D patch selection mode. With a 3×3×3 kernel, at least 5 voxels
-    # are needed in the low-res axis to ensure the kernel has genuine
-    # (non-padded) context from neighboring slices at every position.
-    MIN_LOW_RES_AXIS_PATCH_SIZE = 5
-
-    # Reference GPU memory (bytes) used to scale the patch voxel budget.
-    # At this memory level the reference voxel budget is used as-is; smaller
-    # GPUs get a proportionally smaller budget and larger GPUs a larger one.
-    PATCH_BUDGET_REFERENCE_GPU_MEMORY_BYTES = 16 * (1024**3)  # 16 GB
-
-    # Per-patch voxel budget at the reference GPU memory and reference batch
-    # size. This is a conservative heuristic chosen to leave headroom for
-    # network activations, gradients, and optimizer state. It is not tuned to
-    # a specific architecture — heavier models (e.g. MedNeXt-large, SwinUNETR)
-    # may require a smaller patch size, which can be set manually in config.json
-    # or via --patch-size.
-    PATCH_BUDGET_REFERENCE_VOXELS = 128**3
-
-    # The batch size per GPU assumed when the reference voxel budget was set.
-    # Matches the MIST default (training.batch_size_per_gpu = 2). The budget
-    # scales inversely with actual batch size so that total memory per step
-    # (batch_size × patch_voxels × overhead) stays constant.
-    PATCH_BUDGET_REFERENCE_BATCH_SIZE = 2
-
-    # Fallback voxel budget used when no CUDA device is available.
-    PATCH_BUDGET_DEFAULT_VOXELS = 128**3
 
     # Create the base_config.json path.
     BASE_CONFIG_JSON_PATH = Path(__file__).parent / "base_config.json"

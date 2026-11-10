@@ -17,6 +17,7 @@ data loader without the user having to know these details themselves — see
 """
 
 import contextlib
+import os
 import warnings
 from typing import Literal
 
@@ -189,22 +190,43 @@ def bf16_supported() -> bool:
     return major >= 8
 
 
-def resolve_amp(requested: bool, *, warn: bool = True) -> bool:
+# training.amp value for FP16 mixed precision, which is opt in. True means BF16.
+FP16 = "fp16"
+
+
+def resolve_amp(requested: bool | str, *, warn: bool = True) -> bool | str:
     """Resolve a requested AMP setting against the current hardware.
 
-    Returns ``True`` only when AMP was requested *and* BF16 is hardware
-    supported. When a request is downgraded — because there is no CUDA device
+    ``"fp16"`` is kept on any GPU, since FP16 runs on every CUDA and ROCm GPU,
+    and becomes ``False`` on CPU-only hardware, with a warning. Otherwise this
+    returns ``True`` only when AMP was requested *and* BF16 is hardware
+    supported. ``"auto"`` leaves the choice to MIST, so it never warns; training
+    goes on to time BF16 against FP32 (see ``mist.training.precision_test``).
+    When a request is downgraded — because there is no CUDA device
     or the GPU is pre-Ampere — a warning is emitted (per the ``warnings.warn``
     convention documented in ``mist.utils.console``) so callers know FP32 will
     be used instead.
 
     Args:
-        requested: The AMP setting requested via config (``training.amp``).
+        requested: The AMP setting from config (``training.amp``): a bool,
+            "auto", or "fp16".
         warn: Whether to warn when the request is downgraded to FP32.
 
     Returns:
-        The effective AMP setting for the current hardware.
+        The effective AMP setting for the current hardware: ``True`` for BF16,
+        ``"fp16"``, or ``False`` for FP32.
     """
+    if requested == "auto":
+        return bf16_supported()
+    if requested == FP16:
+        if get_accelerator_type() != "cpu":
+            return FP16
+        if warn:
+            warnings.warn(
+                "FP16 was requested, but there is no GPU, so training uses FP32.",
+                stacklevel=2,
+            )
+        return False
     if not requested:
         return False
     if bf16_supported():
@@ -219,6 +241,22 @@ def resolve_amp(requested: bool, *, warn: bool = True) -> bool:
             stacklevel=2,
         )
     return False
+
+
+def resolve_compile(requested: bool) -> bool:
+    """Resolve the torch.compile setting against the current hardware.
+
+    As in nnU-Net, compiling is left off on CPUs and on Windows, where its default
+    backend isn't supported. This is quiet because compiling is on by default; the
+    training summary shows whether it's on.
+
+    Args:
+        requested: The compile setting from config (``training.compile``).
+
+    Returns:
+        Whether to compile the model.
+    """
+    return bool(requested) and get_accelerator_type() != "cpu" and os.name != "nt"
 
 
 def tune_gpu_math() -> None:
@@ -240,8 +278,11 @@ def tune_gpu_math() -> None:
     torch.backends.cudnn.benchmark = True
 
 
-def autocast_context(enabled: bool):
-    """Return a BF16 autocast context for the current accelerator, or null.
+def autocast_context(enabled: bool | str):
+    """Return a BF16 or FP16 autocast context for the current accelerator, or null.
+
+    ``enabled`` is the resolved ``training.amp``: ``"fp16"`` autocasts to FP16,
+    any other true value to BF16.
 
     ``resolve_amp``/``bf16_supported`` already guarantee ``enabled`` is only
     ``True`` when the current accelerator has native BF16 support, so this
@@ -252,5 +293,6 @@ def autocast_context(enabled: bool):
     """
     if enabled:
         device_type = "cpu" if get_accelerator_type() == "cpu" else "cuda"
-        return torch.autocast(device_type=device_type, dtype=torch.bfloat16)
+        dtype = torch.float16 if enabled == FP16 else torch.bfloat16
+        return torch.autocast(device_type=device_type, dtype=dtype)
     return contextlib.nullcontext()

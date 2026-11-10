@@ -223,6 +223,109 @@ def test_probabilities_back_to_original_space_with_crop():
     assert np.allclose(restored[og_shape[0] - 1, og_shape[1] - 1, og_shape[2] - 1, :], 0.0)
 
 
+def test_labels_from_probabilities_matches_argmax_on_same_grid():
+    """With matching spacing and no crop, the result is a plain argmax."""
+    shape = (6, 5, 4)
+    original_image = _make_sitk_image(np.zeros(shape), origin=(1.0, 2.0, 3.0))
+
+    rng = np.random.default_rng(2)
+    raw_probabilities = rng.uniform(size=(4, *shape)).astype(np.float32)
+
+    result = iu.labels_from_probabilities_in_original_space(
+        raw_probabilities=raw_probabilities,
+        original_image=original_image,
+        target_spacing=(1.0, 1.0, 1.0),
+        foreground_bounding_box=None,
+    )
+
+    assert result.GetSize() == shape
+    assert result.GetOrigin() == pytest.approx(original_image.GetOrigin())
+    np.testing.assert_array_equal(
+        sitk_io.array_from_image(result), np.argmax(raw_probabilities, axis=0)
+    )
+
+
+def test_labels_from_probabilities_matches_full_stack_argmax_when_upsampling():
+    """The running argmax equals an argmax over all resampled channels."""
+    original_image = _make_sitk_image(np.zeros((8, 8, 12)))
+
+    # Coarser along z at the training spacing, as for anisotropic data.
+    target_spacing = (1.0, 1.0, 3.0)
+    rng = np.random.default_rng(3)
+    raw_probabilities = rng.uniform(size=(3, 8, 8, 4)).astype(np.float32)
+
+    result = iu.labels_from_probabilities_in_original_space(
+        raw_probabilities=raw_probabilities,
+        original_image=original_image,
+        target_spacing=target_spacing,
+        foreground_bounding_box=None,
+    )
+
+    resampled = np.stack(
+        [
+            sitk_io.array_from_image(
+                iu._channel_to_original_space(
+                    channel, original_image, target_spacing, None, sitk.sitkLinear
+                )
+            )
+            for channel in raw_probabilities
+        ]
+    )
+    assert result.GetSize() == (8, 8, 12)
+    np.testing.assert_array_equal(sitk_io.array_from_image(result), np.argmax(resampled, axis=0))
+
+
+def test_labels_from_probabilities_with_crop_pads_background():
+    """Outside the foreground bounding box, the label is background."""
+    og_shape = (10, 9, 8)
+    original_image = _make_sitk_image(np.zeros(og_shape))
+    bbox = {
+        "x_start": 2,
+        "x_end": 7,
+        "y_start": 1,
+        "y_end": 6,
+        "z_start": 0,
+        "z_end": 5,
+        "x_og_size": og_shape[0],
+        "y_og_size": og_shape[1],
+        "z_og_size": og_shape[2],
+    }
+    cropped_shape = (6, 6, 6)
+
+    # Foreground (class 1) wins everywhere inside the box.
+    raw_probabilities = np.stack([np.full(cropped_shape, 0.2), np.full(cropped_shape, 0.8)]).astype(
+        np.float32
+    )
+
+    result = iu.labels_from_probabilities_in_original_space(
+        raw_probabilities=raw_probabilities,
+        original_image=original_image,
+        target_spacing=(1.0, 1.0, 1.0),
+        foreground_bounding_box=bbox,
+    )
+
+    labels = sitk_io.array_from_image(result)
+    assert result.GetSize() == og_shape
+    assert np.all(labels[2:8, 1:7, 0:6] == 1)
+    assert labels.sum() == np.prod(cropped_shape)
+
+
+def test_labels_from_probabilities_ties_go_to_lower_class():
+    """Equal probabilities pick the lower class index, like numpy.argmax."""
+    shape = (3, 3, 3)
+    original_image = _make_sitk_image(np.zeros(shape))
+    raw_probabilities = np.full((3, *shape), 1.0 / 3.0, dtype=np.float32)
+
+    result = iu.labels_from_probabilities_in_original_space(
+        raw_probabilities=raw_probabilities,
+        original_image=original_image,
+        target_spacing=(1.0, 1.0, 1.0),
+        foreground_bounding_box=None,
+    )
+
+    assert np.all(sitk_io.array_from_image(result) == 0)
+
+
 @pytest.mark.parametrize(
     "is_avail, dev_in, expected_type",
     [

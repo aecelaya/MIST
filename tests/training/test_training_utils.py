@@ -30,6 +30,36 @@ def test_training_summary_rows_labels_and_values():
     assert values["Parameters"] == "0.68M (683,412)"
 
 
+@pytest.mark.parametrize(
+    "requested, supported, expected",
+    [(True, True, "on"), (True, False, "off"), (False, True, "off")],
+)
+def test_training_summary_rows_reports_compile(monkeypatch, requested, supported, expected):
+    """The table shows whether the model will really be compiled."""
+    monkeypatch.setattr(tu.hardware, "get_accelerator_type", lambda: "cuda" if supported else "cpu")
+    monkeypatch.setattr(tu.hardware.os, "name", "posix")
+    config = _summary_config()
+    config["training"]["compile"] = requested
+    assert dict(tu.training_summary_rows(config, 1000, world_size=1))["torch.compile"] == expected
+
+
+def test_training_summary_rows_saved_model_final():
+    """Without a validation split, the final-epoch model is reported."""
+    values = dict(tu.training_summary_rows(_summary_config(), 1000, world_size=1))
+    assert values["Saved model"] == "final epoch (held-out fold validated every epoch)"
+
+
+def test_training_summary_rows_saved_model_best():
+    """With a validation split, the best smoothed model is reported."""
+    config = _summary_config()
+    config["training"]["val_percent"] = 0.025
+    config["training"]["validate_every"] = 5
+    values = dict(tu.training_summary_rows(config, 1000, world_size=1))
+    assert values["Saved model"] == (
+        "best smoothed validation loss (2.5% of training cases, validated every 5 epochs)"
+    )
+
+
 def test_training_summary_rows_amp_off_label():
     """AMP disabled is reported as 'off (FP32)'."""
     config = _summary_config()
@@ -59,10 +89,12 @@ def test_training_summary_rows_order_is_stable():
         "Model",
         "Parameters",
         "AMP",
+        "torch.compile",
         "GPUs",
         "Global batch size",
         "Patch size",
         "Epochs",
+        "Saved model",
     ]
 
 
@@ -595,3 +627,10 @@ def test_get_npy_paths_raises_without_more_tail_when_leq_five_missing(tmp_path):
     assert re.search(r"\(\+\d+ more\)", msg) is None
     # Preview should list some of the missing filenames.
     assert "x1.npy" in msg
+
+
+def test_summary_names_fp16():
+    """The training summary says FP16 when training uses it."""
+    assert tu._precision_name("fp16") == "FP16"
+    assert tu._precision_name(True) == "BF16"
+    assert tu._precision_name(False) == "off (FP32)"

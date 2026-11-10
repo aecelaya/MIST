@@ -13,7 +13,8 @@ inference, and evaluation).
 
 If you want to **customize training or inference**, you can edit this file
 directly. For example, you can safely change the network architecture, loss
-function, or optimizer.
+function, or optimizer. `mist_train` warns about keys it doesn't use and values
+of the wrong type, so a misspelled setting doesn't go unnoticed.
 
 Editing preprocessing is possible but usually not recommended unless you know
 your dataset requires different resampling or normalization. If, for example,
@@ -27,7 +28,7 @@ Below is an example of a valid `config.json` file.
 
 ```json
 {
-  "mist_version": "2.4.1",
+  "mist_version": "2.5.0",
 
   "dataset_info": {
     "task": "ivygap",
@@ -57,7 +58,7 @@ Below is an example of a valid `config.json` file.
   },
 
   "model": {
-    "architecture": "nnunet",
+    "architecture": "nnunet-plain",
     "params": {
       "in_channels": 4,
       "out_channels": 4
@@ -69,9 +70,11 @@ Below is an example of a valid `config.json` file.
     "nfolds": 5,
     "folds": [0, 1, 2, 3, 4],
     "val_percent": 0.0,
+    "validate_every": 25,
     "epochs": 1000,
     "min_steps_per_epoch": 250,
-    "batch_size_per_gpu": 2,
+    "batch_size_per_gpu": "auto",
+    "gpu_memory_budget_gb": 8,
     "dali_foreground_prob": 0.6,
 
     "loss": {
@@ -85,17 +88,21 @@ Below is an example of a valid `config.json` file.
     "warmup_epochs": 20,
     "l2_penalty": 1e-4,
     "grad_clip_norm": 1.0,
-    "amp": true,
+    "amp": "auto",
+    "compile": true,
 
     "augmentation": {
       "enabled": true,
       "transforms": {
         "flips": true,
-        "zoom": true,
+        "rotation": true,
+        "scaling": true,
         "noise": true,
         "blur": true,
         "brightness": true,
-        "contrast": true
+        "contrast": true,
+        "low_resolution": true,
+        "gamma": true
       }
     },
 
@@ -164,94 +171,88 @@ controls a different part of the MIST pipeline:
 | `preprocessing`  | Defines how raw images are resampled, cropped, and normalized before training.                                                                                                                                                                                                                                                                        |
 | `model`          | Specifies the model architecture and its hyperparameters (`in_channels`, `out_channels`, and any architecture-specific params such as `kernel_size` for MedNeXt).                                                                                                                                                                                     |
 | `training`       | Controls training loop, cross-validation folds, loss function, optimizer, and augmentations.                                                                                                                                                                                                                                                          |
-| `inference`      | Settings for inference, including sliding-window parameters, ensembling, and test-time augmentation. `patch_overlap` must be in `[0, 1)` — a value of `1.0` is invalid. `sw_batch_size` controls how many patches are processed per forward pass during sliding-window inference; it defaults to `2 × batch_size_per_gpu` and can be overridden here. |
+| `inference`      | Settings for inference, including sliding-window parameters, ensembling, and test-time augmentation. `patch_overlap` must be in `[0, 1)` — a value of `1.0` is invalid. `sw_batch_size` controls how many patches are processed per forward pass during validation and inference; by default it's at most 4 and fits the GPU, and it can be set here. |
 | `evaluation`     | Metrics and class definitions for model evaluation.                                                                                                                                                                                                                                                                                                   |
 
-## Patch size selection
+## Patch and batch size selection
 
-The analysis step automatically selects a patch size and writes it to
-`spatial_config.patch_size` in `config.json`. The algorithm uses available GPU
-memory and the target spacing to choose the best patch for the data. The patch
-size can always be overridden by editing `config.json` or passing `--patch-size`
-to `mist_train`.
+`mist_analyze` leaves `spatial_config.patch_size` and `training.batch_size_per_gpu`
+as `"auto"`. The first `mist_train` run chooses them for the network it's about to
+train and a memory budget, prints the result, and saves it to `config.json`. Later runs, `--resume`, and inference reuse the saved values, so
+analysis and preprocessing can run on a different machine from training. MIST
+assumes all GPUs on the training machine are the same.
 
-### Voxel budget
+Either value can be set by hand in `config.json`, or with `--patch-size` and
+`--batch-size-per-gpu` in `mist_train`, and is then kept; the other is chosen
+around it.
 
-The per-patch voxel budget is derived from the minimum GPU memory across all
-available CUDA devices, scaled linearly from a 16 GB / batch-size-2 reference,
-and inversely proportional to the configured batch size per GPU:
+### How it's chosen
 
-```
-budget = (min_gpu_memory / 16 GB) × 128³ × (2 / batch_size_per_gpu)
-```
+1. **Start large.** The search starts from a large patch shaped by the target
+   spacing, clipped to the median resampled image size, and reduced to the nearest
+   size the network can use.
+2. **Shrink until it fits.** While the network doesn't fit the memory budget at a
+   batch size of 2, the search shrinks the axis taking up the largest share of the
+   image.
+3. **Spend what's left on the batch.** The batch size stays at 2 if the patch had
+   to shrink. If the patch reached the image size with memory to spare, the batch
+   size grows to use it, up to a limit: one global batch sees at most 5% of the
+   dataset's voxels.
 
-This means an 8 GB GPU at batch size 2 yields a budget of `128³ / 2 ≈ 1 M`
-voxels, a 40 GB A100 at batch size 2 yields roughly `128³ × 2.5 ≈ 160³` voxels,
-and doubling the batch size to 4 halves the per-patch budget to keep total
-memory per step constant. If no GPU is detected at analysis time, the fallback
-budget is `128³`.
+The memory estimate counts the activations of the actual network, so it works for
+every architecture. It also accounts for BF16 or FP32, since FP32 takes roughly
+twice the activation memory. It's still an estimate: if training runs out of
+memory, use a smaller `--patch-size`.
 
-The `128³` reference is a **conservative heuristic** chosen to leave headroom
-for network activations, gradients, and optimizer state — it is not tuned to a
-specific architecture. Heavier models (e.g. MedNeXt-large, SwinUNETR) may
-require a smaller patch size than the one selected automatically. If training
-runs out of memory, reduce `patch_size` in `config.json` or via `--patch-size`.
-If there is memory headroom to spare, increasing the patch size may improve
-segmentation accuracy.
+### Memory budget
 
-!!! note
+`training.gpu_memory_budget_gb` sets how much GPU memory the plan is for. It
+defaults to 8 GiB. A patch fits if one sample's activations number at most 560
+million per 8 GiB of budget at a batch size of 2, which gives a U-Net a
+128 × 128 × 128 patch for LiTS. The rule doesn't depend on BF16 or
+FP32, so both get the same patch; FP32 just uses more memory, about 11 GiB instead
+of 6.5 for LiTS. Networks whose activations take more memory than a U-Net's, such
+as SwinUNETR, get a proportionally lower limit. The plan must also fit in 90% of the
+GPU's memory by MIST's own estimate, so a small GPU still gets a smaller patch.
 
-    The budget is only used during analysis to choose the initial patch size.
-    It is not stored in `config.json` and does not affect reproducibility —
-    only the resulting `patch_size` values matter for training.
+Planning for a fixed budget means:
 
-### 3D isotropic mode
+- The same dataset gets the same plan on any GPU with at least that much memory,
+  so results are easier to reproduce and compare.
+- Patches stay at sizes the memory estimate was checked at. Very large patches can
+  need far more memory than estimated: a 256 × 224 × 224 patch planned for most of a
+  40 GB A100 ran out of memory in its first step.
+- Steps stay fast. A patch planned for a whole 40 GB GPU can hold several times the
+  voxels, and each step takes correspondingly longer.
 
-Used when `max(target_spacing) / min(target_spacing) ≤ 3`. A physically
-isotropic patch extent is computed from the budget:
+To use more of a large GPU, raise the budget, for example to 24 or 40. Very large patches haven't been checked: the
+256 × 224 × 224 patch above is what LiTS gets with a budget of 40. Set the budget to
+`null` to plan for 90% of the GPU's memory by MIST's estimate, as MIST did before.
+Configs without this setting plan for 8 GiB.
 
-```
-target_mm = (budget × prod(target_spacing))^(1/3)
-patch[i]  = target_mm / target_spacing[i]   for each axis i
-```
+### Training on a different GPU later
 
-Any axis whose raw patch would exceed the median resampled image size is clamped
-to that size; the freed voxels are redistributed to the remaining axes. Every
-axis is then snapped down to the **nearest multiple of 32 ≤ the clamped value**
-(minimum 32), so a clamped axis ends up at the largest multiple of 32 that fits
-within the median image size. This snapping is required because the nnUNet
-encoder applies up to 5 stride-2 downsampling steps (2⁵ = 32), and the decoder
-must reconstruct the output at the original resolution — any dimension not
-divisible by 32 would produce a size mismatch between encoder and decoder
-feature maps.
+What was planned for, including the memory budget, is recorded under `planning` in
+`config.json`. A later `mist_train` compares it with its own GPU and warns, without
+changing anything, if the network may not fit. If the plan used the whole GPU
+(`gpu_memory_budget_gb` set to `null`), it also warns when the GPU has at least 1.5
+times the memory it was planned for. To plan again, set both values back to
+`"auto"`.
 
-### Quasi-2D mode
+Training a different network with `--model` plans again automatically, since a
+patch that suits one network may not suit another. Values set by hand are kept.
 
-Used when `max(target_spacing) / min(target_spacing) > 3`. In highly anisotropic
-data (e.g., thick-slice CT where the z-spacing is 5–10× the in-plane spacing),
-allocating equal voxels to every axis would waste most of the budget on the
-low-resolution axis while under-sampling the high-resolution in-plane axes.
-Quasi-2D mode instead maximises in-plane resolution by keeping the
-low-resolution axis thin.
+### Inference batch size
 
-The **low-resolution axis** is whichever axis has the largest spacing (not
-assumed to be z). Its patch size is chosen as the largest value that still
-leaves the full budget available for the two in-plane axes:
+Validation and inference predict up to 4 patches at once, or fewer if the network
+wouldn't fit. This is worked out on whichever GPU is running and isn't saved,
+because it doesn't change the predictions. To choose your own, set
+`inference.inferer.params.sw_batch_size` in `config.json`.
 
-```
-lr_patch  = budget / max(in_plane_median)²
-            clamped to [MIN_LOW_RES_AXIS_PATCH_SIZE, median_lr]
-
-ip_patch  = sqrt(budget / lr_patch)
-            snapped to nearest multiple of 32, capped at median_ip
-```
-
-Both in-plane axes receive the same patch size (square patch). The
-low-resolution axis is not snapped to a multiple of 32 — the nnUNet uses
-stride-1 (no downsampling) in that direction, so feature map sizes are preserved
-and no divisibility constraint applies. Any size ≥ 1 is valid. The minimum
-low-resolution patch size is 5, ensuring a 3×3×3 convolution kernel has genuine
-(non-padded) context at every position along that axis.
+Memory also depends on the image, so MIST recovers if it runs out: it halves the
+batch and tries again, and at a batch of 1 it stitches that image's result on the
+CPU, which is slower but takes far less GPU memory. Results for each test-time flip
+are held on the CPU until they're averaged.
 
 ### Overriding the patch size
 
@@ -276,7 +277,7 @@ mist_train --numpy /path/to/numpy --results /path/to/results \
 Each architecture imposes its own patch size constraints when overriding
 manually. The key distinction is between _adaptive_ and _fixed_ topology:
 
-- **Adaptive** (nnUNet, ResEnc, FMG-Net, W-Net): the architecture inspects
+- **Adaptive** (`nnunet-*`, ResEnc, FMG-Net, W-Net): the architecture inspects
   `target_spacing` at construction time and skips downsampling on any axis that
   is already low-resolution (applying stride-1 there instead). Those axes accept
   any patch size ≥ 1.
@@ -286,9 +287,10 @@ manually. The key distinction is between _adaptive_ and _fixed_ topology:
 
 | Architecture              | Constraint                          | Notes                                                                                                      |
 | ------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `nnunet`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: the low-res axis uses stride-1, so any value is valid there                                      |
-| `resenc`                  | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet                                                                           |
-| `fmgnet`, `wnet`          | Multiples of 32 on downsampled axes | Same adaptive topology as nnUNet                                                                           |
+| `nnunet-plain`            | Depends on the planned depth        | No depth limit: an axis must be divisible by `2^(times it's downsampled)`; raises an error at model construction if violated. For example, 256 is downsampled six times and needs a multiple of 64 |
+| `nnunet-res`, `nnunet`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: the low-res axis uses stride-1, so any value is valid there                      |
+| `resenc`                  | Multiples of 32 on downsampled axes | Same adaptive topology as `nnunet-res`                                                                     |
+| `fmgnet`, `wnet`          | Multiples of 32 on downsampled axes | Same adaptive topology as `nnunet-res`                                                                     |
 | `mednext-*`               | All dimensions divisible by **16**  | Fixed 4-stage encoder (`2⁴ = 16`); no adaptation for anisotropic axes                                      |
 | `swinunetr-*`             | All dimensions divisible by **32**  | Fixed: `patch_size=2` tokenizer × 4 downsampling stages; raises an error at model construction if violated |
 | `primus-*`, `primusv2-*`  | All dimensions divisible by **8**   | Fixed: one token per `8 × 8 × 8` patch; raises an error at model construction if violated                  |
@@ -303,13 +305,14 @@ All MIST models are **3D-only**. For highly anisotropic data (e.g., thick-slice
 CT), use a thin patch along the anisotropic axis (e.g., `256 256 5`) rather than
 a 2D patch — the analysis step will choose this automatically.
 
-MIST's default network architecture is the 3D nnUNet with a residual encoder and
-two deep supervision heads. However the following architectures are also
+MIST's default network architecture is `nnunet-plain`, a plain convolutional
+U-Net with two deep supervision heads. However the following architectures are also
 available:
 
 | Architecture         | `model.architecture` |
 | -------------------- | -------------------- |
-| nnUNet (default)     | `nnunet`             |
+| nnUNet (default)     | `nnunet-plain`       |
+| nnUNet (residual)    | `nnunet-res`         |
 | nnUNet (pocket)      | `nnunet-pocket`      |
 | ResEnc UNet          | `resenc`             |
 | MedNeXt (small)      | `mednext-small`      |
@@ -331,6 +334,17 @@ available:
 
 The architecture can be specified with the `--model` flag in the `mist_run_all`
 or `mist_train` commands or directly edited in the `config.json` file.
+
+`nnunet-plain` has two plain convolutions per stage and no limit on depth: an
+axis is downsampled while its spacing is under twice the finest spacing among
+the axes that can still be downsampled. Its parameter names and shapes match
+nnU-Net's `PlainConvUNet`, so nnU-Net checkpoints load directly; their duplicate
+`decoder.encoder.` entries are skipped.
+
+`nnunet-res` is the network MIST used by default through version 2.4.0, with a
+residual block per stage and at most five downsamplings. The name `nnunet` still
+builds this same network, so existing configurations and checkpoints keep
+working, and either name can load weights saved under the other.
 
 A pocket version of nnUNet is available as a dedicated architecture. Rather than
 doubling the filter count at each depth level, `nnunet-pocket` uses a constant
@@ -354,9 +368,9 @@ mist_train --numpy /path/to/preprocessed/npy/files \
 `resenc` is the Residual Encoder UNet from _nnU-Net Revisited_ (Isensee et al.,
 MICCAI 2024). Its encoder stacks ResNet-D residual blocks, with more blocks in
 deeper stages (1, 3, 4, 6, 6, 6), and its decoder is a lightweight plain UNet
-decoder with one convolution per stage. MIST's default `nnunet`, by contrast,
-uses a single residual block per stage in both the encoder and the decoder.
-`resenc` uses the same adaptive topology as `nnunet`, so the number of stages,
+decoder with one convolution per stage. `nnunet-res`, by contrast, uses a single
+residual block per stage in both the encoder and the decoder. `resenc` uses the
+same adaptive topology as `nnunet-res`, so the number of stages,
 kernel sizes, and strides follow `patch_size` and `target_spacing`.
 
 nnU-Net's ResEnc M, L, and XL presets share this network and differ only in the
@@ -409,10 +423,9 @@ to the new token grid (for cubic pretraining patches).
 ### MedNeXt kernel size
 
 MedNeXt's depthwise convolutions support kernel sizes of `3`, `5`, and `7`.
-Larger kernels capture longer-range spatial context and are the primary
-differentiator of MedNeXt over nnUNet, at the cost of higher memory usage. The
-default is `3`, which matches nnUNet's receptive field and is the safest choice
-for memory-constrained hardware.
+Larger kernels capture longer-range spatial context at the cost of higher memory
+usage. The default is `3`, the receptive field of a standard 3 × 3 × 3
+convolution, and the safest choice for memory-constrained hardware.
 
 | `kernel_size` | Receptive field | Memory cost |
 | ------------- | --------------- | ----------- |
@@ -442,8 +455,8 @@ exposed as a CLI flag. For example, to use a kernel size of 5 with MedNeXt base:
 
 MedNeXt uses a **fixed 4-stage encoder** (`blocks_down` has length 4 for all
 variants). Each stage halves the spatial resolution by stride-2 convolution, so
-all patch dimensions must be divisible by `2⁴ = 16`. Unlike nnUNet, there is no
-adaptive topology — the same stride schedule is applied to every axis regardless
+all patch dimensions must be divisible by `2⁴ = 16`. There is no adaptive
+topology: the same stride schedule is applied to every axis regardless
 of spacing anisotropy.
 
 The automatic patch selection always produces multiples of 32 (which are also
@@ -456,7 +469,7 @@ with other architectures.
 
 SwinUNETR-V2 requires that all three spatial dimensions of the input patch are
 divisible by **32** (the `patch_size=2` tokenizer followed by four downsampling
-stages: `2 × 2⁴ = 32`). Unlike nnUNet and MedNeXt, SwinUNETR validates this
+stages: `2 × 2⁴ = 32`). Unlike MedNeXt, SwinUNETR validates this
 constraint at model construction time and raises a `ValueError` immediately if
 it is violated, rather than failing silently at the first forward pass.
 
@@ -482,7 +495,7 @@ The two variants differ in their traversal schedule:
   `[1, 2, 1, 3, 1, 2, 1]`.
 
 Both variants adapt their depth and stride schedule to the input `patch_size`
-and `target_spacing`, the same way nnUNet does.
+and `target_spacing`.
 
 ### Adding a custom model
 
@@ -1037,10 +1050,27 @@ AMP applies to the full training loop and is also propagated to inference:
   `Predictor` enters `torch.autocast` for all forward passes. AMP is silently
   skipped if no GPU is available (CPU-only inference always runs in float32).
 
-`training.amp` is set to `true` by default. If BF16 isn't supported on the
-detected hardware, MIST downgrades to float32 automatically and prints a warning
-explaining why, rather than requiring you to set this by hand. To disable AMP
-explicitly, set it to `false` in `config.json`:
+`training.amp` is set to `"auto"` by default. On a GPU, the first `mist_train`
+times a few training steps in each candidate precision and saves the choice to
+`config.json`, in tiers:
+
+- **With BF16 hardware**, BF16 is timed against float32, since float32 with TF32
+  convolutions can be faster on the same GPU, and some GPUs run BF16 slowly. If
+  BF16 is at least 10% faster, it's chosen and FP16 isn't timed. Otherwise FP16 is
+  timed too.
+- **Without BF16 hardware**, float32 is timed against FP16.
+
+The default (BF16 with hardware for it, else float32) is kept unless another
+precision is at least 10% faster in samples per second, needs no smaller a patch,
+and fits in memory; it may use a smaller batch. If a timing can't finish, the
+default is kept. The test compiles the model if training will, which can add
+several minutes per precision; otherwise it adds about a minute. Training a
+different network with `--model` tests again. On a machine without a GPU, MIST
+trains in float32 without a test.
+
+Setting `true` skips the test and uses BF16 where the hardware supports it, or
+float32 with a warning where it doesn't. To disable AMP explicitly, set it to
+`false` in `config.json`:
 
 ```json
 "training": {
@@ -1056,6 +1086,40 @@ explicitly, set it to `false` in `config.json`:
     have BF16 matrix hardware either; on those devices, MIST downgrades to
     float32 automatically (see the warning above) rather than require you to
     disable AMP by hand.
+
+### FP16
+
+FP16 is float16 mixed precision, chosen by the automatic test or set with
+`training.amp: "fp16"`. It runs on any NVIDIA or AMD GPU, including those without
+BF16 hardware, where FP16 tensor cores (NVIDIA Volta and Turing, such as the V100,
+T4, and Quadro RTX 6000) can make it much faster than float32: on a T4,
+`nnunet-plain` trained 3.5 to 4 times faster. Most consumer Pascal GPUs (GTX 10
+series) run FP16 slowly, so the test keeps float32 there. Set on a machine without
+a GPU, it falls back to float32 with a warning.
+
+FP16 takes more GPU memory than BF16: its activations took 0.62 to 0.64 of
+float32's memory on a T4 and 0.80 on an A100, against about 0.55 for BF16. Plans
+and inference batch sizes for FP16 use 0.80.
+
+```json
+"training": {
+  "amp": "fp16"
+}
+```
+
+FP16 has a much smaller range than BF16, so MIST:
+
+- Scales the loss before computing gradients, so small gradients don't become
+  zero, and skips any step whose gradients overflow. The scale is saved in
+  checkpoints, so `--resume` carries on with it.
+- Computes the loss in float32 from the network's FP16 outputs, since a loss's
+  softmax, logarithms, and sums over many voxels can overflow FP16.
+- Watches for training that keeps failing. If 20 steps in a row have a NaN or inf
+  loss, or the gradient scale falls below 1, the rest of that fold trains in BF16 if
+  the GPU has it, or float32 otherwise, with a warning. Other folds start in FP16
+  again.
+
+Validation and inference also run in FP16.
 
 ## Transfer learning
 
@@ -1228,9 +1292,26 @@ This flexibility allows you to:
 
 Another feature is the ability to adjust the train/validation/test split via the
 `val_percent` entry in the configuration file, which takes values from `0.0` to
-`1.0`. By default it is `0.0`, meaning the entire held-out fold is used for both
-validation and test. For example, setting `0.025` holds out 2.5% of the training
-set for validation while the held-out fold remains the independent test set.
+`1.0`. It also decides which model is saved to `models/fold_{fold}.pt`:
+
+- **`0.0` (default)** — the held-out fold is the validation set, used only to
+  track the validation loss. The saved model is the one from the final epoch, so
+  the held-out fold never chooses its own model and the cross-validation results
+  are unbiased.
+- **Above `0.0`** — that share of each fold's training cases is held out for
+  validation, and the held-out fold remains an independent test set. The saved
+  model is the one with the lowest validation loss after exponential smoothing
+  (decay 0.9), which keeps a single lucky epoch from choosing the model. For
+  example, `0.05` holds out 5% of the training set. MIST warns if this leaves
+  fewer than 5 validation cases, since selecting on so few is noisy.
+
+The validation loss is the soft Dice loss over the foreground classes, computed
+for each validation case with sliding-window inference. Validation runs every
+25 epochs by default and always on the last epoch; set `validate_every` (or
+`--validate-every`) to change this. Without a validation split, it only adds
+points to the validation curve, so it doesn't affect the saved model. With
+`val_percent` above 0, only epochs that run validation can be chosen as the best
+model, so use a lower value if you want to choose among more epochs.
 
 The `--val-percent` flag can also be used to override this setting at the
 command line when running `mist_run_all` or `mist_train`. This makes it easy to
@@ -1251,24 +1332,53 @@ mist_train --numpy /path/to/preprocessed/npy/files \
 ## Data Augmentation
 
 Data augmentation is controlled through the `training.augmentation` section of
-the `config.json` file. By default, augmentation is enabled with a standard set
-of spatial and intensity transforms designed for medical imaging. The available
-augmentation transforms are:
+the `config.json` file. By default, augmentation is enabled with the transforms,
+probabilities, and ranges below, applied in this order. Probabilities are per
+training patch.
 
-| Transform  | Description                                | Config key   |
-| ---------- | ------------------------------------------ | ------------ |
-| Flips      | Random spatial flips along x, y, or z axes | `flips`      |
-| Zoom       | Random zoom in/out with interpolation      | `zoom`       |
-| Noise      | Additive Gaussian noise to the image       | `noise`      |
-| Blurring   | Random Gaussian blurring                   | `blur`       |
-| Brightness | Random brightness scaling                  | `brightness` |
-| Contrast   | Random contrast adjustment                 | `contrast`   |
+| Transform               | What it does                                                                                     | Probability                       | Config key       |
+| ----------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------- | ---------------- |
+| Rotation                | Rotates up to ±30° about each axis (±180° in-plane only for quasi-2D patches)                    | 0.2                               | `rotation`       |
+| Scaling                 | Zooms in or out by a factor from 0.7 to 1.4                                                      | 0.2                               | `scaling`        |
+| Noise                   | Adds Gaussian noise with a standard deviation from 0 to 0.1                                      | 0.1                               | `noise`          |
+| Blurring                | Gaussian blur, sigma from 0.5 to 1.0 per axis                                                    | 0.2 (each channel 0.5)            | `blur`           |
+| Brightness              | Multiplies each channel by 0.75 to 1.25                                                          | 0.15                              | `brightness`     |
+| Contrast                | Scales each channel about its mean by 0.75 to 1.25, keeping its range                            | 0.15                              | `contrast`       |
+| Simulated low resolution | Downsamples by 0.5 to 1× and upsamples back                                                     | 0.25 (each channel 0.5)           | `low_resolution` |
+| Gamma                   | Gamma from 0.7 to 1.5 with mean and std restored; also applied to the inverted image             | 0.3 (inverted 0.1)                | `gamma`          |
+| Flips                   | Flips along each axis                                                                            | 0.5 per axis                      | `flips`          |
+
+Rotation and scaling apply to the image, label, and distance transform maps
+(DTMs) together; the other transforms change only the image. To keep real image
+content at the borders of a rotated or zoomed-out patch, the data loader crops a
+larger patch around the same center, and the transform resamples it to the
+patch size. Images and DTMs use linear interpolation. Labels are interpolated
+linearly one class at a time, and each voxel takes the class with the highest
+score.
+
+A patch whose largest dimension is more than three times its smallest (e.g.,
+`256 × 256 × 5`) is treated as quasi-2D: rotation and scaling happen only in
+the plane of its two larger dimensions, and simulated low resolution leaves its
+smallest dimension alone.
+
+DTMs hold distances to each label's boundary, so MIST keeps them valid under
+these transforms. Flips and rotations don't change distances. Scaling changes
+them by the scale factor: normalized DTMs (`preprocessing.normalize_dtms`, the
+default) need no correction, since their normalizing maximum distance changes
+by the same factor, and unnormalized DTMs are divided by the factor. Scaling
+only in-plane would not leave a valid distance map, so quasi-2D patches are not
+scaled when DTMs are used; they are still rotated.
+
+Augmentation runs in PyTorch on each training batch once it is on the training
+device, so the DALI and generic (CPU and ROCm) data loaders apply the same
+transforms.
 
 ### How to customize
 
 - To **disable all augmentation**, set `"enabled": false`.
 - To **toggle individual transforms**, set the corresponding key to `true` or
-  `false`.
+  `false`. Transforms missing from the configuration are enabled, and the
+  `zoom` key from MIST 2.4.0 and earlier is read as `scaling`.
 - Augmentation is applied only during training. Test-time augmentation is
   controlled in the `inference` section of the configuration file.
 
@@ -1281,11 +1391,14 @@ Disable noise and blur while keeping other augmentations active:
   "enabled": true,
   "transforms": {
     "flips": true,
-    "zoom": true,
+    "rotation": true,
+    "scaling": true,
     "noise": false,
     "blur": false,
     "brightness": true,
-    "contrast": true
+    "contrast": true,
+    "low_resolution": true,
+    "gamma": true
   }
 }
 ```
@@ -1315,6 +1428,22 @@ Adjusting this value can improve convergence on highly imbalanced datasets, but
 setting it too high may reduce the model’s ability to distinguish foreground
 from background.
 
+## Restoring predictions to the original image space
+
+The network predicts at the training spacing (`spatial_config.target_spacing`),
+so each prediction is resampled back to the original image's spacing and size.
+MIST resamples each class's probabilities with linear interpolation, then takes
+the argmax at the original resolution. Boundaries therefore
+follow the network's confidence rather than an upsampled label map, which helps
+most for small or thin structures when the original images are finer than the
+training spacing. Along the low-resolution axis of anisotropic images, MIST
+uses nearest-neighbor interpolation instead, as it does when preprocessing.
+
+The classes are resampled one at a time, so memory use at the original
+resolution does not grow with the number of classes. When preprocessing is
+skipped, predictions are already in the original image space and nothing is
+resampled.
+
 ## Accelerator support (NVIDIA, AMD ROCm, CPU)
 
 MIST auto-detects the accelerator it's running on — NVIDIA CUDA, AMD ROCm, or
@@ -1329,10 +1458,10 @@ Two things get resolved this way:
   `"dali"` (NVIDIA's GPU-accelerated data loading library) is used automatically
   on CUDA hardware where it's installed; everywhere else — AMD ROCm, CPU-only
   machines, or a CUDA machine that skipped installing DALI — MIST falls back to
-  its own generic, pure-PyTorch data loader automatically. The generic loader
-  implements the same augmentations (flips, zoom, noise, blur, brightness,
-  contrast) but runs them on CPU instead of as part of a GPU pipeline, so it's
-  slower per batch than DALI but requires no NVIDIA-specific dependencies. If
+  its own generic, pure-PyTorch data loader automatically. Both loaders feed the
+  same augmentation, which runs on the training device; the generic loader
+  reads and crops patches on the CPU, so it's slower per batch than DALI but
+  requires no NVIDIA-specific dependencies. If
   your hardware is CUDA but DALI isn't installed, MIST warns and falls back to
   the generic loader rather than failing outright — install
   `pip install "mist-medical[dali]"` to get DALI's acceleration back
@@ -1356,6 +1485,16 @@ CPU-only training is single-process — MIST does not (yet) support distributed
 training across multiple CPU processes, only across multiple GPUs (see
 [Multi-GPU training](#multi-gpu-training) below, which applies identically to
 AMD ROCm GPUs as it does to NVIDIA ones).
+
+## Compiling the model
+
+New configs set `training.compile` to `true`, which compiles the model with
+`torch.compile` during training on GPUs. It has no effect on CPUs or Windows, and
+configs from before this setting train without it. Compiling takes extra time at
+the start of each fold, usually a few minutes at most, and steps then run faster.
+Checkpoints don't change, so models train, resume, and predict the same way either
+way. To turn it off, for example after a compiler error, set `training.compile` to
+`false` in `config.json`.
 
 ## Multi-GPU training
 
@@ -1381,6 +1520,21 @@ startup. It defaults to `12345`. If you run multiple concurrent MIST jobs on the
 same machine, each job must use a different `master_port` value — port conflicts
 will cause a job to fail with an "address already in use" error. Change this
 value by editing `config.json` directly.
+
+### What extra GPUs change
+
+More GPUs let MIST train on more data in the same or a similar amount of time;
+they don't shorten the run by default. `batch_size_per_gpu` applies to each GPU,
+so the global batch grows with the number of GPUs, while the number of steps per
+epoch usually stays at `min_steps_per_epoch`. For example, two GPUs with a batch
+size of 2 use a global batch of 4 and train on twice as many patches per epoch.
+The extra data isn't guaranteed to improve accuracy.
+
+To finish sooner instead, lower `training.min_steps_per_epoch` in proportion, such
+as from `250` to `125` on two GPUs. This keeps the number of patches about the
+same. An epoch always has enough steps to cover the training set once, so the
+step count won't go below the number of training cases divided by the global
+batch. Validation splits its cases across GPUs, so it gets faster either way.
 
 ### Distributed training across nodes (one fold per node)
 
@@ -1478,8 +1632,8 @@ pipeline, not by Python worker processes.
 
 On AMD ROCm, CPU-only hardware, or a CUDA machine without DALI installed, MIST
 uses its generic data loader instead — a plain `torch.utils.data.DataLoader`
-running the same augmentations on CPU, in separate worker processes rather than
-pipeline threads.
+that reads patches in separate worker processes rather than pipeline threads.
+Augmentation runs on the training device with either loader.
 
 Either way, the number of workers/threads is set via
 `training.hardware.num_cpu_workers` in `config.json` (default: `8`). With the

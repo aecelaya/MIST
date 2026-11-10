@@ -28,3 +28,10 @@ class NNUnetConstants:
 
     # Initial value for bias in convolutional layers.
     INITIAL_BIAS_VALUE = 0
+
+    # nnunet-plain: nnU-Net's planner stops downsampling an axis once halving it
+    # would leave fewer than this many voxels in the bottleneck, and has no
+    # depth limit.
+    PLAIN_MIN_FEATURE_MAP_SIZE = 4
+    PLAIN_CONVS_PER_STAGE = 2  # Convolutions per encoder and decoder stage.
+    PLAIN_DEEP_SUPERVISION_HEADS = 2  # Heads below the full-resolution output.

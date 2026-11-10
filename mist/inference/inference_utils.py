@@ -149,24 +149,12 @@ def back_to_original_space(
     prediction = sitk_io.reorient_image(prediction, sitk_io.get_orientation(original_image))
     prediction.SetDirection(original_image.GetDirection())
 
-    # Enforce size for cropped images.
-    if foreground_bounding_box is not None:
-        # If we have a foreground bounding box, use that to determine the size.
-        new_size = [
-            foreground_bounding_box["x_end"] - foreground_bounding_box["x_start"] + 1,
-            foreground_bounding_box["y_end"] - foreground_bounding_box["y_start"] + 1,
-            foreground_bounding_box["z_end"] - foreground_bounding_box["z_start"] + 1,
-        ]
-    else:
-        # Otherwise, use the original image size.
-        new_size = original_image.GetSize()
-
     # Resample prediction to original image space.
     prediction = preprocess.resample_mask(
         prediction,
         labels=training_labels,
         target_spacing=original_image.GetSpacing(),
-        new_size=np.array(new_size, dtype="int").tolist(),
+        new_size=_original_space_size(original_image, foreground_bounding_box),
     )
 
     # Appropriately pad back to original size if necessary.
@@ -178,6 +166,66 @@ def back_to_original_space(
     # image bounding box.
     prediction = sitk_io.new_image_like(original_image, sitk_io.array_from_image(prediction))
     return prediction
+
+
+def _original_space_size(
+    original_image: sitk.Image,
+    foreground_bounding_box: dict[str, Any] | None,
+) -> list[int]:
+    """Return the size to resample a prediction to before decropping.
+
+    This is the foreground bounding box's size if images were cropped to the
+    foreground, and the original image's size otherwise.
+    """
+    if foreground_bounding_box is not None:
+        new_size = [
+            foreground_bounding_box["x_end"] - foreground_bounding_box["x_start"] + 1,
+            foreground_bounding_box["y_end"] - foreground_bounding_box["y_start"] + 1,
+            foreground_bounding_box["z_end"] - foreground_bounding_box["z_start"] + 1,
+        ]
+    else:
+        new_size = original_image.GetSize()
+    return np.array(new_size, dtype="int").tolist()
+
+
+def _channel_to_original_space(
+    channel: npt.NDArray[Any],
+    original_image: sitk.Image,
+    target_spacing: tuple[float, float, float],
+    foreground_bounding_box: dict[str, Any] | None,
+    interpolator: int,
+) -> sitk.Image:
+    """Reorient, resample, and decrop one continuous channel.
+
+    Args:
+        channel: One channel of a probability volume, of shape (D, H, W).
+        original_image: The original SimpleITK image.
+        target_spacing: The spacing used for training.
+        foreground_bounding_box: The foreground bounding box, or None. See
+            back_to_original_space for the expected keys.
+        interpolator: SimpleITK interpolator for the resampling step.
+
+    Returns:
+        The channel in the original image's size, as a SimpleITK image.
+    """
+    channel_image = sitk_io.image_from_array(channel, spacing=target_spacing)
+
+    # Reorient the channel to match the original image's orientation.
+    channel_image = sitk_io.reorient_image(channel_image, sitk_io.get_orientation(original_image))
+    channel_image.SetDirection(original_image.GetDirection())
+
+    # Resample to the original image's spacing using continuous interpolation.
+    channel_image = preprocess.resample_image(
+        channel_image,
+        target_spacing=original_image.GetSpacing(),
+        new_size=_original_space_size(original_image, foreground_bounding_box),
+        interpolator=interpolator,
+    )
+
+    # Appropriately pad back to original size if necessary.
+    if foreground_bounding_box is not None:
+        channel_image = decrop_from_fg(channel_image, foreground_bounding_box)
+    return channel_image
 
 
 def probabilities_back_to_original_space(
@@ -211,39 +259,16 @@ def probabilities_back_to_original_space(
         original image's space, spacing, orientation, and header, with
         channels in the same order as raw_probabilities.
     """
-    # Enforce size for cropped images, mirroring back_to_original_space.
-    if foreground_bounding_box is not None:
-        new_size = [
-            foreground_bounding_box["x_end"] - foreground_bounding_box["x_start"] + 1,
-            foreground_bounding_box["y_end"] - foreground_bounding_box["y_start"] + 1,
-            foreground_bounding_box["z_end"] - foreground_bounding_box["z_start"] + 1,
-        ]
-    else:
-        new_size = original_image.GetSize()
-
-    restored_channels = []
-    for channel in raw_probabilities:
-        channel_image = sitk_io.image_from_array(channel, spacing=target_spacing)
-
-        # Reorient the channel to match the original image's orientation.
-        channel_image = sitk_io.reorient_image(
-            channel_image, sitk_io.get_orientation(original_image)
+    restored_channels = [
+        _channel_to_original_space(
+            channel,
+            original_image,
+            target_spacing,
+            foreground_bounding_box,
+            interpolator=sitk.sitkBSpline,
         )
-        channel_image.SetDirection(original_image.GetDirection())
-
-        # Resample to the original image's spacing using continuous
-        # interpolation.
-        channel_image = preprocess.resample_image(
-            channel_image,
-            target_spacing=original_image.GetSpacing(),
-            new_size=np.array(new_size, dtype="int").tolist(),
-        )
-
-        # Appropriately pad back to original size if necessary.
-        if foreground_bounding_box is not None:
-            channel_image = decrop_from_fg(channel_image, foreground_bounding_box)
-
-        restored_channels.append(channel_image)
+        for channel in raw_probabilities
+    ]
 
     # Merge the restored channels into one multi-component image and copy
     # the original image's header (spacing, origin, direction) onto it.
@@ -252,6 +277,58 @@ def probabilities_back_to_original_space(
     probabilities.SetOrigin(original_image.GetOrigin())
     probabilities.SetDirection(original_image.GetDirection())
     return probabilities
+
+
+def labels_from_probabilities_in_original_space(
+    raw_probabilities: npt.NDArray[Any],
+    original_image: sitk.Image,
+    target_spacing: tuple[float, float, float],
+    foreground_bounding_box: dict[str, Any] | None,
+) -> sitk.Image:
+    """Resample probabilities to original space, then take the argmax.
+
+    The alternative to back_to_original_space, which takes the argmax at the
+    training spacing and resamples the resulting labels. Here each class's
+    probabilities are resampled with linear interpolation (as nnU-Net does)
+    and the label is chosen at the original resolution, so boundaries use
+    the network's confidence rather than an upsampled label map.
+
+    The argmax is computed one channel at a time, so only two volumes at the
+    original resolution are held in memory regardless of the number of
+    classes. Ties go to the lower class index, as with numpy.argmax.
+
+    Args:
+        raw_probabilities: The per-class probability volume, of shape
+            (C, D, H, W), at the training spacing.
+        original_image: The original SimpleITK image.
+        target_spacing: The spacing used for training.
+        foreground_bounding_box: The foreground bounding box, or None. See
+            back_to_original_space for the expected keys.
+
+    Returns:
+        The discrete prediction (training labels 0..C-1) in the original
+        image space, as a SimpleITK image.
+    """
+    best_probability = None
+    labels = None
+    for class_index, channel in enumerate(raw_probabilities):
+        channel_image = _channel_to_original_space(
+            channel,
+            original_image,
+            target_spacing,
+            foreground_bounding_box,
+            interpolator=sitk.sitkLinear,
+        )
+        probability = sitk_io.array_from_image(channel_image)
+        if best_probability is None:
+            best_probability = probability
+            labels = np.zeros(probability.shape, dtype=np.float32)
+        else:
+            better = probability > best_probability
+            best_probability[better] = probability[better]
+            labels[better] = class_index
+
+    return sitk_io.new_image_like(original_image, labels)
 
 
 def load_test_time_models(

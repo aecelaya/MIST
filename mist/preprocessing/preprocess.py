@@ -23,6 +23,7 @@ def resample_image(
     img_sitk: sitk.Image,
     target_spacing: tuple[float, float, float],
     new_size: tuple[int, int, int] | None = None,
+    interpolator: int = sitk.sitkBSpline,
 ) -> sitk.Image:
     """Resample an image to a target spacing.
 
@@ -30,6 +31,8 @@ def resample_image(
         img_sitk: Image as a SimpleITK image.
         target_spacing: Target spacing as a tuple.
         new_size: New size of the image as a tuple or None.
+        interpolator: SimpleITK interpolator for the final resampling step.
+            Defaults to B-spline; probabilities use linear interpolation.
 
     Returns:
         Resampled image as a SimpleITK image.
@@ -61,12 +64,12 @@ def resample_image(
             int(anisotropic_results["low_resolution_axis"]),
         )
 
-    # Resample the image to the target spacing using B-spline interpolation.
+    # Resample the image to the target spacing (B-spline by default).
     img_sitk = sitk.Resample(
         img_sitk,
         size=np.array(new_size).tolist(),
         transform=sitk.Transform(),
-        interpolator=sitk.sitkBSpline,
+        interpolator=interpolator,
         outputOrigin=img_sitk.GetOrigin(),
         outputSpacing=target_spacing,
         outputDirection=img_sitk.GetDirection(),

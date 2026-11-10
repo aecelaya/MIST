@@ -21,13 +21,13 @@ DALI's exact numerical output).
 """
 
 import warnings
-from itertools import combinations
 
 import numpy as np
 import pytest
 import torch
 from torch import nn
 
+from mist.data_loading import augmentation
 from mist.data_loading import generic_loader as gl
 from mist.utils import hardware
 from tests.regression.ants_sitk.fixtures import generate_dataset
@@ -348,228 +348,34 @@ def test_prefetch_factor_set_when_workers_present():
 
 
 # --------------------------------------------------------------------------- #
-# _flip_fn
+# _extract_patch with a spatial-augmentation margin
 # --------------------------------------------------------------------------- #
 
 
-def test_flip_fn_is_deterministic_given_seed():
-    """Same seed -> identical output."""
-    image = np.arange(2 * 3 * 4 * 1).reshape(2, 3, 4, 1).astype(np.float32)
-    label = image.astype(np.uint8)
-    out1 = gl._flip_fn(image.copy(), label.copy(), None, np.random.default_rng(7))
-    out2 = gl._flip_fn(image.copy(), label.copy(), None, np.random.default_rng(7))
-    assert np.array_equal(out1[0], out2[0])
-    assert np.array_equal(out1[1], out2[1])
+def test_slice_with_padding_zero_pads_outside_bounds():
+    """Slicing past the edges pads with zeros and keeps the inside values."""
+    array = np.arange(4 * 4 * 4, dtype=np.float32).reshape(4, 4, 4, 1)
+    out = gl._slice_with_padding(array, starts=(-2, 1, 2), shape=(6, 2, 4))
+    assert out.shape == (6, 2, 4, 1)
+    np.testing.assert_array_equal(out[2:6, :, :2], array[0:4, 1:3, 2:4])
+    assert np.all(out[:2] == 0)
+    assert np.all(out[:, :, 2:] == 0)
 
 
-def test_flip_fn_applies_the_same_flip_to_image_label_and_dtm():
-    """Whichever axes get flipped, image/label/dtm all get the same ones."""
-    image = np.random.default_rng(0).random((4, 4, 4, 1)).astype(np.float32)
-    label = np.random.default_rng(1).integers(0, 3, (4, 4, 4, 1)).astype(np.uint8)
-    dtm = np.random.default_rng(2).random((4, 4, 4, 2)).astype(np.float32)
+def test_extract_patch_with_margin_centers_the_unmargined_patch():
+    """The enlarged patch's center is the patch the loader would have cut."""
+    shape = (20, 20, 20)
+    image = np.random.default_rng(0).normal(size=(*shape, 1)).astype(np.float32)
+    label = np.zeros((*shape, 1), dtype=np.float32)
 
-    out_image, out_label, out_dtm = gl._flip_fn(image, label, dtm, np.random.default_rng(3))
-
-    # Recover which axis combination was applied (if any) without assuming
-    # anything about the function's internals beyond "some subset of axes
-    # (0, 1, 2) got flipped, identically for all three arrays".
-    candidates = [axes for r in range(4) for axes in combinations(range(3), r)]
-    matches = [axes for axes in candidates if np.array_equal(np.flip(image, axis=axes), out_image)]
-    assert len(matches) == 1
-    axes = matches[0]
-    assert np.array_equal(np.flip(label, axis=axes), out_label)
-    assert np.array_equal(np.flip(dtm, axis=axes), out_dtm)
-
-
-# --------------------------------------------------------------------------- #
-# _zoom_fn
-# --------------------------------------------------------------------------- #
-
-
-def test_zoom_fn_always_returns_roi_size_and_sometimes_triggers():
-    """Output is always roi_size-shaped; the 15% chance triggers eventually."""
-    roi_size = (10, 10, 10)
-    image = np.random.default_rng(1).random((*roi_size, 1)).astype(np.float32)
-    label = np.zeros((*roi_size, 1), dtype=np.uint8)
-    label[4:7, 4:7, 4:7, 0] = 1
-
-    changed = False
-    for seed in range(200):
-        out_image, out_label = gl._zoom_fn(image, label, roi_size, np.random.default_rng(seed))
-        assert out_image.shape == (*roi_size, 1)
-        assert out_label.shape == (*roi_size, 1)
-        if not np.array_equal(out_image, image):
-            changed = True
-    assert changed, "zoom never triggered across 200 seeds"
-
-
-def test_zoom_fn_label_stays_valid_class_ids():
-    """Nearest-neighbor interpolation must not invent fractional class ids."""
-    roi_size = (12, 12, 12)
-    image = np.random.default_rng(1).random((*roi_size, 1)).astype(np.float32)
-    label = np.zeros((*roi_size, 1), dtype=np.uint8)
-    label[4:8, 4:8, 4:8, 0] = 1
-
-    for seed in range(50):
-        _, out_label = gl._zoom_fn(image, label, roi_size, np.random.default_rng(seed))
-        assert set(np.unique(out_label)).issubset({0, 1})
-
-
-# --------------------------------------------------------------------------- #
-# _noise_fn / _blur_fn / _brightness_fn / _contrast_fn
-# --------------------------------------------------------------------------- #
-
-
-def test_noise_fn_stays_within_original_range_and_sometimes_changes():
-    """Matches dali_loader.py's clamp-to-original-range behavior."""
-    image = np.random.default_rng(1).uniform(0.0, 1.0, (6, 6, 6, 1)).astype(np.float32)
-    changed = False
-    for seed in range(200):
-        out = gl._noise_fn(image, np.random.default_rng(seed))
-        assert out.shape == image.shape
-        assert out.min() >= image.min()
-        assert out.max() <= image.max()
-        if not np.array_equal(out, image):
-            changed = True
-    assert changed
-
-
-def test_noise_fn_is_deterministic_given_seed():
-    image = np.random.default_rng(1).uniform(0.0, 1.0, (4, 4, 4, 1)).astype(np.float32)
-    out1 = gl._noise_fn(image, np.random.default_rng(5))
-    out2 = gl._noise_fn(image, np.random.default_rng(5))
-    assert np.array_equal(out1, out2)
-
-
-def test_blur_fn_stays_within_original_range_and_sometimes_changes():
-    """Matches dali_loader.py's clamp-to-original-range behavior."""
-    image = np.random.default_rng(1).uniform(0.0, 1.0, (8, 8, 8, 1)).astype(np.float32)
-    changed = False
-    for seed in range(200):
-        out = gl._blur_fn(image, np.random.default_rng(seed))
-        assert out.shape == image.shape
-        assert out.min() >= image.min() - 1e-5
-        assert out.max() <= image.max() + 1e-5
-        if not np.array_equal(out, image):
-            changed = True
-    assert changed
-
-
-def test_blur_fn_does_not_mix_channels():
-    """sigma's channel-axis entry is 0 -- channels must stay independent."""
-    image = np.zeros((8, 8, 8, 2), dtype=np.float32)
-    image[..., 0] = np.random.default_rng(1).uniform(0.0, 1.0, (8, 8, 8))
-    image[..., 1] = 5.0  # Constant channel -- must stay untouched by blur.
-    for seed in range(50):
-        out = gl._blur_fn(image, np.random.default_rng(seed))
-        assert np.allclose(out[..., 1], 5.0)
-
-
-def test_brightness_fn_scales_without_clamping_and_is_deterministic():
-    """Matches dali_loader.py's brightness_fn: pure scaling, no clamp."""
-    image = np.random.default_rng(1).uniform(0.2, 0.8, (4, 4, 4, 1)).astype(np.float32)
-    out1 = gl._brightness_fn(image, np.random.default_rng(5))
-    out2 = gl._brightness_fn(image, np.random.default_rng(5))
-    assert np.array_equal(out1, out2)
-
-    changed = False
-    for seed in range(200):
-        out = gl._brightness_fn(image, np.random.default_rng(seed))
-        assert out.shape == image.shape
-        if not np.array_equal(out, image):
-            changed = True
-            ratios = out / image
-            assert np.allclose(ratios, ratios.flat[0])  # Constant scale factor.
-    assert changed
-
-
-def test_contrast_fn_stays_within_original_range_and_sometimes_changes():
-    """Matches dali_loader.py's contrast_fn: scaled, then clamped."""
-    image = np.random.default_rng(1).uniform(0.2, 0.8, (6, 6, 6, 1)).astype(np.float32)
-    changed = False
-    for seed in range(200):
-        out = gl._contrast_fn(image, np.random.default_rng(seed))
-        assert out.shape == image.shape
-        assert out.min() >= image.min() - 1e-5
-        assert out.max() <= image.max() + 1e-5
-        if not np.array_equal(out, image):
-            changed = True
-    assert changed
-
-
-# --------------------------------------------------------------------------- #
-# _apply_augmentations
-# --------------------------------------------------------------------------- #
-
-
-def test_apply_augmentations_skips_zoom_only_when_dtm_present(monkeypatch):
-    """Zoom/DTM asymmetry inherited from dali_loader.py's define_graph."""
-    calls = []
-    monkeypatch.setattr(
-        gl,
-        "_zoom_fn",
-        lambda image, label, roi_size, rng: (calls.append("zoom"), (image, label))[1],
-    )
-    monkeypatch.setattr(
-        gl,
-        "_flip_fn",
-        lambda image, label, dtm, rng: (calls.append("flip"), (image, label, dtm))[1],
-    )
-
-    image = np.zeros((4, 4, 4, 1), dtype=np.float32)
-    label = np.zeros((4, 4, 4, 1), dtype=np.uint8)
-    dtm = np.zeros((4, 4, 4, 2), dtype=np.float32)
-    rng = np.random.default_rng(0)
-    no_op_kwargs = {
-        "use_flips": True,
-        "use_zoom": True,
-        "use_noise": False,
-        "use_blur": False,
-        "use_brightness": False,
-        "use_contrast": False,
-    }
-
-    gl._apply_augmentations(image, label, dtm, (4, 4, 4), rng=rng, **no_op_kwargs)
-    assert calls == ["flip"]
-
-    calls.clear()
-    gl._apply_augmentations(image, label, None, (4, 4, 4), rng=rng, **no_op_kwargs)
-    assert calls == ["zoom", "flip"]
-
-
-# --------------------------------------------------------------------------- #
-# _PatchTrainingDataset augmentation wiring
-# --------------------------------------------------------------------------- #
-
-
-def test_use_augmentation_false_disables_every_individual_flag():
-    """Matches dali_loader.py's TrainPipeline: the master switch wins."""
-    dataset = gl._PatchTrainingDataset(
-        image_paths=[],
-        label_paths=[],
-        dtm_paths=None,
-        roi_size=(4, 4, 4),
-        labels=None,
-        oversampling=None,
-        extract_patches=True,
-        use_augmentation=False,
-        use_flips=True,
-        use_zoom=True,
-        use_noise=True,
-        use_blur=True,
-        use_brightness=True,
-        use_contrast=True,
-    )
-    assert not any(
-        (
-            dataset._use_flips,
-            dataset._use_zoom,
-            dataset._use_noise,
-            dataset._use_blur,
-            dataset._use_brightness,
-            dataset._use_contrast,
-        )
-    )
+    plain = gl._extract_patch(image, label, None, (8, 8, 8), None, None, np.random.default_rng(5))[
+        0
+    ]
+    margined = gl._extract_patch(
+        image, label, None, (8, 8, 8), None, None, np.random.default_rng(5), (3, 0, 2)
+    )[0]
+    assert margined.shape == (14, 8, 12, 1)
+    np.testing.assert_array_equal(margined[3:11, :, 2:10], plain)
 
 
 # --------------------------------------------------------------------------- #
@@ -606,7 +412,7 @@ def preprocessed(tmp_path_factory) -> dict:
 
 def test_get_training_dataset_yields_roi_shaped_batches_and_cycles(preprocessed):
     """.next() yields correctly-shaped batches, more times than there are cases."""
-    patch_size = tuple(preprocessed["config"]["spatial_config"]["patch_size"])
+    patch_size = (16, 16, 16)
     labels = preprocessed["config"]["dataset_info"]["labels"][1:]  # Foreground only.
     num_cases = len(preprocessed["image_paths"])
 
@@ -749,7 +555,7 @@ def test_training_dataset_shards_across_ranks_cover_all_cases(preprocessed):
             label_paths=preprocessed["label_paths"],
             dtm_paths=None,
             batch_size=1,
-            roi_size=tuple(preprocessed["config"]["spatial_config"]["patch_size"]),
+            roi_size=(16, 16, 16),
             labels=None,
             oversampling=0.0,
             seed=0,
@@ -766,13 +572,15 @@ def test_training_dataset_shards_across_ranks_cover_all_cases(preprocessed):
     assert sum(seen_images) == len(preprocessed["image_paths"])
 
 
-def test_get_training_dataset_with_augmentation_enabled_and_dtm(preprocessed):
-    """Augmented batches (DTM path -- flips only, no zoom) stay roi-shaped."""
+@pytest.mark.parametrize("with_dtm", [True, False])
+def test_get_training_dataset_with_margin_and_augmentation(preprocessed, with_dtm):
+    """Enlarged patches, augmented on the device, come out patch-shaped."""
     roi_size = (8, 8, 8)
+    settings = augmentation.AugmentationSettings()
     loader = gl.get_training_dataset(
         image_paths=preprocessed["image_paths"],
         label_paths=preprocessed["label_paths"],
-        dtm_paths=preprocessed["dtm_paths"],
+        dtm_paths=preprocessed["dtm_paths"] if with_dtm else None,
         batch_size=2,
         roi_size=roi_size,
         labels=preprocessed["config"]["dataset_info"]["labels"][1:],
@@ -781,70 +589,52 @@ def test_get_training_dataset_with_augmentation_enabled_and_dtm(preprocessed):
         num_workers=0,
         rank=0,
         world_size=1,
-        use_augmentation=True,
+        patch_margin=augmentation.spatial_margin(roi_size, settings),
+    )
+    raw = loader.next()[0]
+    assert raw["image"].shape[2:] == tuple(
+        r + 2 * m for r, m in zip(roi_size, augmentation.spatial_margin(roi_size, settings))
+    )
+
+    augmented = augmentation.AugmentedIterator(
+        loader, augmentation.BatchAugmenter(roi_size, settings, seed=0)
     )
     for _ in range(6):
-        batch = loader.next()[0]
+        batch = augmented.next()[0]
         assert batch["image"].shape[1:] == (1, *roi_size)
         assert batch["label"].shape[1:] == (1, *roi_size)
-        assert batch["dtm"].shape[1:] == (3, *roi_size)
+        if with_dtm:
+            assert batch["dtm"].shape[1:] == (3, *roi_size)
 
 
-def test_get_training_dataset_with_augmentation_enabled_without_dtm(preprocessed):
-    """Augmented batches (no-DTM path -- zoom + flips) stay roi-shaped."""
-    roi_size = (8, 8, 8)
-    loader = gl.get_training_dataset(
-        image_paths=preprocessed["image_paths"],
-        label_paths=preprocessed["label_paths"],
-        dtm_paths=None,
-        batch_size=2,
-        roi_size=roi_size,
-        labels=preprocessed["config"]["dataset_info"]["labels"][1:],
-        oversampling=0.5,
-        seed=0,
-        num_workers=0,
-        rank=0,
-        world_size=1,
-        use_augmentation=True,
-    )
-    for _ in range(6):
-        batch = loader.next()[0]
-        assert batch["image"].shape[1:] == (1, *roi_size)
-        assert batch["label"].shape[1:] == (1, *roi_size)
+def test_training_with_augmentation_enabled_reduces_loss(preprocessed):
+    """A model can actually train on augmented batches.
 
-
-def test_training_with_augmentation_enabled_reduces_loss(preprocessed, monkeypatch):
-    """Stage 3 release gate: a model can actually train on augmented batches.
-
-    Not a claim of numerical parity with DALI (different RNG, different
-    interpolation) -- just that augmented batches are well-formed enough for
-    a tiny model to overfit this small, fixed dataset, matching the release
-    gate in cpu_rocm_support_plan.md's Stage 3.
-
-    Augmentation's own RNG is deliberately unseeded in production (see
-    generic_loader.py's module docstring on why), so it's pinned here to one
-    shared, seeded Generator for a reproducible test -- otherwise this test
-    would flake on whichever random augmentation draws happen to land on a
-    given run, exactly as an earlier version of it did.
+    Just a check that augmented batches are well-formed enough for a tiny
+    model to fit this small, fixed dataset. Patch placement in the loader is
+    unseeded by design (see generic_loader.py's module docstring), so the
+    assertion is on the best late loss rather than an exact value.
     """
     torch.manual_seed(0)
-    fixed_rng = np.random.default_rng(1234)
-    monkeypatch.setattr(np.random, "default_rng", lambda *a, **k: fixed_rng)
 
     roi_size = (12, 12, 12)
-    loader = gl.get_training_dataset(
-        image_paths=preprocessed["image_paths"],
-        label_paths=preprocessed["label_paths"],
-        dtm_paths=None,
-        batch_size=2,
-        roi_size=roi_size,
-        labels=preprocessed["config"]["dataset_info"]["labels"][1:],
-        oversampling=0.8,
-        seed=0,
-        num_workers=0,
-        rank=0,
-        world_size=1,
-        use_augmentation=True,
+    settings = augmentation.AugmentationSettings()
+    loader = augmentation.AugmentedIterator(
+        gl.get_training_dataset(
+            image_paths=preprocessed["image_paths"],
+            label_paths=preprocessed["label_paths"],
+            dtm_paths=None,
+            batch_size=2,
+            roi_size=roi_size,
+            labels=preprocessed["config"]["dataset_info"]["labels"][1:],
+            oversampling=0.8,
+            seed=0,
+            num_workers=0,
+            rank=0,
+            world_size=1,
+            patch_margin=augmentation.spatial_margin(roi_size, settings),
+        ),
+        augmentation.BatchAugmenter(roi_size, settings, seed=1234),
     )
 
     model = nn.Sequential(

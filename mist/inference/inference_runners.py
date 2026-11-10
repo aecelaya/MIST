@@ -24,7 +24,7 @@ from mist.inference.tta.strategies import get_strategy
 from mist.models import model_loader
 from mist.postprocessing.postprocessor import Postprocessor
 from mist.preprocessing import preprocess, preprocessing_utils
-from mist.training import training_utils
+from mist.training import patch_planning, training_utils
 from mist.utils import hardware, io, progress_bar, sitk_io
 from mist.utils.console import print_error, print_section_header, print_success
 
@@ -55,10 +55,10 @@ def _build_predictor(
 
     inferer_params["patch_size"] = mist_configuration["spatial_config"]["patch_size"]
     inferer_params["device"] = device
-    inferer_params.setdefault(
-        "sw_batch_size",
-        2 * mist_configuration["training"]["batch_size_per_gpu"],
-    )
+    if "sw_batch_size" not in inferer_params:
+        inferer_params["sw_batch_size"] = patch_planning.inference_batch_size(
+            mist_configuration, device or inference_utils.get_default_device()
+        )
     inferer = get_inferer(inferer_name)(**inferer_params)
     ensembler = get_ensembler(ensembler_strategy)
     tta_transforms = get_strategy(tta_strategy if tta_enabled else "none")()
@@ -107,25 +107,19 @@ def predict_single_example(
     # Run prediction via Predictor (handles TTA + ensembling internally).
     prediction = predictor(preprocessed_image)
 
-    # Capture the pre-argmax probability volume before the channel dimension
-    # is collapsed, if requested.
-    probability_volume = (
-        prediction.squeeze(dim=ic.BATCH_AXIS).to(torch.float32).cpu().numpy()
-        if output_probs
-        else None
-    )
-
-    # Convert to discrete labels, remove batch dimension, and move to CPU.
-    prediction = torch.argmax(prediction, dim=ic.ARGMAX_AXIS)
-    prediction = prediction.squeeze(dim=ic.BATCH_AXIS)
-    prediction = prediction.to(torch.float32).cpu().numpy()
-
     if mist_configuration["preprocessing"]["skip"]:
         # skip=True: images were read as-is with no spatial transforms applied.
         # The prediction is already in the original image's voxel space, so
-        # just copy the original header directly — no reorient or resample.
-        prediction = sitk_io.new_image_like(original_image, prediction)
-        if probability_volume is not None:
+        # take the argmax and copy the original header directly — no
+        # reorient or resample.
+        labels = torch.argmax(prediction, dim=ic.ARGMAX_AXIS).squeeze(dim=ic.BATCH_AXIS)
+        prediction_image = sitk_io.new_image_like(
+            original_image, labels.to(torch.float32).cpu().numpy()
+        )
+        if output_probs:
+            probability_volume = (
+                prediction.squeeze(dim=ic.BATCH_AXIS).to(torch.float32).cpu().numpy()
+            )
             probability_prediction = sitk_io.merge_channels(
                 [
                     sitk_io.new_image_like(original_image, probability_volume[c])
@@ -143,17 +137,19 @@ def predict_single_example(
             foreground_bounding_box = preprocessing_utils.get_fg_mask_bbox(original_image)
 
         prediction_spacing = tuple(mist_configuration["spatial_config"]["target_spacing"])
+        probability_volume = prediction.squeeze(dim=ic.BATCH_AXIS).to(torch.float32).cpu().numpy()
 
-        # Restore original spacing, orientation, and header.
-        prediction = inference_utils.back_to_original_space(
-            raw_prediction=prediction,
+        # Resample each class's probabilities to the original spacing,
+        # orientation, and header, then take the argmax at the original
+        # resolution.
+        prediction_image = inference_utils.labels_from_probabilities_in_original_space(
+            raw_probabilities=probability_volume,
             original_image=original_image,
             target_spacing=prediction_spacing,
-            training_labels=training_labels,
             foreground_bounding_box=foreground_bounding_box,
         )
 
-        if probability_volume is not None:
+        if output_probs:
             probability_prediction = inference_utils.probabilities_back_to_original_space(
                 raw_probabilities=probability_volume,
                 original_image=original_image,
@@ -165,11 +161,11 @@ def predict_single_example(
 
     # Remap labels to match original dataset.
     if training_labels != original_labels:
-        prediction = inference_utils.remap_mask_labels(
-            sitk_io.array_from_image(prediction), original_labels
+        remapped = inference_utils.remap_mask_labels(
+            sitk_io.array_from_image(prediction_image), original_labels
         )
-        prediction = sitk_io.new_image_like(original_image, prediction)
-    return sitk.Cast(prediction, sitk.sitkUInt8), probability_prediction
+        prediction_image = sitk_io.new_image_like(original_image, remapped)
+    return sitk.Cast(prediction_image, sitk.sitkUInt8), probability_prediction
 
 
 def test_on_fold(

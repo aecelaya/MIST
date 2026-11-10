@@ -2,10 +2,12 @@
 # Publish Docker images
 #
 # Builds the MIST container from ./Dockerfile and pushes it to Docker Hub as
-# mistmedical/mist:<version> and mistmedical/mist:latest. The image version is
-# derived from pyproject.toml; the PyTorch base image is pinned inside
-# ./Dockerfile and must NOT be overridden here (a 2.11.0 override previously
-# shipped images that crashed multi-GPU DDP startup).
+# mistmedical/mist:<version>, and also as mistmedical/mist:latest unless the
+# version is a pre-release (such as 2.5.0rc0, 2.5.0b1, or 2.5.0.dev0), so
+# `docker pull mistmedical/mist` never gets a release candidate. The image
+# version is derived from pyproject.toml; the PyTorch base image is pinned
+# inside ./Dockerfile and must NOT be overridden here (a 2.11.0 override
+# previously shipped images that crashed multi-GPU DDP startup).
 #
 # Triggers:
 #   - workflow_run: after "Upload Python Package" completes successfully, so a
@@ -48,6 +50,14 @@ jobs:
           VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           DOCKER_VERSION=$(echo "$VERSION" | sed 's/-alpha/a0/; s/-beta/b0/; s/-rc/rc0/')
           echo "DOCKER_VERSION=$DOCKER_VERSION" >> "$GITHUB_ENV"
+          # Pre-releases (a, b, rc, or dev in the version) don't move latest.
+          if echo "$DOCKER_VERSION" | grep -Eq '(a|b|rc|dev)[0-9]*$'; then
+            DOCKER_TAGS="mistmedical/mist:$DOCKER_VERSION"
+          else
+            DOCKER_TAGS="mistmedical/mist:$DOCKER_VERSION,mistmedical/mist:latest"
+          fi
+          echo "DOCKER_TAGS=$DOCKER_TAGS" >> "$GITHUB_ENV"
+          echo "Docker tags: $DOCKER_TAGS"
 
       # Authenticate to Docker Hub so the build-push step can push the image.
       - name: Log in to Docker Hub
@@ -66,6 +76,4 @@ jobs:
           # (torch 2.9.1). torch 2.11.0 crashes multi-GPU DDP startup, so do not
           # bump the base image from this workflow.
           push: true
-          tags: |
-            mistmedical/mist:${{ env.DOCKER_VERSION }}
-            mistmedical/mist:latest
+          tags: ${{ env.DOCKER_TAGS }}

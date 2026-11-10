@@ -15,7 +15,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from mist.models.model_registry import get_model_from_registry, list_registered_models
 
 # Stage count depends on patch size, so cover shallow and deep networks.
-ADAPTIVE_DECODERS = ["resenc"]
+ADAPTIVE_DECODERS = ["nnunet-plain", "resenc"]
 
 
 def _build(name, patch_size):
@@ -79,7 +79,7 @@ def _ddp_steps(rank, name, patch_size, port):
     dist.destroy_process_group()
 
 
-@pytest.mark.parametrize("name, port", [("resenc", 29612)])
+@pytest.mark.parametrize("name, port", [("nnunet-plain", 29611), ("resenc", 29612)])
 def test_real_ddp_trains_past_the_second_step(name, port):
     """Two processes take several steps; the original crash came on the second."""
     mp.spawn(_ddp_steps, args=(name, (64, 64, 64), port), nprocs=2, start_method="fork")

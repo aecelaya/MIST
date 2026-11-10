@@ -402,59 +402,43 @@ class Analyzer:
     def get_target_spacing(self) -> list[float]:
         """Get target spacing for preprocessing.
 
-        Compute the target spacing for the dataset based on the median
-        spacing along each axis for the images in the dataset. If this
-        median-based spacing is anisotropic (i.e., the ratio of the maximum
-        to minimum spacing is greater than a threshold), then adjust the
-        coarsest resolution to bring the ratio down. This is done to ensure
-        that we still have a reasonable resolution when we preprocess the
-        data.
+        Use the median spacing along each axis, adjusting the coarsest axis of
+        anisotropic datasets. See `analyzer_utils.compute_target_spacing`.
+        nnU-Net makes this decision with image sizes after its non-zero crop;
+        here they are the full image sizes, since MIST's foreground crop is a
+        different, more aggressive crop.
         """
 
         def _process(patient):
             try:
                 mask = sitk_io.read_image(patient["mask"])
-                # Reorient to RAI first so every patient's spacing tuple
-                # refers to the same physical axis before we take a
-                # cross-patient median below -- see get_target_spacing's
-                # docstring. (The historical mask.set_direction(np.eye(3))
+                # Reorient to RAI first so every patient's spacing and size
+                # refer to the same physical axes before we take
+                # cross-patient medians. (The historical mask.set_direction(np.eye(3))
                 # call after reorienting is not replicated here: verified
                 # empirically -- against real ants, across identity,
                 # anisotropic, oblique, and axis-aligned-non-RAI inputs --
                 # that it never affects the resulting spacing, so it was
                 # dead code even in the ants version.)
                 mask = sitk_io.reorient_image(mask, "RAI")
-                return tuple(mask.GetSpacing())
+                return tuple(mask.GetSpacing()), tuple(mask.GetSize())
             except Exception as e:
                 raise RuntimeError(f"Error processing patient '{patient['id']}': {e}") from e
 
         n_workers = self.n_workers
         patients = [self.paths_df.iloc[i].to_dict() for i in range(len(self.paths_df))]
-        spacings = [None] * len(patients)
+        spacings = np.zeros((len(patients), 3))
+        sizes = np.zeros((len(patients), 3))
 
         progress = progress_bar.get_progress_bar("Getting target spacing")
         with ThreadPoolExecutor(max_workers=n_workers) as executor:
             futures = {executor.submit(_process, p): i for i, p in enumerate(patients)}
             with progress as pb:
                 for future in pb.track(as_completed(futures), total=len(patients)):
-                    spacings[futures[future]] = future.result()
+                    i = futures[future]
+                    spacings[i, :], sizes[i, :] = future.result()
 
-        original_spacings = np.array(spacings, dtype=float)
-
-        # Initialize target spacing.
-        target_spacing = list(np.median(original_spacings, axis=0))
-
-        # If anisotropic, adjust the coarsest resolution to bring ratio down.
-        if (
-            np.max(target_spacing) / np.min(target_spacing)
-            > constants.MAX_DIVIDED_BY_MIN_SPACING_THRESHOLD
-        ):
-            low_res_axis = np.argmax(target_spacing)
-            target_spacing[low_res_axis] = np.percentile(
-                original_spacings[:, low_res_axis],
-                constants.ANISOTROPIC_LOW_RESOLUTION_AXIS_PERCENTILE,
-            )
-        return target_spacing
+        return analyzer_utils.compute_target_spacing(spacings, sizes)
 
     def check_resampled_dims(self, cropped_dims: np.ndarray) -> list[float]:
         """Determine dimensions of resampled data.
@@ -693,16 +677,6 @@ class Analyzer:
         # configuration.
         self.config["model"]["params"]["in_channels"] = len(self.config["dataset_info"]["images"])
         self.config["model"]["params"]["out_channels"] = len(self.config["dataset_info"]["labels"])
-
-        # Set a default patch size based on the median resampled image size.
-        # The patch size can be overridden by the user in the config file or in
-        # the command line arguments for the training pipeline.
-        patch_size = analyzer_utils.get_best_patch_size(
-            median_dims,
-            target_spacing,
-            batch_size_per_gpu=self.config["training"]["batch_size_per_gpu"],
-        )
-        self.config["spatial_config"]["patch_size"] = [int(size) for size in patch_size]
 
         # Build and add the evaluation metrics to the evaluation section of the
         # configuration.

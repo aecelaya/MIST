@@ -71,7 +71,8 @@ for details and how to pick the right `rocmX.Y` version for your machine.
 
 | Model                                    | Key                                                                    |
 | ---------------------------------------- | ---------------------------------------------------------------------- |
-| nnU-Net                                  | `nnunet`                                                               |
+| nnU-Net (default)                        | `nnunet-plain`                                                         |
+| nnU-Net Residual                         | `nnunet-res`, `nnunet`                                                 |
 | nnU-Net Pocket                           | `nnunet-pocket`                                                        |
 | ResEnc UNet                              | `resenc`                                                               |
 | Primus (medium / large / X)              | `primus-medium`, `primus-large`, `primus-x`                            |

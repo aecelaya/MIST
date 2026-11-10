@@ -33,13 +33,15 @@ from mist.models.model_loader import (
     load_pretrained_encoder,
     validate_encoder_compatibility,
 )
-from mist.models.model_registry import get_model_from_registry
-from mist.training import training_utils
+from mist.models.model_registry import canonical_architecture, get_model_from_registry
+from mist.training import config_validation, patch_planning, precision_test, training_utils
 from mist.training.lr_schedulers.lr_scheduler_registry import get_lr_scheduler
 from mist.training.optimizers.optimizer_registry import get_optimizer
+from mist.training.planning_constants import PlanningConstants
 from mist.training.trainers.trainer_constants import TrainerConstants
 from mist.utils import hardware, io, progress_bar
 from mist.utils.console import (
+    console,
     print_error,
     print_info,
     print_section_header,
@@ -68,8 +70,10 @@ class BaseTrainer(ABC):
         self.config_json = self.results_dir / "config.json"
         self.config = io.read_json_file(self.config_json)
 
-        # Point out data preprocessed in a slow layout. This runs once, since
+        # Point out mistakes from editing the file by hand. This runs once, since
         # spawned training processes don't rerun __init__.
+        for problem in config_validation.find_config_problems(self.config):
+            print_warning(f"config.json: {problem}")
         for problem in training_utils.preprocessed_data_problems(self.numpy_dir):
             print_warning(problem)
 
@@ -88,6 +92,10 @@ class BaseTrainer(ABC):
 
         # Resolve hardware configuration.
         self._update_num_gpus_in_config()
+
+        # Plan the patch and batch size the first time training runs; later runs
+        # reuse them, with a warning if they don't suit this machine's GPU.
+        self._resolve_patch_and_batch()
 
         # Set up batch size based on the number of GPUs.
         self.batch_size = self.config["training"]["batch_size_per_gpu"] * max(
@@ -248,12 +256,18 @@ class BaseTrainer(ABC):
         if self.mist_args.val_percent is not None:
             self.config["training"]["val_percent"] = float(self.mist_args.val_percent)
 
+        # Overwrite how often validation runs if specified in command line.
+        if getattr(self.mist_args, "validate_every", None) is not None:
+            self.config["training"]["validate_every"] = int(self.mist_args.validate_every)
+
         # Resolve AMP against the current hardware. BF16 autocast is only
         # hardware-accelerated on Ampere or newer GPUs; downgrade to FP32 on
         # pre-Ampere/CPU. Resolving here (once, in the parent process) persists
         # the effective value to config.json so every training step and all
-        # downstream inference read a hardware-appropriate setting.
-        self.config["training"]["amp"] = hardware.resolve_amp(self.config["training"]["amp"])
+        # downstream inference read a hardware-appropriate setting. "auto" waits
+        # for _resolve_patch_and_batch, which needs the plan to choose.
+        if self.config["training"]["amp"] != "auto":
+            self.config["training"]["amp"] = hardware.resolve_amp(self.config["training"]["amp"])
 
         # Resolve the communication backend against the current hardware, the
         # same way: "auto" becomes "nccl" on CUDA/ROCm (ROCm routes "nccl"
@@ -294,8 +308,8 @@ class BaseTrainer(ABC):
 
         # --- Hard errors: checkpoint weights will not load ----------------
         incompatible = []
-        old_arch = old["model"]["architecture"]
-        new_arch = new["model"]["architecture"]
+        old_arch = canonical_architecture(old["model"]["architecture"])
+        new_arch = canonical_architecture(new["model"]["architecture"])
         if old_arch != new_arch:
             incompatible.append(
                 f"  --model: '{old_arch}' → '{new_arch}' (checkpoint weights are incompatible)"
@@ -350,6 +364,18 @@ class BaseTrainer(ABC):
         if tr_old["l2_penalty"] != tr_new["l2_penalty"]:
             warnings.append(f"  --l2-penalty: {tr_old['l2_penalty']} → {tr_new['l2_penalty']}")
 
+        if tr_old["val_percent"] != tr_new["val_percent"]:
+            warnings.append(
+                f"  --val-percent: {tr_old['val_percent']} → {tr_new['val_percent']} "
+                "(changes the validation split and whether the best or final "
+                "model is saved)"
+            )
+
+        old_every = tr_old.get("validate_every", 1)
+        new_every = tr_new.get("validate_every", 1)
+        if old_every != new_every:
+            warnings.append(f"  --validate-every: {old_every} → {new_every}")
+
         if warnings:
             print_warning(
                 "--resume is set but the following overrides change training "
@@ -392,6 +418,156 @@ class BaseTrainer(ABC):
 
         self.config["training"]["hardware"]["num_gpus"] = num_gpus
         io.write_json_file(self.config_json, self.config)
+
+    def _reset_plan_if_network_changed(self) -> None:
+        """Mark a saved plan for replanning if it was made for a different network.
+
+        A patch that suits one network may not suit another. Only values that came
+        from the plan are reset; anything set by hand, on the command line or in
+        config.json, is kept. An alias and the name it stands for are the same
+        network. --resume never gets here with a changed network, since
+        _check_resume_overrides rejects it. A precision that MIST chose is chosen
+        again, since which is faster can depend on the network.
+        """
+        planning = self.config.get("planning")
+        if not planning:
+            return
+        architecture = self.config["model"]["architecture"]
+        if canonical_architecture(planning["architecture"]) == canonical_architecture(architecture):
+            return
+
+        spatial = self.config["spatial_config"]
+        training = self.config["training"]
+        if spatial["patch_size"] == planning.get("patch_size"):
+            spatial["patch_size"] = patch_planning.AUTO
+        if training["batch_size_per_gpu"] == planning.get("batch_size_per_gpu"):
+            training["batch_size_per_gpu"] = patch_planning.AUTO
+        if planning.get("amp_auto"):
+            training["amp"] = "auto"
+        print_info(
+            f"The saved plan was made for {planning['architecture']}, so planning again for "
+            f"{architecture}. Values set by hand are kept."
+        )
+
+    def _resolve_patch_and_batch(self) -> None:
+        """Plan any "auto" patch, batch size, or precision and save them to config.json."""
+        spatial = self.config["spatial_config"]
+        training = self.config["training"]
+        self._reset_plan_if_network_changed()
+
+        # Any GPU has a choice to make: BF16, FP32, or FP16 with BF16 hardware, and
+        # FP32 or FP16 without. Planning starts from the default, BF16 or FP32.
+        amp_auto = training["amp"] == "auto"
+        test_precision = amp_auto and patch_planning.detect_gpu_memory_bytes()[1] > 0
+        if amp_auto:
+            training["amp"] = hardware.resolve_amp("auto")
+
+        plan_needed = patch_planning.is_auto(spatial["patch_size"]) or patch_planning.is_auto(
+            training["batch_size_per_gpu"]
+        )
+        if not (plan_needed or test_precision):
+            print_info(
+                f"Using patch {spatial['patch_size']} and batch size "
+                f"{training['batch_size_per_gpu']} per GPU from config.json."
+            )
+            if amp_auto:
+                io.write_json_file(self.config_json, self.config)
+            patch_planning.check_plan_fits(
+                self.config, patch_was_set=getattr(self.mist_args, "patch_size", None) is not None
+            )
+            return
+
+        architecture = self.config["model"]["architecture"]
+        num_gpus = max(1, training["hardware"]["num_gpus"])
+        memory = patch_planning.detect_gpu_memory_bytes()[0]
+        gib = 1024**3
+        planned_for = (
+            memory if memory is not None else (PlanningConstants.DEFAULT_GPU_MEMORY_GB * gib)
+        )
+        if test_precision:
+            precision = "BF16, FP32, or FP16" if training["amp"] else "FP32 or FP16"
+        else:
+            precision = {hardware.FP16: "FP16", True: "BF16", False: "FP32"}[
+                training["amp"] if training["amp"] == hardware.FP16 else bool(training["amp"])
+            ]
+
+        budget_gb = patch_planning.memory_budget_gb(self.config)
+        usable = planned_for * PlanningConstants.MEMORY_FRACTION
+        gpu = (
+            f"this {planned_for / gib:.1f} GiB GPU"
+            if memory is not None
+            else f"an assumed {planned_for / gib:.1f} GiB GPU, since none was found"
+        )
+        target = (
+            f"{usable / gib:.1f} GiB, 90% of {gpu}"
+            if budget_gb is None
+            else f"a budget of {budget_gb:g} GiB on {gpu}"
+        )
+
+        print_section_header("Planning patch and batch size")
+        print_info(f"Planning {architecture} for {target}, {precision}.")
+        with console.status("Estimating GPU memory..."):
+            plan = patch_planning.plan_for_config(self.config, len(self.paths), num_gpus)
+        if test_precision:
+            plan = self._choose_precision(plan, planned_for, num_gpus)
+        spatial["patch_size"] = plan.patch_size
+        training["batch_size_per_gpu"] = plan.batch_size_per_gpu
+
+        self.config["planning"] = {
+            "architecture": architecture,
+            "patch_size": plan.patch_size,
+            "batch_size_per_gpu": plan.batch_size_per_gpu,
+            "gpu_memory_gb": round(planned_for / gib, 1),
+            "memory_budget_gb": budget_gb,
+            "amp": training["amp"] if training["amp"] == hardware.FP16 else bool(training["amp"]),
+            "amp_auto": amp_auto,
+            "estimated_gpu_memory_gb": round(plan.estimated_bytes / gib, 1),
+        }
+        io.write_json_file(self.config_json, self.config)
+        print_success(
+            f"Patch {plan.patch_size}, batch size {plan.batch_size_per_gpu} per GPU, about "
+            f"{plan.estimated_bytes / gib:.1f} GiB estimated. Saved to config.json."
+        )
+        if plan.estimated_bytes > usable:
+            print_warning(
+                f"This may not fit in {usable / gib:.1f} GiB, even at the smallest patch."
+            )
+
+    def _choose_precision(
+        self, default_plan: patch_planning.Plan, memory: float, num_gpus: int
+    ) -> patch_planning.Plan:
+        """Time the candidate precisions, set training.amp, and return the winner's plan.
+
+        Args:
+            default_plan: The plan for the default precision, training.amp as resolved
+                from "auto": BF16 with BF16 hardware, else FP32.
+            memory: Memory of the GPU training will run on.
+            num_gpus: Number of GPUs that will train.
+
+        Returns:
+            The plan for the chosen precision.
+        """
+        training = self.config["training"]
+        default = training["amp"]
+        candidates = [True, False, hardware.FP16] if default else [False, hardware.FP16]
+        plans = {}
+        for amp in candidates:
+            if amp == default:
+                plans[amp] = default_plan
+                continue
+            config = {**self.config, "training": {**training, "amp": amp}}
+            plans[amp] = patch_planning.plan_for_config(config, len(self.paths), num_gpus)
+        with console.status("Timing training precisions..."):
+            choice = precision_test.choose_precision(
+                self.config["model"]["architecture"],
+                {**self.config["model"]["params"], **self.config["spatial_config"]},
+                plans,
+                memory,
+                hardware.resolve_compile(training.get("compile", False)),
+            )
+        print_info(choice.reason)
+        training["amp"] = choice.amp
+        return plans[choice.amp]
 
     def _validate_pretrained_config(self) -> None:
         """Validate pretrained encoder compatibility if --pretrained-weights set.
@@ -488,6 +664,15 @@ class BaseTrainer(ABC):
                 (train_images, val_images, train_labels, val_labels, *maybe_dtms) = splits
                 if self._use_dtms():
                     train_dtms, _ = maybe_dtms
+
+                if len(val_images) < TrainerConstants.MIN_VAL_CASES_FOR_SELECTION:
+                    print_warning(
+                        f"Fold {fold}: val_percent={training['val_percent']} holds "
+                        f"out only {len(val_images)} of {len(train_images) + len(val_images)} "
+                        "training cases for validation, so selecting the best "
+                        "model will be noisy. Consider a larger val_percent or "
+                        "val_percent 0.0 to use the final-epoch model."
+                    )
 
             # Sanity check the fold data.
             training_utils.sanity_check_fold_data(
@@ -589,13 +774,19 @@ class BaseTrainer(ABC):
         # coupling-site audit missed this one.
         model.to(hardware.get_device_for_rank(rank))
 
-        # Set up model for distributed data parallel training. device_ids
-        # only makes sense for a CUDA/ROCm rank; this is unreachable on
-        # CPU-only hardware today since fit() forces world_size (and so
-        # use_ddp) to False there -- multi-process CPU training is out of
-        # scope for now (cpu_rocm_support_plan.md Stage 1).
+        # Compile in place rather than with torch.compile(model), whose wrapper would
+        # add "_orig_mod." to the name of every weight in the checkpoints. Configs
+        # from before this setting don't have it, and train as they always have.
+        if hardware.resolve_compile(training.get("compile", False)):
+            model.compile()
+
+        # Set up model for distributed data parallel training. device_ids only
+        # makes sense for a CUDA/ROCm rank. fit() always trains on one process on
+        # CPU-only hardware; the multi-process regression test reaches this
+        # on CPU by spawning run_cross_validation itself, so CI can run real DDP.
         if use_ddp:
-            model = DDP(model, device_ids=[rank])
+            on_cpu = hardware.get_accelerator_type() == "cpu"
+            model = DDP(model, device_ids=None if on_cpu else [rank])
 
         # Get loss function. First get the loss function from the registry.
         # We then wrap it in a DeepSupervisionLoss, which will handle
@@ -643,11 +834,64 @@ class BaseTrainer(ABC):
             "composite_loss_weighting": composite_loss_weighting,
             "optimizer": optimizer,
             "lr_scheduler": lr_scheduler,
+            "grad_scaler": self._grad_scaler(training["amp"] == hardware.FP16),
+            "nonfinite_steps": 0,
             "epoch": 0,
             "global_step": 0,
             "best_val_loss": np.inf,
+            "smoothed_val_loss": None,
             "alpha": 0.5,
         }
+
+    @staticmethod
+    def _grad_scaler(enabled: bool) -> torch.amp.GradScaler:
+        """Return a gradient scaler, which does nothing unless enabled for FP16."""
+        device = "cpu" if hardware.get_accelerator_type() == "cpu" else "cuda"
+        return torch.amp.GradScaler(device, enabled=enabled)
+
+    def _leave_fp16_if_failing(self, state: dict[str, Any], mean_loss: float, rank: int) -> bool:
+        """Check FP16 training after a step, and leave FP16 if it keeps failing.
+
+        Gradient scaling skips the occasional step whose gradients overflow, so a
+        single NaN or inf loss is expected. Many in a row, or a gradient scale
+        that keeps shrinking, mean FP16 isn't working for this run, so the rest
+        of the fold trains in BF16 if the GPU has it, or FP32. Every rank sees the
+        same loss and gradients, so all of them decide the same way.
+
+        Args:
+            state: The training state.
+            mean_loss: This step's loss, averaged across ranks.
+            rank: This process's rank.
+
+        Returns:
+            Whether training is still in FP16 and so the loss needn't stop it.
+        """
+        scaler = state["grad_scaler"]
+        if not scaler.is_enabled():
+            return False
+        finite = bool(np.isfinite(mean_loss))
+        state["nonfinite_steps"] = 0 if finite else state["nonfinite_steps"] + 1
+        too_many = state["nonfinite_steps"] >= TrainerConstants.FP16_MAX_NONFINITE_STEPS
+        collapsed = scaler.get_scale() < TrainerConstants.FP16_MIN_GRAD_SCALE
+        if not (too_many or collapsed):
+            return True
+
+        fallback = hardware.bf16_supported()
+        self.config["training"]["amp"] = fallback
+        state["grad_scaler"] = self._grad_scaler(False)
+        state["nonfinite_steps"] = 0
+        if rank == 0:
+            reason = (
+                f"{TrainerConstants.FP16_MAX_NONFINITE_STEPS} steps in a row had a NaN or inf loss"
+                if too_many
+                else "the gradient scale kept shrinking"
+            )
+            print_warning(
+                f"FP16 training isn't working for this fold: {reason}. Training the rest "
+                f"of the fold in {'BF16' if fallback else 'FP32'}. Set training.amp to "
+                'false or "auto" in config.json to avoid FP16.'
+            )
+        return finite
 
     def _checkpoint_path(self, fold: int) -> Path:
         """Return the checkpoint path for a given fold."""
@@ -671,9 +915,11 @@ class BaseTrainer(ABC):
             "epoch": state["epoch"],
             "global_step": state["global_step"],
             "best_val_loss": state["best_val_loss"],
+            "smoothed_val_loss": state["smoothed_val_loss"],
             "model_state_dict": unwrapped.state_dict(),
             "optimizer_state_dict": state["optimizer"].state_dict(),
             "lr_scheduler_state_dict": state["lr_scheduler"].state_dict(),
+            "grad_scaler_state_dict": state["grad_scaler"].state_dict(),
         }
         # Write to a temp file then atomically rename so a mid-write SIGKILL
         # never leaves a corrupted checkpoint on disk.
@@ -721,11 +967,20 @@ class BaseTrainer(ABC):
         state["optimizer"].load_state_dict(checkpoint["optimizer_state_dict"])
         state["lr_scheduler"].load_state_dict(checkpoint["lr_scheduler_state_dict"])
 
+        # The gradient scale carries on where it was, in FP16. Checkpoints from
+        # before FP16 support, or saved outside FP16, have no scale to restore.
+        scaler_state = checkpoint.get("grad_scaler_state_dict")
+        if scaler_state and state["grad_scaler"].is_enabled():
+            state["grad_scaler"].load_state_dict(scaler_state)
+
         # Restore bookkeeping — epoch is incremented so the loop starts on the
         # next unfinished epoch.
         state["epoch"] = checkpoint["epoch"] + 1
         state["global_step"] = checkpoint["global_step"]
         state["best_val_loss"] = checkpoint["best_val_loss"]
+        # Checkpoints written before 2.5.0 have no smoothed loss; smoothing
+        # restarts from the next validation.
+        state["smoothed_val_loss"] = checkpoint.get("smoothed_val_loss")
 
         return True
 
@@ -763,6 +1018,52 @@ class BaseTrainer(ABC):
         if dist.is_initialized():
             dist.destroy_process_group()
 
+    @staticmethod
+    def _save_model(state: dict[str, Any], model_name: str) -> None:
+        """Save the model weights used for inference (rank 0 only).
+
+        Unwraps DDP so the weights load cleanly in non-DDP contexts.
+        """
+        model = state["model"]
+        to_save = model.module if hasattr(model, "module") else model
+        torch.save(to_save.state_dict(), model_name)
+
+    def _update_best_model(
+        self, state: dict[str, Any], val_mean_loss: float, model_name: str
+    ) -> None:
+        """Smooth the validation loss and save the model if it improved.
+
+        The loss is smoothed with an exponential moving average so that a
+        single lucky epoch does not pick the model.
+
+        Args:
+            state: The current training state dictionary.
+            val_mean_loss: Mean validation loss for this epoch.
+            model_name: Path to save the best model to.
+        """
+        decay = TrainerConstants.VAL_LOSS_EMA_DECAY
+        previous = state["smoothed_val_loss"]
+        smoothed = (
+            val_mean_loss
+            if previous is None or not np.isfinite(previous)
+            else decay * previous + (1.0 - decay) * val_mean_loss
+        )
+        state["smoothed_val_loss"] = smoothed
+
+        if smoothed < state["best_val_loss"]:
+            print_success(
+                f"Smoothed validation loss improved from "
+                f"{state['best_val_loss']:.4f} to {smoothed:.4f} "
+                f"(this epoch: {val_mean_loss:.4f})"
+            )
+            state["best_val_loss"] = smoothed
+            self._save_model(state, model_name)
+        else:
+            print_info(
+                f"Smoothed validation loss did not improve ({smoothed:.4f}; "
+                f"this epoch: {val_mean_loss:.4f})."
+            )
+
     def train_fold(self, fold: int, rank: int, world_size: int) -> None:
         """Generic training loop for a single fold."""
         # Set up for distributed training.
@@ -783,6 +1084,15 @@ class BaseTrainer(ABC):
                 "of GPUs being used or reduce the number of GPUs."
             )
         val_steps = math.ceil(len(fold_data["val_images"]) / max(1, world_size))
+
+        # Model selection and validation frequency. Only a validation split
+        # carved from the training data (val_percent > 0) may pick the best
+        # model; otherwise the held-out fold would choose its own model and
+        # bias the cross-validation results.
+        training = self.config["training"]
+        select_best = training["val_percent"] > 0.0
+        validate_every = training.get("validate_every", 1)
+        last_epoch = training["epochs"] - 1
 
         # Build components for the fold.
         state = self.build_components(rank=rank, world_size=world_size)
@@ -812,7 +1122,8 @@ class BaseTrainer(ABC):
             # Set up tensorboard summary writer.
             logs_writer = SummaryWriter(str(self.logs_dir / f"fold_{fold}"))
 
-            # Path and name for best model for this fold.
+            # Path for the model used for inference: the best model when a
+            # validation split is held out, otherwise the final-epoch model.
             model_name = str(self.models_dir / f"fold_{fold}.pt")
 
         # Stop training flag if we encounter nan or inf losses. Same
@@ -866,15 +1177,21 @@ class BaseTrainer(ABC):
                         else:
                             mean_loss = loss_det.item()
 
-                    # Check for NaN/Inf and flag for early exit.
-                    if not np.isfinite(mean_loss):
+                    # Check for NaN/Inf and flag for early exit. FP16 training
+                    # tolerates some, since gradient scaling skips those steps.
+                    if self._leave_fp16_if_failing(state, mean_loss, rank):
+                        pass
+                    elif not np.isfinite(mean_loss):
                         if rank == 0:
                             print_error("Stopping training: Detected NaN or inf loss value!")
                         stop_training[0] = 1
 
-                    # Update running average and progress bar (rank 0 only).
+                    # Update running average and progress bar (rank 0 only). A
+                    # skipped FP16 step's loss would spoil the average.
                     if rank == 0:
-                        train_mean_loss = running_train_loss(mean_loss)
+                        if np.isfinite(mean_loss):
+                            running_train_loss(mean_loss)
+                        train_mean_loss = running_train_loss.result()
                         pb.update(
                             loss=train_mean_loss,
                             lr=state["optimizer"].param_groups[0]["lr"],
@@ -904,69 +1221,66 @@ class BaseTrainer(ABC):
             if use_ddp:
                 dist.barrier()
 
+            # Validate every `validate_every` epochs and always on the last
+            # epoch, so the curve ends on the model that training finishes with.
+            run_validation = (epoch + 1) % validate_every == 0 or epoch == last_epoch
+
             # Run the validation steps for this epoch. Rank 0 shows a progress
-            # bar and tracks best loss; other ranks run silently.
-            state["model"].eval()
-            with torch.inference_mode():
-                pbv_ctx = (
-                    progress_bar.ValidationProgressBar(val_steps)
-                    if rank == 0
-                    else contextlib.nullcontext()
-                )
-                with pbv_ctx as pbv:
-                    for _ in range(val_steps):
-                        # Get a batch of validation data.
-                        batch = val_loader.next()[0]
+            # bar and tracks the loss; other ranks run silently.
+            if run_validation:
+                state["model"].eval()
+                with torch.inference_mode():
+                    pbv_ctx = (
+                        progress_bar.ValidationProgressBar(val_steps)
+                        if rank == 0
+                        else contextlib.nullcontext()
+                    )
+                    with pbv_ctx as pbv:
+                        for _ in range(val_steps):
+                            # Get a batch of validation data.
+                            batch = val_loader.next()[0]
 
-                        # Compute validation loss.
-                        val_loss = self.validation_step(state=state, data=batch)
+                            # Compute validation loss.
+                            val_loss = self.validation_step(state=state, data=batch)
 
-                        # Aggregate mean across ranks.
-                        val_det = val_loss.detach()
-                        if use_ddp:
-                            dist.all_reduce(val_det, op=dist.ReduceOp.SUM)
-                            mean_val = (val_det / world_size).item()
-                        else:
-                            mean_val = val_det.item()
+                            # Aggregate mean across ranks.
+                            val_det = val_loss.detach()
+                            if use_ddp:
+                                dist.all_reduce(val_det, op=dist.ReduceOp.SUM)
+                                mean_val = (val_det / world_size).item()
+                            else:
+                                mean_val = val_det.item()
 
-                        # Update running average and progress bar (rank 0 only).
-                        if rank == 0:
-                            val_mean_loss = running_val_loss(mean_val)
-                            pbv.update(loss=val_mean_loss)
+                            # Update running average and progress bar (rank 0 only).
+                            if rank == 0:
+                                val_mean_loss = running_val_loss(mean_val)
+                                pbv.update(loss=val_mean_loss)
 
-                # Check if validation loss improved and save model (rank 0 only).
                 if rank == 0:
-                    if val_mean_loss < state["best_val_loss"]:
-                        print_success(
-                            f"Validation loss improved from "
-                            f"{state['best_val_loss']:.4f} to "
-                            f"{val_mean_loss:.4f}"
-                        )
-
-                        # Update the best validation loss.
-                        state["best_val_loss"] = val_mean_loss
-
-                        # Save the model. Unwrap DDP so it loads cleanly in
-                        # non-DDP contexts.
-                        to_save = (
-                            state["model"].module
-                            if hasattr(state["model"], "module")
-                            else state["model"]
-                        )
-                        torch.save(to_save.state_dict(), model_name)
+                    if select_best:
+                        self._update_best_model(state, val_mean_loss, model_name)
                     else:
-                        print_info("Validation loss did not improve.")
+                        print_info(f"Validation loss: {val_mean_loss:.4f}")
 
-            # Reset the dataloaders for the next epoch.
+            # Without a validation split, the saved model is the final one.
+            # Save it before the last checkpoint so that a fold whose last
+            # checkpoint exists (and is skipped on resume) always has a model.
+            if rank == 0 and not select_best and epoch == last_epoch:
+                self._save_model(state, model_name)
+
+            # Reset the dataloaders for the next epoch. The validation loader
+            # is only reset after a pass over it.
             train_loader.reset()
-            val_loader.reset()
+            if run_validation:
+                val_loader.reset()
 
             # Log the running losses to tensorboard.
             if rank == 0:
-                summary_data = {
-                    "train": float(train_mean_loss),
-                    "validation": float(val_mean_loss),
-                }
+                summary_data = {"train": float(train_mean_loss)}
+                if run_validation:
+                    summary_data["validation"] = float(val_mean_loss)
+                    if select_best:
+                        summary_data["validation_smoothed"] = float(state["smoothed_val_loss"])
                 logs_writer.add_scalars("losses", summary_data, epoch + 1)
 
                 # Log learning rate.

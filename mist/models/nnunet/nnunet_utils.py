@@ -160,3 +160,73 @@ def get_unet_params(
     # Add a kernel size of 3 to the last convolutional layer for the bottleneck.
     kernels.append(len(spacings) * [3])
     return kernels, strides, final_encoded_dimension
+
+
+def get_plain_unet_params(
+    patch_size: Sequence[int],
+    spacings: Sequence[float],
+) -> tuple[list[list[int]], list[list[int]], list[int]]:
+    """Plan the nnunet-plain topology, as nnU-Net's planner does.
+
+    Follows nnU-Net's get_pool_and_conv_props. Unlike get_unet_params, there is
+    no depth limit; an axis is downsampled only if its spacing is less than
+    twice the finest spacing among axes that can still be downsampled; and once
+    an axis's kernel size becomes 3 it stays 3.
+
+    Args:
+        patch_size: Size of the patch as a sequence of integers.
+        spacings: The voxel spacings of the input image as a sequence of floats.
+
+    Returns:
+        kernels: Kernel sizes for each stage.
+        strides: Strides for each stage; the first is always all ones.
+        divisors: What each patch axis must be divisible by for skip
+            connections to match in size.
+
+    Raises:
+        ValueError: If the patch size and spacings have different lengths.
+    """
+    if len(patch_size) != len(spacings):
+        raise ValueError(
+            "The patch size and the spacings must be the same length, "
+            f"but got {len(patch_size)} and {len(spacings)}."
+        )
+
+    dim = len(patch_size)
+    min_size = constants.PLAIN_MIN_FEATURE_MAP_SIZE
+    current_spacing = [float(s) for s in spacings]
+    current_size = [int(s) for s in patch_size]
+
+    strides = [[1] * dim]
+    kernels = []
+    kernel = [1] * dim
+    divisors = [1] * dim
+
+    while True:
+        # Axes long enough to halve, then those close to the finest of them.
+        axes = [i for i in range(dim) if current_size[i] >= 2 * min_size]
+        if not axes:
+            break
+        finest = min(current_spacing[i] for i in axes)
+        axes = [i for i in axes if current_spacing[i] / finest < 2]
+
+        # Downsampling one axis alone needs a bit more room.
+        if len(axes) == 1 and current_size[axes[0]] < 3 * min_size:
+            break
+
+        kernel = [
+            3 if k == 3 or current_spacing[i] / min(current_spacing) < 2 else 1
+            for i, k in enumerate(kernel)
+        ]
+        stride = [2 if i in axes else 1 for i in range(dim)]
+        for i in axes:
+            divisors[i] *= 2
+            current_spacing[i] *= 2
+            current_size[i] = (current_size[i] + 1) // 2
+
+        strides.append(stride)
+        kernels.append(list(kernel))
+
+    # The bottleneck always uses a kernel size of 3.
+    kernels.append([3] * dim)
+    return kernels, strides, divisors

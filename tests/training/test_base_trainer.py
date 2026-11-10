@@ -4,6 +4,7 @@ import json
 import math
 import os
 import pickle
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -542,6 +543,38 @@ def test_build_components_multi_gpu_wraps_with_ddp(tmp_pipeline, mist_args, monk
     assert "scaler" not in state
 
 
+def _is_compiled(model):
+    """Return whether a model was compiled in place."""
+    return getattr(model, "_compiled_call_impl", None) is not None
+
+
+def test_build_components_does_not_compile_on_a_cpu(tmp_pipeline, mist_args):
+    """On a CPU, the model isn't compiled, whatever the default."""
+    state = DummyTrainer(mist_args).build_components(rank=0, world_size=1)
+    assert not _is_compiled(state["model"])
+
+
+def test_build_components_old_config_without_compile_key(tmp_pipeline, mist_args):
+    """A config from before the setting trains uncompiled."""
+    results, _ = tmp_pipeline
+    cfg = json.loads((Path(results) / "config.json").read_text())
+    cfg["training"].pop("compile", None)
+    (Path(results) / "config.json").write_text(json.dumps(cfg))
+    state = DummyTrainer(mist_args).build_components(rank=0, world_size=1)
+    assert not _is_compiled(state["model"])
+
+
+@pytest.mark.parametrize("world_size", [1, 2])
+def test_build_components_compiles_in_place(tmp_pipeline, mist_args, monkeypatch, world_size):
+    """Compiling keeps the model's type and weight names, and comes before DDP."""
+    monkeypatch.setattr(bt.hardware, "resolve_compile", lambda requested: True)
+    state = DummyTrainer(mist_args).build_components(rank=0, world_size=world_size)
+    model = state["model"].module if world_size > 1 else state["model"]
+    assert isinstance(model, DummyModel)
+    assert _is_compiled(model)
+    assert not any(key.startswith("_orig_mod.") for key in model.state_dict())
+
+
 def test_setup_initializes_process_group_once(tmp_pipeline, mist_args, monkeypatch, patch_dist):
     """Ensure process group is initialized only once."""
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2, raising=False)
@@ -766,6 +799,21 @@ def test_run_cross_validation_skips_cudnn_tuning_on_cpu(tmp_pipeline, mist_args,
     assert torch.backends.cudnn.benchmark is False
 
 
+def test_init_warns_about_mistakes_in_config_file(tmp_pipeline, mist_args, monkeypatch):
+    """A misspelled key in config.json gets a warning, and training still starts."""
+    results, _ = tmp_pipeline
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["compil"] = True
+    cfg_path.write_text(json.dumps(cfg))
+    warnings = []
+    monkeypatch.setattr(bt, "print_warning", warnings.append)
+
+    DummyTrainer(mist_args)
+
+    assert any("training.compil'" in warning for warning in warnings)
+
+
 def test_init_warns_about_fortran_order_labels(tmp_pipeline, mist_args, monkeypatch):
     """Labels saved in Fortran order by an older mist_preprocess get a warning."""
     _, numpy_dir = tmp_pipeline
@@ -988,7 +1036,7 @@ def test_validation_else_branch_rank_nonzero(tmp_pipeline, mist_args, monkeypatc
 
 
 def test_validation_no_improvement_message(tmp_pipeline, mist_args, monkeypatch):
-    """Test that validation step logs no improvement message."""
+    """With a validation split, a non-improving epoch logs a message."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True, raising=False)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1, raising=False)
     monkeypatch.setattr(torch.cuda, "set_device", lambda idx: None, raising=False)
@@ -998,6 +1046,7 @@ def test_validation_no_improvement_message(tmp_pipeline, mist_args, monkeypatch)
 
     trainer.folds[0]["steps_per_epoch"] = 1
     trainer.folds[0]["val_images"] = ["val0", "val1"]
+    trainer.config["training"]["val_percent"] = 0.5
 
     monkeypatch.setattr(trainer, "setup", lambda *a, **k: None)
 
@@ -1006,7 +1055,7 @@ def test_validation_no_improvement_message(tmp_pipeline, mist_args, monkeypatch)
 
     trainer.train_fold(fold=0, rank=0, world_size=1)
 
-    assert any("Validation loss did not improve" in s for s in out)
+    assert any("Smoothed validation loss did not improve" in s for s in out)
 
 
 def test_run_cross_validation_rank0_prints_and_calls_all_folds(
@@ -1152,6 +1201,20 @@ def test_resume_raises_on_incompatible_patch_size_override(tmp_pipeline, mist_ar
 
     with pytest.raises(ValueError, match="incompatible with the saved checkpoint"):
         DummyTrainer(mist_args)
+
+
+@pytest.mark.parametrize("saved, override", [("nnunet", "nnunet-res"), ("nnunet-res", "nnunet")])
+def test_resume_accepts_architecture_alias(tmp_pipeline, mist_args, monkeypatch, saved, override):
+    """--resume treats an alias and the name it stands for as the same network."""
+    results, _ = tmp_pipeline
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["model"]["architecture"] = saved
+    cfg_path.write_text(json.dumps(cfg))
+
+    mist_args.resume = True
+    mist_args.model = override
+    DummyTrainer(mist_args)
 
 
 def test_resume_warns_on_loss_override(tmp_pipeline, mist_args, monkeypatch):
@@ -1488,7 +1551,8 @@ def test_check_resume_overrides_warns_on_all_training_diffs(tmp_pipeline, monkey
         learning_rate=0.001,  # differs from 0.01
         lr_scheduler="cosine",  # differs from "constant"
         warmup_epochs=3,  # differs from missing/0
-        val_percent=None,
+        val_percent=0.5,  # differs from 0.0
+        validate_every=2,  # differs from missing/1
         resume=True,
     )
 
@@ -1505,6 +1569,8 @@ def test_check_resume_overrides_warns_on_all_training_diffs(tmp_pipeline, monkey
     assert "--lr-scheduler" in combined
     assert "--warmup-epochs" in combined
     assert "--l2-penalty" in combined
+    assert "--val-percent" in combined
+    assert "--validate-every" in combined
 
 
 # =============================================
@@ -1705,3 +1771,726 @@ def test_train_fold_logs_alpha_for_composite_loss(tmp_pipeline, mist_args, monke
     # Each logged alpha value should be the fixed 0.7 returned by the stub.
     for _, value, _ in alpha_entries:
         assert value == pytest.approx(0.7)
+
+
+# =============================================
+# Model selection and validation frequency
+# =============================================
+
+
+class SequenceValTrainer(DummyTrainer):
+    """DummyTrainer whose validation loss follows a per-epoch sequence."""
+
+    def __init__(self, mist_args, val_losses):
+        self._val_losses = list(val_losses)
+        self.val_calls = []
+        super().__init__(mist_args)
+
+    def validation_step(self, **kwargs):
+        """Return this epoch's validation loss and record the call."""
+        epoch = kwargs["state"]["epoch"]
+        self.val_calls.append(epoch)
+        return torch.tensor(self._val_losses[epoch])
+
+
+def _set_epochs(results, epochs, **training):
+    """Rewrite config.json with the given epoch count and training keys."""
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["epochs"] = epochs
+    cfg["training"].update(training)
+    cfg_path.write_text(json.dumps(cfg))
+
+
+@pytest.fixture
+def saved_model_epochs(monkeypatch):
+    """Record the epoch at which each inference model is saved."""
+    saved = []
+    monkeypatch.setattr(
+        bt.BaseTrainer,
+        "_save_model",
+        staticmethod(lambda state, model_name: saved.append(state["epoch"])),
+    )
+    return saved
+
+
+def test_final_model_saved_once_on_last_epoch(tmp_pipeline, mist_args, saved_model_epochs):
+    """Without a validation split, only the final-epoch model is saved."""
+    results, _ = tmp_pipeline
+    _set_epochs(results, 3)
+
+    # Validation improves every epoch, which used to save each time.
+    trainer = SequenceValTrainer(mist_args, val_losses=[0.9, 0.5, 0.1])
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+
+    assert saved_model_epochs == [2]
+
+
+def test_final_model_saved_even_if_validation_never_improves(
+    tmp_pipeline, mist_args, saved_model_epochs
+):
+    """The final-epoch model is saved regardless of the validation loss."""
+    results, _ = tmp_pipeline
+    _set_epochs(results, 2)
+
+    trainer = SequenceValTrainer(mist_args, val_losses=[float("inf"), float("inf")])
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+
+    assert saved_model_epochs == [1]
+
+
+def test_best_model_uses_smoothed_validation_loss(tmp_pipeline, mist_args, saved_model_epochs):
+    """With a validation split, the best smoothed loss picks the saved model."""
+    results, _ = tmp_pipeline
+    _set_epochs(results, 4)
+
+    # A single low epoch (0.1) moves the smoothed loss only a little.
+    trainer = SequenceValTrainer(mist_args, val_losses=[1.0, 0.1, 1.0, 1.0])
+    trainer.config["training"]["val_percent"] = 0.5
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+
+    # Smoothed: 1.0, 0.91, 0.919, 0.9271 -> improves at epochs 0 and 1 only.
+    assert saved_model_epochs == [0, 1]
+
+
+def test_update_best_model_smoothing_math(tmp_pipeline, mist_args, saved_model_epochs):
+    """The smoothed loss is an EMA with the configured decay."""
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+
+    trainer._update_best_model(state, 1.0, "unused.pt")
+    assert state["smoothed_val_loss"] == pytest.approx(1.0)
+    assert state["best_val_loss"] == pytest.approx(1.0)
+
+    trainer._update_best_model(state, 0.0, "unused.pt")
+    decay = bt.TrainerConstants.VAL_LOSS_EMA_DECAY
+    assert state["smoothed_val_loss"] == pytest.approx(decay)
+    assert state["best_val_loss"] == pytest.approx(decay)
+    assert len(saved_model_epochs) == 2
+
+
+def test_update_best_model_restarts_after_non_finite(tmp_pipeline, mist_args, saved_model_epochs):
+    """A non-finite smoothed loss restarts smoothing at the next value."""
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+
+    trainer._update_best_model(state, float("inf"), "unused.pt")
+    assert saved_model_epochs == []
+
+    trainer._update_best_model(state, 0.3, "unused.pt")
+    assert state["smoothed_val_loss"] == pytest.approx(0.3)
+    assert len(saved_model_epochs) == 1
+
+
+def test_validate_every_skips_epochs_but_always_runs_last(tmp_pipeline, mist_args, monkeypatch):
+    """Validation runs every N epochs and on the last epoch only."""
+    results, _ = tmp_pipeline
+    _set_epochs(results, 5, validate_every=2)
+
+    writers = []
+
+    class CapturingWriter(DummySummaryWriter):
+        def __init__(self, log_dir):
+            super().__init__(log_dir)
+            writers.append(self)
+
+    monkeypatch.setattr(bt, "SummaryWriter", CapturingWriter)
+
+    trainer = SequenceValTrainer(mist_args, val_losses=[0.5] * 5)
+    trainer.train_fold(fold=0, rank=0, world_size=1)
+
+    # Fold 0 has two validation cases, so each validation makes two calls.
+    val_steps = len(trainer.folds[0]["val_images"])
+    assert trainer.val_calls == [e for e in (1, 3, 4) for _ in range(val_steps)]
+
+    losses = [e for e in writers[-1].scalars if e[0] == "losses"]
+    logged_val_steps = [step for _, values, step in losses if "validation" in values]
+    assert logged_val_steps == [2, 4, 5]
+    assert all("train" in values for _, values, _ in losses)
+
+
+def test_small_validation_split_warns(tmp_pipeline, mist_args, monkeypatch):
+    """A validation split with too few cases prints a warning."""
+    results, _ = tmp_pipeline
+    _set_epochs(results, 1, val_percent=0.5)
+
+    printed = []
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
+
+    DummyTrainer(mist_args)
+
+    combined = "\n".join(printed)
+    assert "holds out only 1 of 2" in combined
+
+
+def test_overwrite_config_sets_validate_every(tmp_pipeline, mist_args):
+    """--validate-every overrides training.validate_every."""
+    mist_args.validate_every = 3
+    trainer = DummyTrainer(mist_args)
+    assert trainer.config["training"]["validate_every"] == 3
+
+
+def test_checkpoint_roundtrips_smoothed_val_loss(tmp_pipeline, mist_args, monkeypatch):
+    """The smoothed validation loss survives save and load."""
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+    state["smoothed_val_loss"] = 0.37
+    trainer.save_checkpoint(fold=0, state=state)
+
+    fresh_state = trainer.build_components(rank=0, world_size=1)
+    trainer.load_checkpoint(fold=0, state=fresh_state)
+    assert fresh_state["smoothed_val_loss"] == pytest.approx(0.37)
+
+
+def test_load_pre_2_5_checkpoint_without_smoothed_loss(tmp_pipeline, mist_args, monkeypatch):
+    """Checkpoints without a smoothed loss load with smoothing reset."""
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+
+    trainer = DummyTrainer(mist_args)
+    state = trainer.build_components(rank=0, world_size=1)
+    trainer.save_checkpoint(fold=0, state=state)
+
+    path = trainer._checkpoint_path(0)
+    checkpoint = torch.load(path, weights_only=False)
+    del checkpoint["smoothed_val_loss"]
+    torch.save(checkpoint, path)
+
+    fresh_state = trainer.build_components(rank=0, world_size=1)
+    fresh_state["smoothed_val_loss"] = 0.5
+    trainer.load_checkpoint(fold=0, state=fresh_state)
+    assert fresh_state["smoothed_val_loss"] is None
+
+
+# =============================================
+# Planning the patch and batch size at training
+# =============================================
+
+
+def _set_auto(results, **overrides):
+    cfg_path = Path(results) / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["spatial_config"]["patch_size"] = overrides.get("patch", "auto")
+    cfg["training"]["batch_size_per_gpu"] = overrides.get("batch", "auto")
+    cfg["preprocessing"]["median_resampled_image_size"] = [64, 64, 64]
+    cfg["model"]["params"] = {"in_channels": 1, "out_channels": 2}
+    cfg_path.write_text(json.dumps(cfg))
+    return cfg_path
+
+
+def _fake_plan(monkeypatch, calls):
+    def plan(config, num_cases, num_gpus):
+        calls.append((num_cases, num_gpus))
+        return bt.patch_planning.Plan([32, 32, 16], 3, 2 * 1024**3)
+
+    monkeypatch.setattr(bt.patch_planning, "plan_for_config", plan)
+    monkeypatch.setattr(bt.patch_planning, "detect_gpu_memory_bytes", lambda: (8.0 * 1024**3, 1))
+
+
+def test_first_training_run_plans_and_saves(tmp_pipeline, mist_args, monkeypatch):
+    """An "auto" config is planned once and written back to config.json."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto(results)
+    calls = []
+    _fake_plan(monkeypatch, calls)
+    trainer = DummyTrainer(mist_args)
+
+    assert len(calls) == 1 and calls[0][0] == 4  # All 4 cases in train_paths.csv.
+    saved = json.loads(cfg_path.read_text())
+    assert saved["spatial_config"]["patch_size"] == [32, 32, 16]
+    assert saved["training"]["batch_size_per_gpu"] == 3
+    assert saved["planning"]["gpu_memory_gb"] == 8.0
+    assert trainer.batch_size == 3
+
+
+def test_later_runs_reuse_the_saved_plan_and_only_warn(tmp_pipeline, mist_args, monkeypatch):
+    """A saved plan is kept, whichever GPU the later run has."""
+    results, _ = tmp_pipeline
+    _set_auto(results)
+    calls = []
+    _fake_plan(monkeypatch, calls)
+    DummyTrainer(mist_args)
+
+    checked = []
+    monkeypatch.setattr(
+        bt.patch_planning, "check_plan_fits", lambda config, patch_was_set: checked.append(1)
+    )
+    trainer = DummyTrainer(mist_args)
+    assert len(calls) == 1 and checked == [1]
+    assert trainer.config["spatial_config"]["patch_size"] == [32, 32, 16]
+
+
+def test_hand_set_values_reach_the_planner_unchanged(tmp_pipeline, mist_args, monkeypatch):
+    """--patch-size is in the config by the time planning reads it."""
+    results, _ = tmp_pipeline
+    _set_auto(results)
+    seen = []
+
+    def plan(config, num_cases, num_gpus):
+        seen.append(config["spatial_config"]["patch_size"])
+        return bt.patch_planning.Plan(config["spatial_config"]["patch_size"], 2, 1024**3)
+
+    monkeypatch.setattr(bt.patch_planning, "plan_for_config", plan)
+    monkeypatch.setattr(bt.patch_planning, "detect_gpu_memory_bytes", lambda: (8.0 * 1024**3, 1))
+    mist_args.patch_size = [48, 48, 48]
+    DummyTrainer(mist_args)
+    assert seen == [[48, 48, 48]]
+
+
+def test_configs_with_real_values_are_never_replanned(tmp_pipeline, mist_args, monkeypatch):
+    """Configs from earlier versions keep their patch and batch size."""
+    calls = []
+    _fake_plan(monkeypatch, calls)
+    trainer = DummyTrainer(mist_args)
+    assert calls == []
+    assert trainer.config["spatial_config"]["patch_size"] == [16, 16, 16]
+
+
+def _planned_run(tmp_pipeline, mist_args, monkeypatch):
+    """Run first-time planning with a fake plan; return the config path and calls."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto(results)
+    calls = []
+    _fake_plan(monkeypatch, calls)
+    DummyTrainer(mist_args)
+    assert len(calls) == 1
+    return cfg_path, calls
+
+
+def test_changing_the_network_plans_again(tmp_pipeline, mist_args, monkeypatch):
+    """A saved plan for another network is replaced, with the new one recorded."""
+    cfg_path, calls = _planned_run(tmp_pipeline, mist_args, monkeypatch)
+    mist_args.model = "other"
+    printed = []
+    monkeypatch.setattr(console_mod.console, "print", lambda msg: printed.append(str(msg)))
+    DummyTrainer(mist_args)
+    assert len(calls) == 2
+    assert json.loads(cfg_path.read_text())["planning"]["architecture"] == "other"
+    assert any("planning again for other" in message for message in printed)
+
+
+def test_same_network_keeps_the_saved_plan(tmp_pipeline, mist_args, monkeypatch):
+    """Naming the network the plan was made for doesn't replan."""
+    _, calls = _planned_run(tmp_pipeline, mist_args, monkeypatch)
+    mist_args.model = "dummy"
+    DummyTrainer(mist_args)
+    assert len(calls) == 1
+
+
+def test_an_alias_of_the_planned_network_keeps_the_saved_plan(tmp_pipeline, mist_args, monkeypatch):
+    """nnunet and nnunet-res are the same network."""
+    cfg_path, calls = _planned_run(tmp_pipeline, mist_args, monkeypatch)
+    cfg = json.loads(cfg_path.read_text())
+    cfg["model"]["architecture"] = "nnunet"
+    cfg["planning"]["architecture"] = "nnunet"
+    cfg_path.write_text(json.dumps(cfg))
+    mist_args.model = "nnunet-res"
+    DummyTrainer(mist_args)
+    assert len(calls) == 1
+
+
+def test_changing_the_network_keeps_a_patch_set_on_the_command_line(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """--patch-size with a new --model stays, and only the batch is planned again."""
+    cfg_path, calls = _planned_run(tmp_pipeline, mist_args, monkeypatch)
+    seen = []
+    real = bt.patch_planning.plan_for_config
+
+    def plan(config, num_cases, num_gpus):
+        seen.append(
+            (config["spatial_config"]["patch_size"], config["training"]["batch_size_per_gpu"])
+        )
+        return real(config, num_cases, num_gpus)
+
+    monkeypatch.setattr(bt.patch_planning, "plan_for_config", plan)
+    mist_args.model = "other"
+    mist_args.patch_size = [48, 48, 48]
+    DummyTrainer(mist_args)
+    assert seen == [([48, 48, 48], "auto")]
+
+
+def test_changing_the_network_keeps_a_batch_edited_in_config(tmp_pipeline, mist_args, monkeypatch):
+    """A batch edited after planning isn't the plan's, so it stays."""
+    cfg_path, calls = _planned_run(tmp_pipeline, mist_args, monkeypatch)
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["batch_size_per_gpu"] = 7
+    cfg_path.write_text(json.dumps(cfg))
+    seen = []
+    real = bt.patch_planning.plan_for_config
+
+    def plan(config, num_cases, num_gpus):
+        seen.append(
+            (config["spatial_config"]["patch_size"], config["training"]["batch_size_per_gpu"])
+        )
+        return real(config, num_cases, num_gpus)
+
+    monkeypatch.setattr(bt.patch_planning, "plan_for_config", plan)
+    mist_args.model = "other"
+    DummyTrainer(mist_args)
+    assert seen == [("auto", 7)]
+
+
+def test_config_without_a_plan_keeps_its_values_for_a_new_network(
+    tmp_pipeline, mist_args, monkeypatch
+):
+    """Configs from earlier versions have no plan to replace."""
+    calls = []
+    _fake_plan(monkeypatch, calls)
+    mist_args.model = "other"
+    trainer = DummyTrainer(mist_args)
+    assert calls == []
+    assert trainer.config["spatial_config"]["patch_size"] == [16, 16, 16]
+
+
+def test_resume_with_a_changed_network_still_raises(tmp_pipeline, mist_args, monkeypatch):
+    """--resume can't replan a running job; the architecture check stops it first."""
+    _, calls = _planned_run(tmp_pipeline, mist_args, monkeypatch)
+    mist_args.model = "other"
+    mist_args.resume = True
+    with pytest.raises(ValueError, match="incompatible with the saved checkpoint"):
+        DummyTrainer(mist_args)
+    assert len(calls) == 1
+
+
+# =============================================
+# What planning prints
+# =============================================
+
+
+@pytest.fixture
+def printed(monkeypatch):
+    """Capture everything printed through the shared console."""
+    messages = []
+    monkeypatch.setattr(console_mod.console, "print", lambda msg="": messages.append(str(msg)))
+    return messages
+
+
+def test_first_run_announces_planning_then_the_result(
+    tmp_pipeline, mist_args, monkeypatch, printed
+):
+    """Planning shows a header, what it's planning for, and what it chose, in order."""
+    results, _ = tmp_pipeline
+    _set_auto(results)
+    _fake_plan(monkeypatch, [])
+    DummyTrainer(mist_args)
+
+    combined = "\n".join(printed)
+    header = combined.index("Planning patch and batch size")
+    target = combined.index("Planning dummy for a budget of 8 GiB on this 8.0 GiB GPU")
+    result = combined.index("Patch [32, 32, 16], batch size 3 per GPU")
+    assert header < target < result
+    assert "Saved to config.json" in combined
+
+
+def test_first_run_without_a_gpu_says_so(tmp_pipeline, mist_args, monkeypatch, printed):
+    """The default memory isn't presented as if it were a real GPU."""
+    results, _ = tmp_pipeline
+    _set_auto(results)
+    _fake_plan(monkeypatch, [])
+    monkeypatch.setattr(bt.patch_planning, "detect_gpu_memory_bytes", lambda: (None, 0))
+    DummyTrainer(mist_args)
+    assert any("since none was found" in message for message in printed)
+
+
+def test_first_run_saves_the_memory_budget_it_planned_for(tmp_pipeline, mist_args, monkeypatch):
+    """The plan records the budget, so later runs know it wasn't the whole GPU."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto(results)
+    _fake_plan(monkeypatch, [])
+    DummyTrainer(mist_args)
+    assert json.loads(Path(cfg_path).read_text())["planning"]["memory_budget_gb"] == 8.0
+
+
+def test_later_runs_say_they_reuse_the_saved_values(tmp_pipeline, mist_args, monkeypatch, printed):
+    """Reusing a plan prints the values, with no planning header."""
+    results, _ = tmp_pipeline
+    _set_auto(results)
+    _fake_plan(monkeypatch, [])
+    DummyTrainer(mist_args)
+    printed.clear()
+
+    DummyTrainer(mist_args)
+    combined = "\n".join(printed)
+    assert "Using patch [32, 32, 16] and batch size 3 per GPU from config.json" in combined
+    assert "Planning patch and batch size" not in combined
+
+
+# =============================================
+# Choosing the precision
+# =============================================
+
+
+def _set_auto_amp(results, **overrides):
+    cfg_path = _set_auto(results, **overrides)
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["amp"] = "auto"
+    cfg_path.write_text(json.dumps(cfg))
+    return cfg_path
+
+
+def _fake_precision(monkeypatch, amp, bf16_supported=True, gpu=True):
+    """Fake the GPU, the BF16 check, the plans, and the speed test; record what's tested."""
+    tested = []
+
+    def plan(config, num_cases, num_gpus):
+        batch = {True: 8, False: 4, "fp16": 6}[config["training"]["amp"]]
+        return bt.patch_planning.Plan([32, 32, 16], batch, 2 * 1024**3)
+
+    def choose(architecture, model_kwargs, plans, memory, compiled):
+        batches = {key: value.batch_size_per_gpu for key, value in plans.items()}
+        tested.append((architecture, batches))
+        return bt.precision_test.Choice(amp, "Speeds were measured.")
+
+    detected = (8.0 * 1024**3, 1) if gpu else (None, 0)
+    monkeypatch.setattr(bt.patch_planning, "plan_for_config", plan)
+    monkeypatch.setattr(bt.patch_planning, "detect_gpu_memory_bytes", lambda: detected)
+    monkeypatch.setattr(bt.hardware, "bf16_supported", lambda: bf16_supported)
+    monkeypatch.setattr(bt.precision_test, "choose_precision", choose)
+    return tested
+
+
+@pytest.mark.parametrize("compiled", [False, True])
+def test_auto_amp_tests_the_compile_setting_training_will_use(
+    tmp_pipeline, mist_args, monkeypatch, compiled
+):
+    """The speed test compiles the model only if training will."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto_amp(results)
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["compile"] = compiled
+    cfg_path.write_text(json.dumps(cfg))
+    _fake_precision(monkeypatch, amp=True)
+    monkeypatch.setattr(bt.hardware, "resolve_compile", bool)
+    fake_choose = bt.precision_test.choose_precision
+    seen = []
+
+    def choose(*args):
+        seen.append(args[-1])
+        return fake_choose(*args)
+
+    monkeypatch.setattr(bt.precision_test, "choose_precision", choose)
+    DummyTrainer(mist_args)
+    assert seen == [compiled]
+
+
+def test_auto_amp_uses_the_winning_precision_and_its_plan(
+    tmp_pipeline, mist_args, monkeypatch, printed
+):
+    """FP32 winning saves amp false with the FP32 plan's batch size."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto_amp(results)
+    tested = _fake_precision(monkeypatch, amp=False)
+    trainer = DummyTrainer(mist_args)
+
+    assert tested == [("dummy", {True: 8, False: 4, "fp16": 6})]
+    assert trainer.config["training"]["amp"] is False
+    assert trainer.config["training"]["batch_size_per_gpu"] == 4
+    saved = json.loads(cfg_path.read_text())
+    assert saved["training"]["amp"] is False
+    assert saved["planning"]["amp"] is False
+    assert saved["planning"]["amp_auto"] is True
+
+    combined = "\n".join(printed)
+    assert "BF16, FP32, or FP16" in combined
+    assert combined.index("Speeds were measured") < combined.index("batch size 4 per GPU")
+
+
+def test_auto_amp_keeps_the_bf16_plan_when_bf16_wins(tmp_pipeline, mist_args, monkeypatch):
+    """BF16 winning saves amp true with the BF16 plan's batch size."""
+    results, _ = tmp_pipeline
+    _set_auto_amp(results)
+    _fake_precision(monkeypatch, amp=True)
+    trainer = DummyTrainer(mist_args)
+    assert trainer.config["training"]["amp"] is True
+    assert trainer.config["training"]["batch_size_per_gpu"] == 8
+
+
+def test_auto_amp_runs_the_speed_test_once(tmp_pipeline, mist_args, monkeypatch):
+    """Later runs reuse the saved choice."""
+    results, _ = tmp_pipeline
+    _set_auto_amp(results)
+    tested = _fake_precision(monkeypatch, amp=False)
+    DummyTrainer(mist_args)
+    trainer = DummyTrainer(mist_args)
+    assert len(tested) == 1
+    assert trainer.config["training"]["amp"] is False
+
+
+def test_auto_amp_without_bf16_hardware_times_fp32_and_fp16(
+    tmp_pipeline, mist_args, monkeypatch, printed
+):
+    """A pre-Ampere GPU compares FP32 with FP16, without warning about BF16."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto_amp(results)
+    tested = _fake_precision(monkeypatch, amp="fp16", bf16_supported=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        trainer = DummyTrainer(mist_args)
+    assert tested == [("dummy", {False: 4, "fp16": 6})]
+    assert trainer.config["training"]["batch_size_per_gpu"] == 6
+    saved = json.loads(cfg_path.read_text())
+    assert saved["training"]["amp"] == "fp16"
+    assert saved["planning"]["amp"] == "fp16"
+    assert "FP32 or FP16" in "\n".join(printed)
+
+
+def test_auto_amp_without_a_gpu_is_fp32_without_a_test(tmp_pipeline, mist_args, monkeypatch):
+    """With no GPU there's nothing to time, and the choice still reaches config.json."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto_amp(results, patch=[16, 16, 16], batch=2)
+    tested = _fake_precision(monkeypatch, amp=True, bf16_supported=False, gpu=False)
+    DummyTrainer(mist_args)
+    assert tested == []
+    assert json.loads(cfg_path.read_text())["training"]["amp"] is False
+
+
+def test_auto_amp_is_tested_even_with_a_hand_set_plan(tmp_pipeline, mist_args, monkeypatch):
+    """A hand-set patch and batch stay, and the precision is still chosen."""
+    results, _ = tmp_pipeline
+    _set_auto_amp(results, patch=[16, 16, 16], batch=2)
+    tested = _fake_precision(monkeypatch, amp=False)
+
+    def keep(config, num_cases, num_gpus):
+        return bt.patch_planning.Plan(
+            config["spatial_config"]["patch_size"],
+            config["training"]["batch_size_per_gpu"],
+            1024**3,
+        )
+
+    monkeypatch.setattr(bt.patch_planning, "plan_for_config", keep)
+    trainer = DummyTrainer(mist_args)
+    assert len(tested) == 1
+    assert trainer.config["training"]["amp"] is False
+    assert trainer.config["spatial_config"]["patch_size"] == [16, 16, 16]
+    assert trainer.config["training"]["batch_size_per_gpu"] == 2
+
+
+@pytest.mark.parametrize("amp", [True, False])
+def test_amp_set_by_hand_skips_the_speed_test(tmp_pipeline, mist_args, monkeypatch, amp):
+    """true and false are kept as they are, including in configs from earlier versions."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto(results)
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["amp"] = amp
+    cfg_path.write_text(json.dumps(cfg))
+    tested = _fake_precision(monkeypatch, amp=not amp)
+    trainer = DummyTrainer(mist_args)
+    assert tested == []
+    assert trainer.config["training"]["amp"] is amp
+    assert json.loads(cfg_path.read_text())["planning"]["amp_auto"] is False
+
+
+def test_changing_the_network_tests_a_chosen_precision_again(tmp_pipeline, mist_args, monkeypatch):
+    """Which precision is faster can depend on the network."""
+    results, _ = tmp_pipeline
+    _set_auto_amp(results)
+    tested = _fake_precision(monkeypatch, amp=False)
+    DummyTrainer(mist_args)
+    mist_args.model = "other"
+    DummyTrainer(mist_args)
+    assert [entry[0] for entry in tested] == ["dummy", "other"]
+
+
+def test_changing_the_network_keeps_a_precision_set_by_hand(tmp_pipeline, mist_args, monkeypatch):
+    """A hand-set amp survives replanning for another network."""
+    results, _ = tmp_pipeline
+    cfg_path = _set_auto(results)
+    cfg = json.loads(cfg_path.read_text())
+    cfg["training"]["amp"] = True
+    cfg_path.write_text(json.dumps(cfg))
+    tested = _fake_precision(monkeypatch, amp=False)
+    DummyTrainer(mist_args)
+    mist_args.model = "other"
+    trainer = DummyTrainer(mist_args)
+    assert tested == []
+    assert trainer.config["training"]["amp"] is True
+
+
+class _FakeScaler:
+    """A gradient scaler whose scale and on/off state are set by the test."""
+
+    def __init__(self, scale=1024.0, enabled=True):
+        self.scale = scale
+        self.enabled = enabled
+
+    def is_enabled(self):
+        return self.enabled
+
+    def get_scale(self):
+        return self.scale
+
+
+def _fp16_state(scale=1024.0):
+    return {"grad_scaler": _FakeScaler(scale), "nonfinite_steps": 0}
+
+
+def test_fp16_tolerates_a_few_nonfinite_losses(tmp_pipeline, mist_args, monkeypatch):
+    """Gradient scaling skips the odd overflow, so FP16 carries on."""
+    trainer = DummyTrainer(mist_args)
+    trainer.config["training"]["amp"] = "fp16"
+    state = _fp16_state()
+    assert trainer._leave_fp16_if_failing(state, float("nan"), rank=0) is True
+    assert trainer._leave_fp16_if_failing(state, 0.5, rank=0) is True
+    assert state["nonfinite_steps"] == 0
+    assert trainer.config["training"]["amp"] == "fp16"
+
+
+@pytest.mark.parametrize("bf16", [True, False])
+def test_fp16_falls_back_after_many_nonfinite_losses(tmp_pipeline, mist_args, monkeypatch, bf16):
+    """Too many NaN losses in a row switch the fold to BF16 or FP32, with a warning."""
+    trainer = DummyTrainer(mist_args)
+    trainer.config["training"]["amp"] = "fp16"
+    monkeypatch.setattr(bt.hardware, "bf16_supported", lambda: bf16)
+    warned = []
+    monkeypatch.setattr(bt, "print_warning", warned.append)
+    state = _fp16_state()
+    for _ in range(bt.TrainerConstants.FP16_MAX_NONFINITE_STEPS - 1):
+        assert trainer._leave_fp16_if_failing(state, float("inf"), rank=0) is True
+    assert trainer._leave_fp16_if_failing(state, float("inf"), rank=0) is False
+    assert trainer.config["training"]["amp"] is bf16
+    assert not state["grad_scaler"].is_enabled()
+    assert len(warned) == 1 and ("BF16" if bf16 else "FP32") in warned[0]
+
+
+def test_fp16_falls_back_when_the_gradient_scale_collapses(tmp_pipeline, mist_args, monkeypatch):
+    """A gradient scale below the minimum means FP16 keeps overflowing."""
+    trainer = DummyTrainer(mist_args)
+    trainer.config["training"]["amp"] = "fp16"
+    monkeypatch.setattr(bt.hardware, "bf16_supported", lambda: False)
+    monkeypatch.setattr(bt, "print_warning", lambda message: None)
+    state = _fp16_state(scale=0.5)
+    assert trainer._leave_fp16_if_failing(state, 0.5, rank=0) is True
+    assert trainer.config["training"]["amp"] is False
+
+
+def test_bf16_and_fp32_leave_nonfinite_losses_to_the_loop(tmp_pipeline, mist_args):
+    """Outside FP16 the check does nothing, so a NaN loss still stops training."""
+    trainer = DummyTrainer(mist_args)
+    state = {"grad_scaler": _FakeScaler(enabled=False), "nonfinite_steps": 0}
+    assert trainer._leave_fp16_if_failing(state, float("nan"), rank=0) is False
+
+
+def test_checkpoint_keeps_the_fp16_gradient_scale(tmp_pipeline, mist_args, monkeypatch):
+    """Resuming FP16 training carries on with the saved gradient scale."""
+    monkeypatch.setattr(torch, "save", _real_torch_save)
+    monkeypatch.setattr(torch, "load", _real_torch_load)
+    monkeypatch.setattr(bt.BaseTrainer, "save_checkpoint", _real_save_checkpoint)
+    monkeypatch.setattr(bt.hardware, "get_accelerator_type", lambda: "cpu")
+
+    trainer = DummyTrainer(mist_args)
+    trainer.config["training"]["amp"] = "fp16"
+    state = trainer.build_components(rank=0, world_size=1)
+    assert state["grad_scaler"].is_enabled()
+    state["grad_scaler"].scale(torch.tensor(1.0))  # The scale starts on first use.
+    state["grad_scaler"].update(new_scale=128.0)
+    trainer.save_checkpoint(fold=0, state=state)
+
+    fresh = trainer.build_components(rank=0, world_size=1)
+    trainer.load_checkpoint(fold=0, state=fresh)
+    assert fresh["grad_scaler"].get_scale() == 128.0

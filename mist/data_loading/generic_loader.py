@@ -31,19 +31,10 @@ state, making all of them draw the same "random" sequence independently.
 `training.seed` still governs the (much simpler, single-process) shuffling
 of case order between epochs, which doesn't have that pitfall.
 
-Augmentations (Stage 3) run on CPU tensors/NumPy inside
-`Dataset.__getitem__`, matching `data_loading_utils.py`'s DALI-side
-transforms one for one -- same constants (`data_loading_constants.py`,
-which has no DALI dependency and is safe to import here), same
-probabilities and ranges -- with one asymmetry inherited directly from
-`dali_loader.py`'s own `TrainPipeline.define_graph`: zoom only ever runs
-when there is no DTM. DALI's own pipeline skips zoom outright whenever
-DTMs are present (rather than resizing the DTM to match), so this mirrors
-that rather than "fixing" it -- Stage 3's job is parity with the existing
-DALI transforms, not new behavior. No claim of exact numerical parity with
-DALI's own transforms is made or needed (different RNG stream, and likely
-different interpolation kernels for zoom) -- see the Stage 3 release gate
-in `cpu_rocm_support_plan.md`.
+Augmentation is not done here: like dali_loader.py, this loader only
+extracts patches (enlarged by `patch_margin` when rotation or scaling is
+enabled), and mist.data_loading.augmentation augments each batch in PyTorch
+on the training device, so both loaders share one implementation.
 
 Every `DataLoader` built here with `num_workers > 0` explicitly requests
 the "fork" multiprocessing context (see `_multiprocessing_context()`).
@@ -64,10 +55,8 @@ from typing import Any
 
 import numpy as np
 import torch
-from scipy import ndimage
 from torch.utils.data import DataLoader, Dataset
 
-from mist.data_loading.data_loading_constants import DataLoadingConstants as constants
 from mist.utils import hardware
 
 # Validation and test loaders read whole volumes, which for LiTS-sized images
@@ -218,8 +207,7 @@ def _load_case(path: str) -> np.ndarray:
     at disk read throughput instead.
 
     Safe to do unconditionally: every augmentation function in this module
-    (`_flip_fn`, `_zoom_fn`, `_noise_fn`, `_blur_fn`, `_brightness_fn`,
-    `_contrast_fn`) already only reads its input and returns a new array
+    (`_extract_patch` and its helpers) already only reads its input and returns a new array
     rather than mutating in place, and `_to_channels_first` forces a real
     writable, contiguous copy (`np.ascontiguousarray`) as the last step
     before wrapping in a `torch.Tensor` -- so a read-only memmap view never
@@ -290,6 +278,35 @@ def _foreground_anchor_center(
     return None
 
 
+def _slice_with_padding(
+    array: np.ndarray,
+    starts: Sequence[int],
+    shape: Sequence[int],
+) -> np.ndarray:
+    """Slice a (D, H, W, C) array, zero-padding any part outside its bounds.
+
+    Matches dali_loader.py's `fn.slice(..., out_of_bounds_policy="pad")`.
+    """
+    before = [max(0, -start) for start in starts]
+    after = [
+        max(0, start + size - dim)
+        for start, size, dim in zip(starts, shape, array.shape[:3], strict=True)
+    ]
+    if any(before) or any(after):
+        array = np.pad(
+            array,
+            [*zip(before, after, strict=True), (0, 0)],
+            mode="constant",
+            constant_values=0,
+        )
+    return array[
+        tuple(
+            slice(start + pad, start + pad + size)
+            for start, pad, size in zip(starts, before, shape, strict=True)
+        )
+    ]
+
+
 def _extract_patch(
     image: np.ndarray,
     label: np.ndarray,
@@ -298,6 +315,7 @@ def _extract_patch(
     labels: list[int] | None,
     oversampling: float | None,
     rng: np.random.Generator,
+    patch_margin: tuple[int, int, int] = (0, 0, 0),
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """Extract one (D, H, W, C)-shaped patch, foreground-oversampled.
 
@@ -306,7 +324,8 @@ def _extract_patch(
     foreground voxel (falling back to a plain random crop if the example has
     no foreground at all); otherwise the crop is placed uniformly at random.
     See the module docstring for why this matches DALI statistically, not
-    exactly.
+    exactly. The crop is then extended by `patch_margin` voxels on each side
+    (zero-padded where it leaves the image), keeping the same center.
     """
     image = _pad_to_roi(image, roi_size)
     label = _pad_to_roi(label, roi_size)
@@ -326,14 +345,13 @@ def _extract_patch(
         )
         for axis in range(3)
     ]
-    slices = tuple(
-        slice(anchor, anchor + roi) for anchor, roi in zip(anchors, roi_size, strict=True)
-    )
+    starts = [anchor - margin for anchor, margin in zip(anchors, patch_margin, strict=True)]
+    shape = [roi + 2 * margin for roi, margin in zip(roi_size, patch_margin, strict=True)]
 
-    image = image[slices]
-    label = label[slices]
+    image = _slice_with_padding(image, starts, shape)
+    label = _slice_with_padding(label, starts, shape)
     if dtm is not None:
-        dtm = dtm[slices]
+        dtm = _slice_with_padding(dtm, starts, shape)
     return image, label, dtm
 
 
@@ -356,179 +374,6 @@ def _to_channels_first(array: np.ndarray) -> torch.Tensor:
     return torch.from_numpy(np.array(np.moveaxis(array, -1, 0), order="C"))
 
 
-def _match_roi_size(array: np.ndarray, roi_size: tuple[int, int, int]) -> np.ndarray:
-    """Guarantee exactly roi_size spatial dims after a scipy zoom's rounding.
-
-    `scipy.ndimage.zoom` computes its output shape as
-    `round(input_shape * zoom_factor)` per axis; floating-point zoom
-    factors can, in principle, land one voxel short or long of the intended
-    `roi_size`. Padding (if short) then trimming (if long) forces an exact
-    match rather than let a shape mismatch propagate downstream, where it
-    would break stacking patches into a batch.
-    """
-    array = _pad_to_roi(array, roi_size)
-    return array[tuple(slice(0, roi) for roi in roi_size)]
-
-
-def _flip_fn(
-    image: np.ndarray,
-    label: np.ndarray,
-    dtm: np.ndarray | None,
-    rng: np.random.Generator,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-    """Independently flip each spatial axis with probability 0.5.
-
-    Matches dali_loader.py's flips_fn: three independent coin flips --
-    depthwise (axis 0), vertical (axis 1), horizontal (axis 2) -- applied
-    identically to image, label, and DTM (when present).
-    """
-    axes = [
-        axis
-        for axis, probability in enumerate(
-            (
-                constants.DEPTH_FLIP_PROBABILITY,
-                constants.VERTICAL_FLIP_PROBABILITY,
-                constants.HORIZONTAL_FLIP_PROBABILITY,
-            )
-        )
-        if rng.random() < probability
-    ]
-    if not axes:
-        return image, label, dtm
-    image = np.flip(image, axis=axes).copy()
-    label = np.flip(label, axis=axes).copy()
-    if dtm is not None:
-        dtm = np.flip(dtm, axis=axes).copy()
-    return image, label, dtm
-
-
-def _zoom_fn(
-    image: np.ndarray,
-    label: np.ndarray,
-    roi_size: tuple[int, int, int],
-    rng: np.random.Generator,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Randomly zoom in on the patch, resizing back to roi_size.
-
-    Matches dali_loader.py's zoom_fn: with probability `ZOOM_FN_PROBABILITY`,
-    center-crop to `scale` (Uniform[ZOOM_FN_RANGE_MIN, ZOOM_FN_RANGE_MAX])
-    times `roi_size` along every axis, then resize back up to `roi_size` --
-    cubic interpolation for the image, nearest-neighbor for the label so its
-    class values aren't corrupted by interpolation.
-
-    Only ever called on the DTM-free path -- see the module docstring's note
-    on the zoom/DTM asymmetry inherited from dali_loader.py.
-    """
-    if rng.random() >= constants.ZOOM_FN_PROBABILITY:
-        return image, label
-
-    scale = rng.uniform(constants.ZOOM_FN_RANGE_MIN, constants.ZOOM_FN_RANGE_MAX)
-    cropped_size = tuple(max(1, int(round(scale * roi))) for roi in roi_size)
-    starts = tuple((roi_size[axis] - cropped_size[axis]) // 2 for axis in range(3))
-    crop = tuple(
-        slice(start, start + size) for start, size in zip(starts, cropped_size, strict=True)
-    )
-    zoom_factors = tuple(roi_size[axis] / cropped_size[axis] for axis in range(3)) + (1.0,)
-
-    image = ndimage.zoom(image[crop], zoom_factors, order=3)
-    label = ndimage.zoom(label[crop], zoom_factors, order=0)
-    return _match_roi_size(image, roi_size), _match_roi_size(label, roi_size)
-
-
-def _noise_fn(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """Add zero-mean Gaussian noise, clamped to the original value range.
-
-    Matches dali_loader.py's noise_fn: stddev ~ Uniform(NOISE_FN_RANGE_MIN,
-    NOISE_FN_RANGE_MAX), applied with probability NOISE_FN_PROBABILITY.
-    """
-    if rng.random() >= constants.NOISE_FN_PROBABILITY:
-        return image
-    stddev = rng.uniform(constants.NOISE_FN_RANGE_MIN, constants.NOISE_FN_RANGE_MAX)
-    noise = rng.normal(loc=0.0, scale=stddev, size=image.shape).astype(image.dtype)
-    return np.clip(image + noise, image.min(), image.max())
-
-
-def _blur_fn(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """Apply Gaussian blur, clamped to the original value range.
-
-    Matches dali_loader.py's blur_fn: sigma ~ Uniform(BLUR_FN_RANGE_MIN,
-    BLUR_FN_RANGE_MAX), applied with probability BLUR_FN_PROBABILITY, over
-    the spatial axes only (never across the channel axis).
-    """
-    if rng.random() >= constants.BLUR_FN_PROBABILITY:
-        return image
-    sigma = rng.uniform(constants.BLUR_FN_RANGE_MIN, constants.BLUR_FN_RANGE_MAX)
-    blurred = ndimage.gaussian_filter(image, sigma=(sigma, sigma, sigma, 0))
-    return np.clip(blurred, image.min(), image.max())
-
-
-def _brightness_fn(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """Scale intensities by a random brightness factor.
-
-    Matches dali_loader.py's brightness_fn: scale ~
-    Uniform(BRIGHTNESS_FN_RANGE_MIN, BRIGHTNESS_FN_RANGE_MAX), applied with
-    probability BRIGHTNESS_FN_PROBABILITY (identity otherwise).
-    """
-    if rng.random() >= constants.BRIGHTNESS_FN_PROBABILITY:
-        return image
-    scale = rng.uniform(constants.BRIGHTNESS_FN_RANGE_MIN, constants.BRIGHTNESS_FN_RANGE_MAX)
-    return image * scale
-
-
-def _contrast_fn(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """Scale intensities about their own range, clamped back to it.
-
-    Matches dali_loader.py's contrast_fn: scale ~
-    Uniform(CONTRAST_FN_RANGE_MIN, CONTRAST_FN_RANGE_MAX), applied with
-    probability CONTRAST_FN_PROBABILITY (identity otherwise).
-    """
-    if rng.random() >= constants.CONTRAST_FN_PROBABILITY:
-        return image
-    min_, max_ = image.min(), image.max()
-    scale = rng.uniform(constants.CONTRAST_FN_RANGE_MIN, constants.CONTRAST_FN_RANGE_MAX)
-    return np.clip(image * scale, min_, max_)
-
-
-def _apply_augmentations(
-    image: np.ndarray,
-    label: np.ndarray,
-    dtm: np.ndarray | None,
-    roi_size: tuple[int, int, int],
-    use_flips: bool,
-    use_zoom: bool,
-    use_noise: bool,
-    use_blur: bool,
-    use_brightness: bool,
-    use_contrast: bool,
-    rng: np.random.Generator,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-    """Apply MIST's training-time augmentations to one CPU-side patch.
-
-    Mirrors dali_loader.py's TrainPipeline.define_graph precedence exactly,
-    including the zoom/DTM asymmetry described in the module docstring:
-    zoom only ever runs on the DTM-free path.
-    """
-    if dtm is not None:
-        if use_flips:
-            image, label, dtm = _flip_fn(image, label, dtm, rng)
-    else:
-        if use_zoom:
-            image, label = _zoom_fn(image, label, roi_size, rng)
-        if use_flips:
-            image, label, dtm = _flip_fn(image, label, None, rng)
-
-    if use_noise:
-        image = _noise_fn(image, rng)
-    if use_blur:
-        image = _blur_fn(image, rng)
-    if use_brightness:
-        image = _brightness_fn(image, rng)
-    if use_contrast:
-        image = _contrast_fn(image, rng)
-
-    return image, label, dtm
-
-
 class _PatchTrainingDataset(Dataset):
     """CPU-side dataset yielding one (optionally patch-extracted) example.
 
@@ -547,13 +392,7 @@ class _PatchTrainingDataset(Dataset):
         labels: list[int] | None,
         oversampling: float | None,
         extract_patches: bool,
-        use_augmentation: bool = False,
-        use_flips: bool = False,
-        use_zoom: bool = False,
-        use_noise: bool = False,
-        use_blur: bool = False,
-        use_brightness: bool = False,
-        use_contrast: bool = False,
+        patch_margin: tuple[int, int, int] = (0, 0, 0),
     ):
         self._image_paths = image_paths
         self._label_paths = label_paths
@@ -562,17 +401,7 @@ class _PatchTrainingDataset(Dataset):
         self._labels = labels
         self._oversampling = oversampling
         self._extract_patches = extract_patches
-
-        # Matches dali_loader.py's TrainPipeline: the master use_augmentation
-        # switch ANDs into every individual flag, rather than being checked
-        # separately at call time.
-        self._use_augmentation = use_augmentation
-        self._use_flips = use_flips and use_augmentation
-        self._use_zoom = use_zoom and use_augmentation
-        self._use_noise = use_noise and use_augmentation
-        self._use_blur = use_blur and use_augmentation
-        self._use_brightness = use_brightness and use_augmentation
-        self._use_contrast = use_contrast and use_augmentation
+        self._patch_margin = tuple(int(m) for m in patch_margin)
 
     def __len__(self) -> int:
         return len(self._image_paths)
@@ -593,21 +422,7 @@ class _PatchTrainingDataset(Dataset):
                 self._labels,
                 self._oversampling,
                 rng,
-            )
-
-        if self._use_augmentation:
-            image, label, dtm = _apply_augmentations(
-                image,
-                label,
-                dtm,
-                self._roi_size,
-                use_flips=self._use_flips,
-                use_zoom=self._use_zoom,
-                use_noise=self._use_noise,
-                use_blur=self._use_blur,
-                use_brightness=self._use_brightness,
-                use_contrast=self._use_contrast,
-                rng=rng,
+                self._patch_margin,
             )
 
         batch = {
@@ -704,21 +519,13 @@ def get_training_dataset(
     rank: int,
     world_size: int,
     extract_patches: bool = True,
-    use_augmentation: bool = True,
-    use_flips: bool = True,
-    use_zoom: bool = True,
-    use_noise: bool = True,
-    use_blur: bool = True,
-    use_brightness: bool = True,
-    use_contrast: bool = True,
+    patch_margin: tuple[int, int, int] = (0, 0, 0),
 ) -> GenericIterator:
     """Generic-loader equivalent of dali_loader.get_training_dataset.
 
     Same signature and `.next()`/`.reset()` contract as dali_loader.py (see
-    the module docstring). Augmentations run per `data_loading_constants.py`
-    (same probabilities/ranges as `dali_loader.py`); the module docstring's
-    note on the zoom/DTM asymmetry applies -- zoom only ever runs when
-    `dtm_paths` is None.
+    the module docstring). Like dali_loader.py, this only extracts patches;
+    augmentation happens afterwards in mist.data_loading.augmentation.
 
     Args:
         image_paths: List of file paths to the image data.
@@ -737,15 +544,9 @@ def get_training_dataset(
         extract_patches: Whether to extract a roi_size patch from each
             example. If False, the entire (already roi_size-shaped) example
             is returned unmodified.
-        use_augmentation: Master switch for all augmentations below; ANDed
-            into each individual flag, matching dali_loader.py.
-        use_flips: Whether to randomly flip each spatial axis.
-        use_zoom: Whether to randomly zoom in on the patch. Only applied
-            when dtm_paths is None -- see the module docstring.
-        use_noise: Whether to add random Gaussian noise to the image.
-        use_blur: Whether to apply random Gaussian blur to the image.
-        use_brightness: Whether to randomly scale image brightness.
-        use_contrast: Whether to randomly scale image contrast.
+        patch_margin: Voxels added to each side of the patch along each
+            axis, so spatial augmentation has real image content at the
+            borders.
 
     Returns:
         A GenericIterator over training batches, already on the target
@@ -762,13 +563,7 @@ def get_training_dataset(
         labels=labels,
         oversampling=oversampling,
         extract_patches=extract_patches,
-        use_augmentation=use_augmentation,
-        use_flips=use_flips,
-        use_zoom=use_zoom,
-        use_noise=use_noise,
-        use_blur=use_blur,
-        use_brightness=use_brightness,
-        use_contrast=use_contrast,
+        patch_margin=patch_margin,
     )
     shuffle_generator = torch.Generator().manual_seed(seed + rank)
     data_loader = DataLoader(

@@ -3,6 +3,7 @@
 # MIST imports.
 from mist.models.model_registry import register_model
 from mist.models.nnunet.mist_nnunet import NNUNet
+from mist.models.nnunet.mist_plain_nnunet import PlainNNUNet
 
 
 def _create_nnunet_base(use_pocket_model: bool, **kwargs) -> NNUNet:
@@ -32,10 +33,33 @@ def _create_nnunet_base(use_pocket_model: bool, **kwargs) -> NNUNet:
     )
 
 
+@register_model("nnunet-plain")
+def create_nnunet_plain(**kwargs) -> PlainNNUNet:
+    """Create nnU-Net's PlainConvUNet with deep supervision, MIST's default network."""
+    required_keys = ["in_channels", "out_channels", "patch_size", "target_spacing"]
+    for key in required_keys:
+        if key not in kwargs:
+            raise ValueError(f"Missing required key '{key}' in model configuration.")
+
+    return PlainNNUNet(
+        in_channels=kwargs["in_channels"],
+        out_channels=kwargs["out_channels"],
+        patch_size=kwargs["patch_size"],
+        target_spacing=kwargs["target_spacing"],
+        use_deep_supervision=True,
+    )
+
+
+@register_model("nnunet-res")
+def create_nnunet_res(**kwargs) -> NNUNet:
+    """Create a residual nnUNet with deep supervision."""
+    return _create_nnunet_base(use_pocket_model=False, **kwargs)
+
+
 @register_model("nnunet")
 def create_nnunet(**kwargs) -> NNUNet:
-    """Create a standard nnUNet model with residual blocks and deep supervision."""
-    return _create_nnunet_base(use_pocket_model=False, **kwargs)
+    """Create the same network as nnunet-res; this name is kept for compatibility."""
+    return create_nnunet_res(**kwargs)
 
 
 @register_model("nnunet-pocket")

@@ -3,9 +3,10 @@
 from typing import Any
 
 import torch
-from monai.inferers import sliding_window_inference
 
-from mist.data_loading import data_loader_registry
+from mist.data_loading import augmentation, data_loader_registry
+from mist.inference.inferers.sliding_window import predict_with_fallback
+from mist.training import patch_planning
 from mist.training.trainers.base_trainer import BaseTrainer
 from mist.training.trainers.trainer_constants import TrainerConstants as constants
 from mist.utils import hardware
@@ -13,6 +14,9 @@ from mist.utils import hardware
 
 class Patch3DTrainer(BaseTrainer):
     """Trainer for 3D patch-based training in MIST."""
+
+    # Chosen at the first validation step, when the model is on its GPU.
+    _validation_batch_size: int | None = None
 
     def build_dataloaders(
         self,
@@ -49,9 +53,13 @@ class Patch3DTrainer(BaseTrainer):
                 - val_loader: Validation data loader. Yields full images for
                     validation, without random sampling.
         """
-        # Build training loader.
+        # Build training loader. The loader extracts patches, enlarged by a
+        # margin when rotation or scaling is on, and the augmenter applies
+        # every augmentation to each batch on the training device.
         training = self.config["training"]
         train_labels = self.config["dataset_info"]["labels"][1:]
+        patch_size = self.config["spatial_config"]["patch_size"]
+        settings = augmentation.settings_from_config(training["augmentation"])
         loader = data_loader_registry.get_data_loader_from_registry(
             training["hardware"]["data_loader"]
         )
@@ -63,19 +71,25 @@ class Patch3DTrainer(BaseTrainer):
             batch_size=training["batch_size_per_gpu"],
             oversampling=training["dali_foreground_prob"],
             labels=train_labels,
-            roi_size=self.config["spatial_config"]["patch_size"],
+            roi_size=patch_size,
             seed=training["seed"],
             num_workers=training["hardware"]["num_cpu_workers"],
-            use_augmentation=training["augmentation"]["enabled"],
-            use_flips=training["augmentation"]["transforms"]["flips"],
-            use_blur=training["augmentation"]["transforms"]["blur"],
-            use_noise=training["augmentation"]["transforms"]["noise"],
-            use_brightness=training["augmentation"]["transforms"]["brightness"],
-            use_contrast=training["augmentation"]["transforms"]["contrast"],
-            use_zoom=training["augmentation"]["transforms"]["zoom"],
+            patch_margin=augmentation.spatial_margin(patch_size, settings),
             rank=rank,
             world_size=world_size,
         )
+        if settings.any_enabled:
+            train_loader = augmentation.AugmentedIterator(
+                train_loader,
+                augmentation.BatchAugmenter(
+                    patch_size=patch_size,
+                    settings=settings,
+                    seed=training["seed"] + rank,
+                    normalized_dtms=self.config.get("preprocessing", {}).get(
+                        "normalize_dtms", True
+                    ),
+                ),
+            )
 
         # Build validation loader.
         val_loader = loader.get_validation_dataset(
@@ -126,21 +140,43 @@ class Patch3DTrainer(BaseTrainer):
         amp_context = hardware.autocast_context(amp_enabled)
 
         optimizer.zero_grad()
-        with amp_context:
-            output = model(image)
-
+        if amp_enabled == hardware.FP16:
+            # The loss's softmax, logs, and sums can overflow FP16, so it's
+            # computed in FP32 from the network's FP16 outputs.
+            with amp_context:
+                output = model(image)
             y_deep_supervision = output.get("deep_supervision", None)
+            if y_deep_supervision is not None:
+                y_deep_supervision = tuple(extra.float() for extra in y_deep_supervision)
             loss = criterion(
                 y_true=label,
-                y_pred=output["prediction"],
+                y_pred=output["prediction"].float(),
                 y_supervision=y_deep_supervision,
                 alpha=alpha,
                 dtm=dtm,
             )
+        else:
+            with amp_context:
+                output = model(image)
 
-        loss.backward()
+                y_deep_supervision = output.get("deep_supervision", None)
+                loss = criterion(
+                    y_true=label,
+                    y_pred=output["prediction"],
+                    y_supervision=y_deep_supervision,
+                    alpha=alpha,
+                    dtm=dtm,
+                )
+
+        # Gradient scaling keeps small FP16 gradients from becoming zero, and
+        # skips steps whose gradients overflow. It does nothing unless training
+        # uses FP16.
+        scaler = state["grad_scaler"]
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
         return loss
 
     def validation_step(self, **kwargs) -> torch.Tensor:
@@ -178,17 +214,22 @@ class Patch3DTrainer(BaseTrainer):
         label = batch["label"]
 
         # Perform sliding window inference for validation.
-        sw_batch_size = 2 * self.config["training"]["batch_size_per_gpu"]
+        if self._validation_batch_size is None:
+            self._validation_batch_size = self.config["inference"]["inferer"]["params"].get(
+                "sw_batch_size"
+            ) or patch_planning.inference_batch_size(self.config, image.device)
         amp_context = hardware.autocast_context(self.config["training"]["amp"])
         with amp_context:
-            pred = sliding_window_inference(
+            pred = predict_with_fallback(
                 inputs=image,
                 roi_size=patch_size,
                 overlap=overlap,
-                sw_batch_size=sw_batch_size,
+                sw_batch_size=self._validation_batch_size,
                 predictor=model,
                 device=image.device,
             )
 
-        # Compute the loss using the criterion.
-        return self.validation_loss(label, pred)
+        # Compute the loss using the criterion. Running out of memory may have left
+        # the prediction on the CPU, but the loss goes back to the GPU for reducing.
+        # Sums over a whole image can overflow FP16, so the loss is computed in FP32.
+        return self.validation_loss(label.to(pred.device), pred.float()).to(image.device)

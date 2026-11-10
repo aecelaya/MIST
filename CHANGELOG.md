@@ -3,6 +3,137 @@
 All notable changes to MIST are listed here, newest first. MIST follows
 [semantic versioning](https://semver.org/) from 2.3.0 onward.
 
+## 2.5.0rc0 — Unreleased
+
+### Added
+
+- **FP16 mixed precision.** `training.amp: "fp16"` trains in FP16 on any GPU,
+  including those without BF16 hardware, such as the V100, T4, and Quadro RTX
+  6000, and the automatic test can now choose it (see `training.amp` below). Training scales gradients, computes the
+  loss in FP32, and saves the gradient scale in checkpoints. If FP16 keeps
+  producing NaN or inf losses (20 steps in a row) or its gradient scale collapses,
+  the rest of the fold trains in BF16 or FP32 with a warning. The optimizer keeps
+  its usual epsilon. Plans estimate FP16's memory at 0.80 of FP32's activation
+  memory, as measured on an A100, instead of BF16's 0.55. On a T4, FP16 trained
+  `nnunet-plain` 3.5 to 4 times faster than FP32.
+- **`nnunet-plain`** — a plain convolutional U-Net with two convolutions per
+  stage, no depth limit, and downsampling of an axis only when its spacing is
+  under twice the finest spacing among axes that can still be downsampled. Its
+  parameter names match nnU-Net's `PlainConvUNet`, so those checkpoints load
+  directly.
+- **`nnunet-res`** — a clearer name for the residual network MIST has called
+  `nnunet`.
+
+- `training.compile` compiles the model with `torch.compile` during training. New
+  configs turn it on; it stays off on CPUs and Windows, and configs from before this setting train as they did. In benchmarks
+  without data loading on an A100, steps ran a median of 1.6 times faster with BF16
+  and 1.25 times with FP32, after one to seven extra minutes per fold. Checkpoints
+  keep the same weight names, so they work with or without it. Inference doesn't
+  use it. `benchmarks/mist_compile_benchmark.ipynb` measures its effect on a GPU.
+- `mist_train` warns about mistakes in `config.json`: keys MIST doesn't use, with
+  the likely spelling, and values of the wrong type or range, such as
+  `"compile": "false"`. These are only warnings, so existing configs still train.
+- `training.validate_every` (and `--validate-every`) runs validation every N
+  epochs instead of every epoch. Validation always runs on the last epoch. New
+  configs use `25`, because validating whole cases every epoch can take much of
+  the training time on large datasets. Configs without this setting validate
+  every epoch, as they did before. With `val_percent` above 0, only validated
+  epochs can be chosen as the best model.
+
+### Changed
+
+- DALI stays the default data loader on NVIDIA GPUs with DALI installed, and
+  the generic loader on other machines. `"auto"` resolves as in 2.4.
+- Benchmark notebooks and manual GPU check scripts moved from `examples/` and
+  `tests/regression/gpu/` to a new `benchmarks/` folder, with a README for
+  each. `examples/` keeps the MIST demos.
+- **The patch and batch size are now chosen at the start of training,** from an
+  estimate of the network's GPU memory, instead of at analysis from a fixed voxel
+  budget. `mist_analyze` leaves both as `"auto"`, and the first `mist_train` plans
+  them for its own GPU, network, and precision, then saves them to `config.json`.
+  The search shrinks the axis taking up the most of the image until the network
+  fits. The batch size stays at 2 unless the patch has reached
+  the image size, and one global batch sees at most 5% of the dataset. New runs
+  may get different patch and batch sizes than before; configs that already have
+  values keep them.
+- **Plans now use an 8 GiB memory budget by default,** set by the new
+  `training.gpu_memory_budget_gb`. A patch fits if one sample has at most 560
+  million activations per 8 GiB at a batch size of 2, whatever the GPU and
+  precision. Planning for most of a 40 GB A100 gave LiTS a 256 × 224 × 224 patch,
+  which ran out of memory in its first step; it now gets 128³ in BF16 or FP32. The
+  plan must still fit in 90% of the GPU. Raise the budget to use more of a large GPU, or set it to `null` to plan for 90% of the GPU as before.
+  Configs without the setting plan for 8 GiB; configs that already have a plan keep
+  it.
+- The planner's memory estimate is refitted to steady training memory measured on
+  four GPUs, with separate values for SwinUNETR and Primus. Plans for U-Net and
+  MedNeXt networks use up to about 1.4 times the voxels they did. Configs that
+  already have a plan keep it. PrimusV2 with `amp` off can still exceed the estimate
+  on the A100, L4, and RTX PRO 6000.
+- **Target spacing has a new anisotropy rule.** The coarsest axis moves
+  from its median to its 10th percentile only if its spacing is over 3 times the
+  next coarsest axis and its median voxel count is under a third of the smallest
+  other axis. It never goes finer than the next coarsest axis. Previously MIST
+  compared spacing with the finest axis, ignored voxel counts, and had no lower
+  limit. Some anisotropic datasets now get a coarser target spacing, and smaller
+  preprocessed images, from `mist_analyze`; existing configs keep their values.
+- `training.amp` now defaults to `"auto"`. On a GPU, the first `mist_train` times
+  a few training steps, compiling the model if training will, and saves the
+  choice. With BF16 hardware it times BF16 and FP32, and FP16 too unless BF16 is
+  clearly faster; without it, FP32 and FP16. The default, BF16 or FP32, is kept
+  unless another precision is at least 10% faster and needs no smaller a patch.
+  An explicit `true`, `false`, or `"fp16"` skips the test.
+- Later `mist_train` runs warn if the saved plan doesn't suit their GPU, and plan
+  again if `--model` changes the network, keeping values set by hand.
+- **Validation and inference predict up to 4 patches at once,** or fewer if the
+  network wouldn't fit, instead of `2 × batch_size_per_gpu`. This changes
+  predictions only by floating-point rounding. Validation now honors
+  `inference.inferer.params.sw_batch_size`.
+- **Inference recovers from running out of GPU memory** by halving its batch, then
+  stitching on the CPU, and holds results for each test-time flip on the CPU until
+  they're averaged.
+- **Training augmentation has new transforms and defaults.** New
+  transforms: rotation (±30° per axis, or ±180° in-plane for quasi-2D patches),
+  scaling from 0.7 to 1.4 (replacing zoom, which only zoomed in), simulated low
+  resolution, and gamma (including on the inverted image). Noise, blur,
+  brightness, and flips use new probabilities and ranges, and contrast now
+  scales about the mean instead of acting as a second brightness. Rotation and
+  scaling resample a larger patch cropped around the same center (images and
+  DTMs linearly, labels per class with an argmax), and apply to
+  DTMs too (previously zoom was skipped when DTMs were used). Scaling keeps DTM
+  distances valid: unnormalized DTMs are divided by the scale factor, and
+  quasi-2D patches, which scale only in-plane, skip scaling when DTMs are used.
+- Augmentation runs in PyTorch on each batch on the training device, so the
+  DALI and generic loaders now apply identical transforms. The loaders only
+  extract patches.
+- New config keys under `training.augmentation.transforms`: `rotation`,
+  `scaling`, `low_resolution`, and `gamma`. Missing keys mean enabled, so older
+  configs get the new transforms; their `zoom` key is read as `scaling`.
+- **Predictions are restored to the original image space by resampling class
+  probabilities, then taking the argmax.** Previously MIST
+  took the argmax at the training spacing and resampled the labels. This helps
+  most for small or thin structures when the original images are finer than
+  the training spacing; along the low-resolution axis of anisotropic images
+  both use nearest-neighbor interpolation, so nothing changes there. Classes
+  are resampled one at a time, so memory doesn't grow with the number of
+  classes. This applies to cross-validation predictions and to `mist_infer`,
+  including for models trained with earlier versions.
+- **Which model is saved to `models/` now depends on `val_percent`.** With the
+  default `val_percent` of `0.0`, the saved model is the final-epoch model.
+  Previously it was the model with the lowest loss on the held-out fold, which
+  let the fold used for cross-validation choose its own model and made
+  cross-validation results optimistic. With `val_percent` above `0.0`, the saved model is still the best one
+  on the validation split carved from the training cases, now chosen by the
+  validation loss smoothed with an exponential moving average (decay 0.9) so
+  that one noisy epoch doesn't pick it. Cross-validation scores from a default
+  run may come out slightly lower than in 2.4.0; that is the bias being removed.
+- MIST warns when `val_percent` leaves fewer than 5 validation cases in a fold.
+- `--resume` warns if `--val-percent` or `--validate-every` differ from the
+  saved run.
+
+### Fixed
+
+- Includes every fix in 2.4.1.
+
 ## 2.4.1 — 2026-11-09
 
 Bug fixes only, backported from the 2.5.0 work.

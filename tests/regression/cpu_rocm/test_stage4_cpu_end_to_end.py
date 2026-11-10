@@ -13,6 +13,7 @@ whole CPU/ROCm plan where CPU *training* (not just analyze/preprocess, see
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from mist.cli.inference_entrypoint import inference_entry
 from mist.cli.train_entrypoint import train_entry
@@ -21,7 +22,10 @@ from tests.regression.ants_sitk.fixtures import generate_dataset
 from tests.regression.ants_sitk.harness import run_pipeline
 
 
-def test_full_cpu_pipeline_trains_and_predicts_with_generic_loader(tmp_path: Path) -> None:
+@pytest.mark.parametrize("model", [None, "nnunet-pocket"], ids=["default", "pocket"])
+def test_full_cpu_pipeline_trains_and_predicts_with_generic_loader(
+    tmp_path: Path, model: str | None
+) -> None:
     """analyze -> preprocess -> train -> predict, all on CPU, via "generic"."""
     dataset = generate_dataset(tmp_path / "dataset")
     outputs = run_pipeline(
@@ -53,8 +57,7 @@ def test_full_cpu_pipeline_trains_and_predicts_with_generic_loader(tmp_path: Pat
             str(results_dir),
             "--numpy",
             str(numpy_dir),
-            "--model",
-            "nnunet-pocket",
+            *(["--model", model] if model else []),
             "--epochs",
             "2",
             "--warmup-epochs",
@@ -73,6 +76,7 @@ def test_full_cpu_pipeline_trains_and_predicts_with_generic_loader(tmp_path: Pat
     # in-memory artifact of this process).
     trained_config = io.read_json_file(str(config_path))
     assert trained_config["training"]["hardware"]["data_loader"] == "generic"
+    assert trained_config["model"]["architecture"] == (model or "nnunet-plain")
 
     for fold in range(2):
         assert (results_dir / "models" / f"fold_{fold}.pt").is_file()
