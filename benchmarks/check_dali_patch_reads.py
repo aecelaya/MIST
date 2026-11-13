@@ -23,7 +23,9 @@ MIST installed:
         --patch 128 128 128 --margin 39 39 39 --labels 1 2
 
 Steps include only data loading and the copy to the GPU, not training. Labels
-default to those saved with the foreground locations, if any.
+default to those saved with the foreground locations, if any. The loaders read
+the same patches, so each later one finds them in the file cache. For cold
+timings, drop the files from the cache and time each loader alone with --only.
 """
 
 import argparse
@@ -37,6 +39,9 @@ from mist.data_loading import generic_loader
 from mist.preprocessing import foreground_locations
 
 WARMUP_STEPS = 5
+
+# --only choices and the loaders they time.
+ONLY = {"mist": "MIST now", "region": "region reads", "python": "python reads"}
 
 
 def choose_windows(images, labels_paths, classes, args, count, seed):
@@ -211,6 +216,15 @@ def main():
     parser.add_argument(
         "--skip-mist", action="store_true", help="Skip MIST's whole-volume pipeline."
     )
+    parser.add_argument(
+        "--only",
+        choices=sorted(ONLY),
+        help=(
+            "Time one loader and skip the same-patch check. Loaders read the same "
+            "patches, so later ones find them cached; evict the cache and run each "
+            "alone for cold timings."
+        ),
+    )
     args = parser.parse_args()
 
     from nvidia.dali.plugin.pytorch import DALIGenericIterator
@@ -234,25 +248,30 @@ def main():
     count = (WARMUP_STEPS + args.steps + 2) * args.batch_size
     windows = choose_windows(images, labels_paths, classes, args, count, args.seed)
     keys = ["image", "label"]
-    region = DALIGenericIterator(region_pipeline(images, labels_paths, windows, args), keys)
-    python = DALIGenericIterator(python_pipeline(images, labels_paths, windows, args), keys)
-    same = check_same(region, python, 2)
-    print(f"Region reads and python reads give the same patches: {same}")
+    if args.only is None:
+        region = DALIGenericIterator(region_pipeline(images, labels_paths, windows, args), keys)
+        python = DALIGenericIterator(python_pipeline(images, labels_paths, windows, args), keys)
+        same = check_same(region, python, 2)
+        print(f"Region reads and python reads give the same patches: {same}")
 
-    # Fresh loaders, so each timing starts from the same samples.
-    results = {
-        "region reads": DALIGenericIterator(
+    # Fresh loaders, so each timing starts from the same samples. Built only when
+    # timed, so --only reads nothing for the others.
+    loaders = {
+        "MIST now": lambda: mist_iterator(images, labels_paths, classes, args),
+        "region reads": lambda: DALIGenericIterator(
             region_pipeline(images, labels_paths, windows, args), keys
         ),
-        "python reads": DALIGenericIterator(
+        "python reads": lambda: DALIGenericIterator(
             python_pipeline(images, labels_paths, windows, args), keys
         ),
     }
-    if not args.skip_mist:
-        results = {"MIST now": mist_iterator(images, labels_paths, classes, args), **results}
+    if args.only is not None:
+        loaders = {name: make for name, make in loaders.items() if name == ONLY[args.only]}
+    elif args.skip_mist:
+        del loaders["MIST now"]
     size = [p + 2 * m for p, m in zip(args.patch, args.margin, strict=True)]
-    for name, iterator in results.items():
-        median, mean = time_steps(iterator, args.steps)
+    for name, make in loaders.items():
+        median, mean = time_steps(make(), args.steps)
         print(
             f"{name:13}: median {median:6.3f} s, mean {mean:6.3f} s per batch of "
             f"{args.batch_size} {'x'.join(map(str, size))} patches"
