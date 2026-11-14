@@ -15,9 +15,12 @@ preprocessed data:
   each patch with positioned reads, as the generic loader does, and DALI
   batches the patches and moves them to the GPU.
 
-Both read exactly the same patches, and the check compares them voxel for
-voxel. Run it on a Linux machine with an NVIDIA GPU, DALI, and this branch of
-MIST installed:
+It also times MIST's generic loader, which reads patches the same way in
+PyTorch DataLoader workers but picks its own random patches.
+
+The two DALI patch-only pipelines read exactly the same patches, and the check
+compares them voxel for voxel. Run it on a Linux machine with an NVIDIA GPU,
+DALI, and this branch of MIST installed:
 
     python benchmarks/check_dali_patch_reads.py --numpy /path/to/numpy \\
         --patch 128 128 128 --margin 39 39 39 --labels 1 2
@@ -41,7 +44,12 @@ from mist.preprocessing import foreground_locations
 WARMUP_STEPS = 5
 
 # --only choices and the loaders they time.
-ONLY = {"mist": "MIST now", "region": "region reads", "python": "python reads"}
+ONLY = {
+    "mist": "MIST now",
+    "region": "region reads",
+    "python": "python reads",
+    "generic": "generic loader",
+}
 
 
 def choose_windows(images, labels_paths, classes, args, count, seed):
@@ -168,16 +176,34 @@ def mist_iterator(images, labels_paths, classes, args):
     )
 
 
+def generic_iterator(images, labels_paths, classes, args):
+    """MIST's generic training loader, with its own worker processes."""
+    return generic_loader.get_training_dataset(
+        image_paths=images,
+        label_paths=labels_paths,
+        dtm_paths=None,
+        batch_size=args.batch_size,
+        roi_size=tuple(args.patch),
+        labels=classes,
+        oversampling=args.oversampling,
+        seed=args.seed,
+        num_workers=args.workers,
+        rank=0,
+        world_size=1,
+        patch_margin=tuple(args.margin),
+    )
+
+
 def time_steps(iterator, steps):
     """Median and mean seconds per batch, after warmup."""
     import torch
 
     def step():
         try:
-            batch = next(iterator)
+            batch = iterator.next()
         except StopIteration:
             iterator.reset()
-            batch = next(iterator)
+            batch = iterator.next()
         torch.cuda.synchronize()
         return batch
 
@@ -194,7 +220,7 @@ def time_steps(iterator, steps):
 def check_same(region, python, count):
     """Compare the first batches of the two patch-only pipelines voxel for voxel."""
     for _ in range(count):
-        a, b = next(region)[0], next(python)[0]
+        a, b = region.next()[0], python.next()[0]
         for key in ("image", "label"):
             if not np.array_equal(a[key].cpu().numpy(), b[key].cpu().numpy()):
                 return False
@@ -264,6 +290,7 @@ def main():
         "python reads": lambda: DALIGenericIterator(
             python_pipeline(images, labels_paths, windows, args), keys
         ),
+        "generic loader": lambda: generic_iterator(images, labels_paths, classes, args),
     }
     if args.only is not None:
         loaders = {name: make for name, make in loaders.items() if name == ONLY[args.only]}
@@ -273,7 +300,7 @@ def main():
     for name, make in loaders.items():
         median, mean = time_steps(make(), args.steps)
         print(
-            f"{name:13}: median {median:6.3f} s, mean {mean:6.3f} s per batch of "
+            f"{name:14}: median {median:6.3f} s, mean {mean:6.3f} s per batch of "
             f"{args.batch_size} {'x'.join(map(str, size))} patches"
         )
 
