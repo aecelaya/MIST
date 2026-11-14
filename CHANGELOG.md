@@ -39,6 +39,12 @@ All notable changes to MIST are listed here, newest first. MIST follows
   the training time on large datasets. Configs without this setting validate
   every epoch, as they did before. With `val_percent` above 0, only validated
   epochs can be chosen as the best model.
+- `mist_train` warns when PyTorch 2.9 runs with a cuDNN older than 9.15, as
+  PyTorch 2.9's CUDA wheels do. That combination runs most 3D convolutions in
+  BF16 and FP16 without cuDNN: on an H100, nnunet-plain trained about 3x slower
+  in BF16 than in FP32, so the precision test kept FP32. After
+  `pip install -U "nvidia-cudnn-cu12>=9.15"`, BF16 trained twice as fast as
+  FP32 with half the memory. The warning prints that command.
 
 ### Changed
 

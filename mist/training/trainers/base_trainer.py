@@ -76,6 +76,9 @@ class BaseTrainer(ABC):
             print_warning(f"config.json: {problem}")
         for problem in training_utils.preprocessed_data_problems(self.numpy_dir):
             print_warning(problem)
+        slow_half_precision = hardware.slow_half_precision_warning()
+        if slow_half_precision is not None:
+            print_warning(slow_half_precision)
 
         # Snapshot config before CLI overrides so resume checks can compare.
         _original_config = copy.deepcopy(self.config)

@@ -243,6 +243,43 @@ def resolve_amp(requested: bool | str, *, warn: bool = True) -> bool | str:
     return False
 
 
+# First cuDNN version, as torch.backends.cudnn.version() reports it, that fixes
+# slow FP16 and BF16 3D convolutions under PyTorch 2.9. PyTorch 2.9's CUDA wheels
+# ship cuDNN 9.10, with which most such convolutions fall back to a slow
+# non-cuDNN path: about 3x slower than FP32 for nnunet-plain on an H100.
+_FAST_HALF_CONV3D_CUDNN = 91500
+
+
+def slow_half_precision_warning() -> str | None:
+    """Return a warning if this PyTorch and cuDNN run 3D BF16 and FP16 slowly.
+
+    PyTorch 2.9 with cuDNN older than 9.15 runs most 3D convolutions in BF16
+    and FP16 without cuDNN (pytorch/pytorch#168167). The precision test then
+    keeps FP32, which works but gives up mixed precision's speed and memory
+    savings. A newer cuDNN from PyPI fixes it, though torch's own requirements
+    pin the old one, so this can't be a MIST dependency.
+
+    Returns:
+        A sentence to print as a warning, or None if nothing is wrong.
+    """
+    if get_accelerator_type() != "cuda":
+        return None
+    try:
+        major, minor = (int(part) for part in torch.__version__.split("+")[0].split(".")[:2])
+    except ValueError:
+        return None
+    cudnn = torch.backends.cudnn.version()
+    if (major, minor) < (2, 9) or cudnn is None or cudnn >= _FAST_HALF_CONV3D_CUDNN:
+        return None
+    cuda_major = (torch.version.cuda or "12").split(".")[0]
+    return (
+        f"PyTorch {torch.__version__} with cuDNN {cudnn} runs 3D convolutions in BF16 "
+        "and FP16 about 3x slower than FP32, so training can't benefit from mixed "
+        f'precision. Install a newer cuDNN with: pip install -U "nvidia-cudnn-cu{cuda_major}'
+        ">=9.15\". pip will say torch requires an older version; that's expected."
+    )
+
+
 def resolve_compile(requested: bool) -> bool:
     """Resolve the torch.compile setting against the current hardware.
 

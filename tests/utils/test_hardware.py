@@ -333,3 +333,38 @@ def test_autocast_context_uses_fp16_or_bf16(monkeypatch) -> None:
     hardware.autocast_context("fp16")
     hardware.autocast_context(True)
     assert [kwargs["dtype"] for kwargs in created] == [torch.float16, torch.bfloat16]
+
+
+@pytest.mark.parametrize(
+    ("accelerator", "version", "cudnn", "warns"),
+    [
+        ("cuda", "2.9.1+cu128", 91002, True),
+        ("cuda", "2.9.0", 91002, True),
+        ("cuda", "2.10.0a0+git", 91200, True),
+        ("cuda", "2.9.1+cu128", 92801, False),
+        ("cuda", "2.9.1+cu128", 91500, False),
+        ("cuda", "2.8.0+cu128", 91002, False),
+        ("cuda", "2.9.1+cu128", None, False),
+        ("rocm", "2.9.1+rocm6.4", 91002, False),
+        ("cpu", "2.9.1", None, False),
+    ],
+)
+def test_slow_half_precision_warning(monkeypatch, accelerator, version, cudnn, warns) -> None:
+    """Warn only for PyTorch 2.9 or newer on CUDA with cuDNN older than 9.15."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    monkeypatch.setattr(torch, "__version__", version)
+    monkeypatch.setattr(torch.backends.cudnn, "version", lambda: cudnn)
+    monkeypatch.setattr(torch.version, "cuda", "12.8", raising=False)
+    warning = hardware.slow_half_precision_warning()
+    assert (warning is not None) == warns
+    if warns:
+        assert 'pip install -U "nvidia-cudnn-cu12>=9.15"' in warning
+
+
+def test_slow_half_precision_warning_names_cuda_13_package(monkeypatch) -> None:
+    """CUDA 13 builds need the cu13 cuDNN package."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
+    monkeypatch.setattr(torch, "__version__", "2.9.1+cu130")
+    monkeypatch.setattr(torch.backends.cudnn, "version", lambda: 91300)
+    monkeypatch.setattr(torch.version, "cuda", "13.0", raising=False)
+    assert "nvidia-cudnn-cu13>=9.15" in hardware.slow_half_precision_warning()

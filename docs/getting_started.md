@@ -44,6 +44,20 @@ pip install "mist-medical[dali]"
     still works too — it's kept as an identical alias for `[dali]`, so
     nothing in an existing script or notebook breaks.
 
+!!! warning "PyTorch 2.9 and cuDNN"
+
+    PyTorch 2.9's CUDA wheels come with cuDNN 9.10, which runs 3D convolutions
+    in BF16 and FP16 about 3x slower than FP32, so training gets nothing from
+    mixed precision. `mist_train` warns when it finds this. Install a newer
+    cuDNN alongside PyTorch (use `cu13` instead of `cu12` with CUDA 13 builds):
+
+    ```console
+    pip install -U "nvidia-cudnn-cu12>=9.15"
+    ```
+
+    pip will report that torch requires an older cuDNN. That's expected, and
+    training works.
+
 #### AMD ROCm GPU
 
 PyPI's default `torch` wheel has no ROCm support, so install a ROCm-enabled
