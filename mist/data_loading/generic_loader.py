@@ -1,29 +1,18 @@
-"""Generic, accelerator-agnostic data loader for MIST.
+"""MIST's data loader, for CPU, NVIDIA, and AMD ROCm machines.
 
-`dali_loader.py` requires an NVIDIA GPU (`nvidia-dali-cuda120`), so it can't
-run on CPU-only or AMD ROCm hardware. This module is the CPU/ROCm-friendly
-alternative: it runs entirely on the CPU (NumPy for patch extraction,
-`torch.utils.data.Dataset`/`DataLoader` for batching and worker-process
-parallelism) and hands a finished batch off to the target accelerator only
-once, inside `.next()`.
+It runs on the CPU (NumPy for patch extraction, `torch.utils.data.Dataset`/
+`DataLoader` for batching and worker-process parallelism) and hands a finished
+batch to the target accelerator only once, inside `.next()`.
 
-`get_training_dataset`/`get_validation_dataset`/`get_test_dataset` match
-`dali_loader.py`'s signatures and its `.next()`/`.reset()` iterator contract
-exactly -- `.next()` returns `[{"image": ..., "label": ..., "dtm": ...}]`
-already on the target device, and `.reset()` marks an epoch boundary -- so
-nothing downstream (`patch_3d_trainer.py`, `inference_runners.py`) needs to
-know or care which loader backend is active. See `cpu_rocm_support_plan.md`
-Stages 2-3.
+`get_training_dataset`/`get_validation_dataset`/`get_test_dataset` return
+iterators with a `.next()`/`.reset()` contract: `.next()` returns
+`[{"image": ..., "label": ..., "dtm": ...}]` already on the target device, and
+`.reset()` marks an epoch boundary. `patch_3d_trainer.py` and
+`inference_runners.py` use only that contract.
 
-This is deliberately *not* a byte-for-byte reimplementation of DALI's
-pipeline. Patch extraction and foreground-oversampled patch placement are
-careful approximations of `dali_loader.py`'s `random_object_bbox`/
-`roi_random_crop` combination -- matching the same foreground-sampling
-*rate*, not the same RNG stream or connected-component-object semantics,
-since the two loaders were never going to share an RNG stream anyway (see
-`cpu_rocm_support_plan.md`'s Stage 2 release gate: a statistical, not
-exact-match, equivalence check). For the same reason, patch placement here
-uses a fresh, unseeded `numpy.random.Generator` per `__getitem__` call rather
+With probability `oversampling`, a training patch is centered on a voxel of a
+foreground class chosen uniformly among the classes present, so small classes
+are sampled as often as large ones. Patch placement uses a fresh, unseeded `numpy.random.Generator` per `__getitem__` call rather
 than one seeded from `training.seed`: a `DataLoader` with `num_workers > 0`
 forks/spawns separate worker processes, and a single `Generator` seeded once
 in the parent would otherwise be copied into every worker with identical
@@ -31,14 +20,14 @@ state, making all of them draw the same "random" sequence independently.
 `training.seed` still governs the (much simpler, single-process) shuffling
 of case order between epochs, which doesn't have that pitfall.
 
-Augmentation is not done here: like dali_loader.py, this loader only
-extracts patches (enlarged by `patch_margin` when rotation or scaling is
-enabled), and mist.data_loading.augmentation augments each batch in PyTorch
-on the training device, so both loaders share one implementation.
+Augmentation is not done here: this loader only extracts patches (enlarged by
+`patch_margin` when rotation or scaling is enabled), and
+mist.data_loading.augmentation augments each batch in PyTorch on the training
+device.
 
 Every `DataLoader` built here with `num_workers > 0` explicitly requests
 the "fork" multiprocessing context (see `_multiprocessing_context()`).
-Found necessary during Stage 4's real end-to-end CPU run: on macOS, whose
+Found necessary during a real end-to-end CPU run: on macOS, whose
 default start method is "spawn", a real `mist_train` process that had used
 any multi-worker `DataLoader` here would hang *indefinitely* at interpreter
 shutdown -- confirmed via a stack sample showing the main thread stuck in
@@ -75,13 +64,6 @@ _PAD_ON_DEVICE = True
 # workers keep up.
 _FULL_VOLUME_MAX_WORKERS = 2
 _FULL_VOLUME_PREFETCH = 1
-
-# Deliberately not imported from data_loading_utils.py: that module imports
-# nvidia.dali at the top for its DALI-graph-building helpers, so importing it
-# here would defeat the entire point of this module (running without DALI
-# installed). This is the same validation dali_loader.py's pipelines run via
-# data_loading_utils.validate_train_and_eval_inputs, just duplicated instead
-# of shared to keep this module import-safe with no NVIDIA/DALI dependency.
 
 
 def _validate_train_and_eval_inputs(
@@ -170,10 +152,8 @@ def _full_volume_workers(num_workers: int) -> dict[str, Any]:
 def _target_device(rank: int) -> torch.device:
     """Resolve the device .next() should move a finished batch to.
 
-    Mirrors dali_loader.py's device_id=rank convention. Delegates to
-    hardware.get_device_for_rank() (added in Stage 4 once base_trainer.py
-    needed the identical logic at its own model.to()/tensor-device call
-    sites) rather than duplicating it here.
+    Delegates to hardware.get_device_for_rank(), which base_trainer.py also
+    uses for its model and tensors, rather than duplicating it here.
     """
     return hardware.get_device_for_rank(rank)
 
@@ -252,8 +232,7 @@ def _foreground_anchor_center(
 ) -> tuple[int, int, int] | None:
     """Pick a random foreground voxel's (d, h, w) coordinate to center on.
 
-    Mirrors dali_loader.py's equal per-class weighting (its label_weights =
-    [1 / len(labels)] * len(labels)): shuffle the foreground classes into a
+    Weights each foreground class equally: shuffle the foreground classes into a
     random order, then return a random voxel of the first one actually
     present in this example. Falls back to any nonzero voxel if none of the
     configured classes are present, and to None (caller falls back to a
@@ -275,8 +254,7 @@ def _slice_with_padding(
 ) -> np.ndarray:
     """Slice a (D, H, W, C) array, zero-padding any part outside its bounds.
 
-    Matches dali_loader.py's `fn.slice(..., out_of_bounds_policy="pad")`. Only
-    the part of the slice inside the array is read, so a memory-mapped case is
+    Only the part of the slice inside the array is read, so a memory-mapped case is
     not loaded in full just because a patch runs past its edge.
     """
     inside = []
@@ -422,11 +400,10 @@ def _extract_patch(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """Extract one (D, H, W, C)-shaped patch, foreground-oversampled.
 
-    Approximates dali_loader.py's biased_crop_fn: with probability
-    `oversampling`, centers the crop on a random foreground voxel (falling back
-    to a plain random crop if the example has no foreground at all); otherwise
-    the crop is placed uniformly at random. See the module docstring for why
-    this matches DALI statistically, not exactly. The crop is then extended by
+    With probability `oversampling`, centers the crop on a random foreground
+    voxel (falling back to a plain random crop if the example has no foreground
+    at all); otherwise the crop is placed uniformly at random. The crop is then
+    extended by
     `patch_margin` voxels on each side, keeping the same center. Anything
     outside the image, including along an axis smaller than roi_size, is
     zero-padded. `get_locations` supplies the case's foreground locations, so
@@ -444,8 +421,6 @@ def _extract_patch(
 
 def _to_channels_first(array: np.ndarray) -> torch.Tensor:
     """Move a (D, H, W, C) array to (C, D, H, W).
-
-    Matches dali_loader.py's final `fn.transpose(image, perm=[3, 0, 1, 2])`.
 
     Uses `np.array(..., order="C")` (default `copy=True`) rather than
     `np.ascontiguousarray`, which is a no-op -- returns the input unchanged,
@@ -577,8 +552,7 @@ def _collate_patches(samples: list[dict[str, torch.Tensor]]) -> dict[str, Any]:
 class _FullVolumeDataset(Dataset):
     """CPU-side dataset yielding one full (unpatched) example per index.
 
-    Used for validation and test, matching dali_loader.py's EvalPipeline and
-    TestPipeline: no patch extraction, no shuffling.
+    Used for validation and test: no patch extraction, no shuffling.
     """
 
     def __init__(
@@ -621,7 +595,7 @@ class _EndlessShuffleSampler(Sampler[int]):
 
 
 class GenericIterator:
-    """DALI-compatible iterator: `.next()` -> `[batch on device]`, `.reset()`.
+    """Iterator with `.next()` -> `[batch on device]` and `.reset()`.
 
     This is the "chokepoint" mentioned in the module docstring -- the only
     place a CPU-loaded batch is moved to the target accelerator -- which is
@@ -644,8 +618,7 @@ class GenericIterator:
     def next(self) -> list[dict[str, torch.Tensor]]:
         """Return the next batch, auto-restarting when the pass is exhausted.
 
-        Mirrors dali_loader.py's DALIGenericIterator, which is constructed
-        there without an explicit `size`/`reader_name`: MIST's training loop
+        MIST's training loop
         can call `.next()` more times per "epoch" than the dataset has
         batches for (see `training.min_steps_per_epoch`), so this must never
         raise `StopIteration` on its own -- only an explicit `.reset()` call
@@ -700,11 +673,10 @@ def get_training_dataset(
     extract_patches: bool = True,
     patch_margin: tuple[int, int, int] = (0, 0, 0),
 ) -> GenericIterator:
-    """Generic-loader equivalent of dali_loader.get_training_dataset.
+    """Build the training iterator of foreground-oversampled patches.
 
-    Same signature and `.next()`/`.reset()` contract as dali_loader.py (see
-    the module docstring). Like dali_loader.py, this only extracts patches;
-    augmentation happens afterwards in mist.data_loading.augmentation.
+    This only extracts patches; augmentation happens afterwards in
+    mist.data_loading.augmentation.
 
     Args:
         image_paths: List of file paths to the image data.
@@ -767,16 +739,16 @@ def get_validation_dataset(
     rank: int,
     world_size: int,
 ) -> GenericIterator:
-    """Generic-loader equivalent of dali_loader.get_validation_dataset.
+    """Build the validation iterator.
 
     Streams full (unpatched) images and labels, sharded across ranks but not
-    shuffled -- matching dali_loader.py's EvalPipeline (shuffle_input=False).
+    shuffled.
 
     Args:
         image_paths: List of file paths to the image data.
         label_paths: List of file paths to the label data.
-        seed: Unused here (validation is never shuffled); accepted for
-            parity with dali_loader.py, which also takes it unconditionally.
+        seed: Unused here (validation is never shuffled); accepted so every
+            loader takes the same arguments.
         num_workers: Number of DataLoader worker processes.
         rank: The rank of the current process.
         world_size: The total number of processes.
@@ -809,17 +781,17 @@ def get_test_dataset(
     rank: int = 0,
     world_size: int = 1,
 ) -> GenericIterator:
-    """Generic-loader equivalent of dali_loader.get_test_dataset.
+    """Build the test iterator.
 
     Streams full (unpatched) images in the exact order given -- no shuffling,
     no sharding by default (rank/world_size default to 0/1, matching
-    dali_loader.py and inference_runners.py::test_on_fold's assumption that
-    the loader yields batches in the same order as its input file list).
+    inference_runners.py::test_on_fold's assumption that the loader yields
+    batches in the same order as its input file list).
 
     Args:
         image_paths: List of file paths to the image data.
-        seed: Unused here (test is never shuffled); accepted for parity with
-            dali_loader.py, which also takes it unconditionally.
+        seed: Unused here (test is never shuffled); accepted so every loader
+            takes the same arguments.
         num_workers: Number of DataLoader worker processes.
         rank: The rank of the current process. Defaults to 0.
         world_size: The total number of processes. Defaults to 1.

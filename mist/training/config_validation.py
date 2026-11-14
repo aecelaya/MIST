@@ -27,7 +27,7 @@ _FREE_FORM_SECTIONS = frozenset(
 )
 
 # Older names that MIST still reads.
-_LEGACY_KEYS = frozenset({"training.augmentation.transforms.zoom"})
+_LEGACY_KEYS = frozenset({"training.augmentation.transforms.zoom", "training.dali_foreground_prob"})
 
 _TRANSFORMS = (
     "flips",
@@ -77,7 +77,7 @@ _NUMBERS = frozenset(
 _FRACTIONS = frozenset(
     {
         "training.val_percent",
-        "training.dali_foreground_prob",
+        "training.foreground_prob",
     }
 )
 

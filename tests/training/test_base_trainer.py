@@ -29,7 +29,7 @@ _real_save_checkpoint = bt.BaseTrainer.save_checkpoint
 
 
 class DummyIter:
-    """DALI-style loader with .next()[0] and .reset()."""
+    """Loader with .next()[0] and .reset()."""
 
     def __init__(self, batch, length: int):
         self._batch = batch

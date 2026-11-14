@@ -112,42 +112,34 @@ def resolve_communication_backend(requested: str) -> str:
 
 
 def resolve_data_loader(requested: str) -> str:
-    """Resolve a requested data loader implementation.
+    """Resolve a configured data loader to a registered one.
 
-    ``"auto"`` means MIST's generic loader on every machine. It matched or beat
-    DALI in benchmarks: about 4 times faster on LiTS-sized images, where DALI reads
-    whole volumes for each patch, and as fast or faster on BraTS-sized ones. DALI
-    is only used when ``training.hardware.data_loader`` is ``"dali"``, which needs
-    an NVIDIA GPU and ``pip install "mist-medical[dali]"``. Configs written before
-    2.5.0 may still say ``"auto"``; they get the generic loader too.
+    MIST has one data loader, the generic loader, so ``"auto"`` and
+    ``"generic"`` both resolve to it. ``"dali"`` resolves to it too, with a
+    warning: MIST 3.0 removed NVIDIA DALI, and configs written by MIST 2.x may
+    still say ``"dali"``. Inference on those results folders reads this value,
+    so it has to keep working. Any other value passes through, and the registry
+    reports it as unknown.
 
     Args:
-        requested: The configured loader, or ``"auto"``.
+        requested: The configured loader: ``"auto"``, ``"generic"``, or
+            ``"dali"`` from a 2.x config.
 
     Returns:
         The data loader name, as registered in
         ``mist.data_loading.data_loader_registry``.
     """
-    return "generic" if requested == "auto" else requested
-
-    # Local import: avoids a hardware.py <-> mist.data_loading import cycle
-    # (mist.data_loading's own __init__.py imports generic_loader, which
-    # imports this module). Safe here regardless, since by the time any
-    # real training code calls this, mist.data_loading is already fully
-    # imported.
-    from mist.data_loading import data_loader_registry
-
-    if "dali" in data_loader_registry.list_registered_data_loaders():
-        return "dali"
-
-    warnings.warn(
-        "CUDA hardware was detected, but nvidia-dali-cuda120 is not "
-        "installed, so the DALI-accelerated data loader is unavailable. "
-        "Falling back to the generic data loader (slower, but fully "
-        'functional). Install it with: pip install "mist-medical[dali]".',
-        stacklevel=2,
-    )
-    return "generic"
+    if requested == "dali":
+        warnings.warn(
+            'training.hardware.data_loader is "dali", but MIST 3.0 removed NVIDIA '
+            'DALI. Using the generic loader. Set it to "generic" to remove this '
+            "warning.",
+            stacklevel=2,
+        )
+        return "generic"
+    if requested == "auto":
+        return "generic"
+    return requested
 
 
 def bf16_supported() -> bool:

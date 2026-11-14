@@ -1,23 +1,19 @@
-"""Tests for the generic, accelerator-agnostic data loader in MIST.
+"""Tests for MIST's generic data loader.
 
-Split into three groups:
+Split into two groups:
 
-* Pure unit tests (no I/O) for the Stage 2 helper functions -- sharding,
-  padding, anchor placement, foreground selection.
-* Pure unit tests (no I/O) for the Stage 3 augmentation functions -- flips,
-  zoom, noise, blur, brightness, contrast.
-* An integration/smoke test running the full get_training_dataset /
+* Pure unit tests (no I/O) for the helper functions -- sharding, padding,
+  anchor placement, foreground selection, positioned reads.
+* Integration tests running the full get_training_dataset /
   get_validation_dataset / get_test_dataset entry points against real
   preprocessed fixture data (reusing tests/regression/ants_sitk's harness),
   since that's the only way to exercise the actual .next()/.reset() iterator
   contract end to end -- including a synthetic "does it train" check with
-  augmentation enabled, per the Stage 3 release gate.
+  augmentation enabled.
 
-See cpu_rocm_support_plan.md Stages 2-3 for the design this is validating
-against: same signatures/contract as dali_loader.py, foreground-oversampling
-rate (not RNG stream) equivalence, DDP sharding with no drops/duplicates, and
-augmentations matching data_loading_constants.py's probabilities/ranges (not
-DALI's exact numerical output).
+What they check: the foreground-oversampling rate, DDP sharding with no drops
+or duplicates, and the .next()/.reset() contract the trainers and inference
+rely on.
 """
 
 import gc
@@ -132,7 +128,7 @@ def test_foreground_locations_caps_each_class(monkeypatch):
 
 
 def test_foreground_anchor_center_weights_classes_equally():
-    """A tiny class is picked as often as a huge one, as in dali_loader.py."""
+    """A tiny class is picked as often as a huge one."""
     label = np.zeros((20, 20, 20, 1), dtype=np.uint8)
     label[:10] = 1
     label[19, 19, 19, 0] = 2
@@ -292,7 +288,7 @@ def test_load_case_returns_a_memory_mapped_array(tmp_path):
 
 
 def test_validate_train_and_eval_inputs_rejects_empty_images():
-    """No images raises, mirroring dali_loader.py's validation."""
+    """No images raises."""
     with pytest.raises(ValueError, match="No images found"):
         gl._validate_train_and_eval_inputs([], ["a.npy"])
 
@@ -733,7 +729,7 @@ def test_get_test_dataset_preserves_input_order(preprocessed):
 
 
 def test_get_test_dataset_rejects_empty_input():
-    """No images raises ValueError, matching dali_loader.py."""
+    """No images raises ValueError."""
     with pytest.raises(ValueError, match="No images found"):
         gl.get_test_dataset(image_paths=[], seed=0, num_workers=0)
 

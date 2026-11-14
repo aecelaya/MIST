@@ -12,6 +12,14 @@ from mist.training.trainers.trainer_constants import TrainerConstants as constan
 from mist.utils import hardware
 
 
+def foreground_prob(training: dict[str, Any]) -> float:
+    """Chance that a training patch is centered on foreground.
+
+    MIST 2.x configs call this setting `dali_foreground_prob`.
+    """
+    return training.get("foreground_prob", training.get("dali_foreground_prob", 0.6))
+
+
 class Patch3DTrainer(BaseTrainer):
     """Trainer for 3D patch-based training in MIST."""
 
@@ -26,14 +34,11 @@ class Patch3DTrainer(BaseTrainer):
     ) -> tuple[Any, Any]:
         """Build dataloaders for training and validation.
 
-        Looks up the data loader backend resolved into
-        `training.hardware.data_loader` (`"dali"` or `"generic"` -- see
-        `hardware.resolve_data_loader()` and `cpu_rocm_support_plan.md`
-        Stage 4) in the registry and uses it to construct the training and
-        validation data loaders for MIST's 3D patch training. Both backends
-        share the exact same `.next()`/`.reset()` iterator contract (see
-        `dali_loader.py`/`generic_loader.py`), so nothing below this line
-        needs to know or care which one is active.
+        Looks up the data loader resolved into `training.hardware.data_loader`
+        (see `hardware.resolve_data_loader()`) in the registry and uses it to
+        construct the training and validation data loaders for MIST's 3D patch
+        training. Loaders share a `.next()`/`.reset()` iterator contract (see
+        `generic_loader.py`).
 
         Args:
             fold_data: Dictionary containing the following key-value pairs:
@@ -69,7 +74,7 @@ class Patch3DTrainer(BaseTrainer):
             label_paths=fold_data["train_labels"],
             dtm_paths=fold_data["train_dtms"],
             batch_size=training["batch_size_per_gpu"],
-            oversampling=training["dali_foreground_prob"],
+            oversampling=foreground_prob(training),
             labels=train_labels,
             roi_size=patch_size,
             seed=training["seed"],

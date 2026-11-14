@@ -5,9 +5,6 @@ a `foreground` folder, as nnU-Net does. The generic loader reads them instead of
 scanning every full label in every worker, which is slow for large images such
 as abdominal CT. Data preprocessed before this existed has no such folder, so
 the loader falls back to scanning the label.
-
-This module imports nothing from DALI, so the generic loader can use it on
-machines without DALI.
 """
 
 from collections.abc import Sequence

@@ -28,7 +28,7 @@ def clear_registry():
     """Isolate the data loader registry for each test in this file.
 
     Snapshots and restores the *real* registrations afterward, rather than
-    just clearing to empty -- mist.data_loading registers "generic"/"dali"
+    just clearing to empty -- mist.data_loading registers "generic"
     exactly once, at that package's own import time, so other test files
     (patch_3d_trainer.py's tests, in particular) rely on those still being
     there once this file's tests are done. Clearing to empty permanently

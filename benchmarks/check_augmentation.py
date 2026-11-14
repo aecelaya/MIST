@@ -1,12 +1,12 @@
 """Manual GPU check for MIST's training augmentation.
 
-The test suite fakes DALI, so the DALI pipeline only really runs on a CUDA
-machine. Run this there after mist_analyze and mist_preprocess:
+The test suite checks augmentation on tiny synthetic data. This runs it on a
+GPU, on real preprocessed data. Run it after mist_analyze and mist_preprocess:
 
     python benchmarks/check_augmentation.py \\
         --results /path/to/results --numpy /path/to/numpy --out /tmp/aug_check
 
-For each data loader backend available ("dali" and "generic") it builds the
+For each registered data loader backend ("generic" since MIST 3.0) it builds the
 training loader the way training does, pulls batches through the augmenter,
 checks their shapes and label values, times batches with and without
 augmentation, and saves a few augmented patches as NIfTI files to eyeball
@@ -25,6 +25,7 @@ import torch
 
 from mist.data_loading import augmentation, data_loader_registry
 from mist.training import patch_planning
+from mist.training.trainers.patch_3d_trainer import foreground_prob
 from mist.utils import hardware
 
 
@@ -71,7 +72,7 @@ def main() -> None:
         "batch_size": plan.batch_size_per_gpu,
         "roi_size": patch_size,
         "labels": labels[1:],
-        "oversampling": training["dali_foreground_prob"],
+        "oversampling": foreground_prob(training),
         "seed": training["seed"],
         "num_workers": training["hardware"]["num_cpu_workers"],
         "rank": 0,

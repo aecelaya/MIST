@@ -1,11 +1,12 @@
 """Data loader registry for managing training data loading backends in MIST.
 
 Mirrors mist/models/model_registry.py's pattern, with one difference: a data
-loading backend is a *module* exposing three functions with matching
-signatures -- get_training_dataset, get_validation_dataset, get_test_dataset
-(see dali_loader.py and generic_loader.py) -- rather than a single builder
-function, so the whole module is registered as one unit instead of wrapping
-each function separately with a decorator.
+loading backend is a *module* exposing three functions -- get_training_dataset,
+get_validation_dataset, get_test_dataset (see generic_loader.py) -- rather than
+a single builder function, so the whole module is registered as one unit
+instead of wrapping each function separately with a decorator. MIST ships one
+backend, "generic"; the registry lets a new one plug in without touching the
+trainers or inference.
 """
 
 from types import ModuleType
@@ -21,8 +22,7 @@ def register_data_loader(name: str, module: ModuleType) -> None:
     """Register a data loading backend module under a unique name.
 
     Args:
-        name: A unique string identifier for the loader (e.g., "dali",
-            "generic").
+        name: A unique string identifier for the loader (e.g., "generic").
         module: The loader module. Must expose get_training_dataset,
             get_validation_dataset, and get_test_dataset.
 

@@ -491,8 +491,8 @@ def _preprocess_single_patient(
         )
 
         # Save every array in C order. Converting labels to MIST's (x, y, z)
-        # order transposes them, and DALI reorders a Fortran-order file in full
-        # for every patch, which is slow for large images.
+        # order transposes them, and the data loader reads patches with
+        # positioned reads only from C-order files.
         patient_npy = f"{patient_id}.npy"
         np.save(output_dirs["images"] / patient_npy, np.ascontiguousarray(result["image"]))
         label = np.ascontiguousarray(result["mask"])

@@ -405,10 +405,7 @@ def main() -> int:
         f"trained {config['model']['architecture']}, not {expected}",
     )
     loader = config["training"]["hardware"]["data_loader"]
-    if loader == "generic" and shutil.which("nvidia-smi"):
-        report.add("WARN", "used the generic loader on an NVIDIA machine; is DALI installed?")
-    else:
-        report.info(f"data loader: {loader}")
+    report.info(f"data loader: {loader}")
 
     paths = pd.read_csv(results / "train_paths.csv")
     check_losses(report, results, args.epochs)

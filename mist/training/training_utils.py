@@ -263,8 +263,9 @@ def preprocessed_data_problems(numpy_dir: Path) -> list[str]:
     label = np.load(labels[0], mmap_mode="r")
     if label.flags.f_contiguous and not label.flags.c_contiguous:
         problems.append(
-            "Labels are saved in Fortran order, which makes the DALI loader much "
-            "slower on large images. Run mist_preprocess again to fix this."
+            "Labels are saved in Fortran order, so the data loader can't read "
+            "patches with positioned reads, which is slower on network "
+            "filesystems. Run mist_preprocess again to fix this."
         )
     if not (numpy_dir / foreground_locations.FOLDER).is_dir():
         problems.append(

@@ -58,21 +58,23 @@ def test_resolve_communication_backend(monkeypatch, requested, accelerator, expe
         ("auto", "rocm", "generic"),
         ("auto", "cuda", "generic"),
         ("generic", "cuda", "generic"),
-        ("dali", "cuda", "dali"),  # An explicit value always passes through untouched.
-        ("dali", "cpu", "dali"),
+        ("custom", "cuda", "custom"),  # Unknown names are left for the registry.
     ],
 )
 def test_resolve_data_loader(monkeypatch, requested, accelerator, expected) -> None:
-    """ "auto" is the generic loader on every machine, even with DALI installed."""
-    from mist.data_loading import data_loader_registry
-
+    """ "auto" is the generic loader on every machine, without a warning."""
     monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
-    monkeypatch.setattr(
-        data_loader_registry, "list_registered_data_loaders", lambda: ["dali", "generic"]
-    )
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         assert hardware.resolve_data_loader(requested) == expected
+
+
+@pytest.mark.parametrize("accelerator", ["cpu", "cuda", "rocm"])
+def test_resolve_data_loader_maps_dali_to_generic_with_warning(monkeypatch, accelerator) -> None:
+    """MIST 2.x configs that say "dali" still train and predict, with a warning."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    with pytest.warns(UserWarning, match="removed NVIDIA DALI"):
+        assert hardware.resolve_data_loader("dali") == "generic"
 
 
 @pytest.mark.parametrize(
