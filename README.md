@@ -23,43 +23,21 @@ a configuration file for when you need more control.
 
 ## Installation
 
-**CPU** (default — runs the full pipeline: train, predict, evaluate,
-everything):
-
 ```bash
 pip install mist-medical
 ```
 
-The same command works on an **NVIDIA GPU**. With PyTorch 2.9, also run
-`pip install -U "nvidia-cudnn-cu12>=9.15"`: PyTorch 2.9's CUDA wheels come with
-cuDNN 9.10, which makes 3D mixed-precision training about 3x slower. Upgrading
-from MIST 2.x? See
+This works on CPUs and NVIDIA GPUs. On NVIDIA GPUs with PyTorch 2.9, also
+upgrade cuDNN, or mixed-precision training runs about 3x slower:
+
+```bash
+pip install -U "nvidia-cudnn-cu12>=9.15"
+```
+
+For AMD GPUs, install a ROCm build of PyTorch first (see
+[Accelerator support](https://mist-medical.readthedocs.io/en/latest/advanced_topics/#accelerator-support-nvidia-amd-rocm-cpu)).
+Docker: `docker pull mistmedical/mist:latest`. Upgrading from 2.x? See
 [Upgrading to 3.0](https://mist-medical.readthedocs.io/en/latest/upgrading/).
-
-**AMD ROCm GPU** (install a ROCm-enabled PyTorch build first — PyPI's default
-`torch` wheel has no ROCm support — matching your driver's ROCm version, then
-MIST on top with no extra needed; see
-[Accelerator support](https://mist-medical.readthedocs.io/en/latest/advanced_topics/#accelerator-support-nvidia-amd-rocm-cpu)
-for details):
-
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/rocm6.4
-pip install mist-medical
-```
-
-**Development**:
-
-```bash
-git clone https://github.com/mist-medical/MIST.git
-cd MIST
-pip install -e .            # CPU, NVIDIA, or AMD ROCm GPU
-```
-
-**Docker** (NVIDIA GPU required, driver ≥ 525.x):
-
-```bash
-docker pull mistmedical/mist:latest
-```
 
 ## Quick Start
 
