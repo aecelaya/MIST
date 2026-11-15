@@ -1447,6 +1447,17 @@ this to work; it's resolved once, the first time you run `mist_train`, and the
 resolved values are written back to `config.json` so every later run and all
 downstream inference read the same settings.
 
+**Installing on AMD GPUs.** PyPI's default `torch` has no ROCm support, so
+install a ROCm build of PyTorch first, then MIST:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/rocm6.4
+pip install mist-medical
+```
+
+Replace `rocm6.4` with the ROCm version your driver supports (see
+[PyTorch's install selector](https://pytorch.org/get-started/locally/)).
+
 **`training.hardware.communication_backend`** is resolved this way: the
 `torch.distributed` backend used for multi-GPU coordination. It resolves to
 `"nccl"` on both NVIDIA CUDA and AMD ROCm (on ROCm, the `"nccl"` backend name
