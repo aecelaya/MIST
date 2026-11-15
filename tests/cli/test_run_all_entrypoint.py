@@ -1,7 +1,6 @@
 """Tests for mist_run_all CLI entrypoint."""
 
 import argparse
-from pathlib import Path
 
 import pytest
 
@@ -21,22 +20,22 @@ def _patch_minimal_cli(monkeypatch) -> None:
         return argparse.ArgumentParser(**kwargs)
 
     def _add_analyzer_args(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--data", type=str)
-        parser.add_argument("--results", type=str)
+        parser.add_argument("--data", type=str, required=True)
+        parser.add_argument("--results", type=str, required=True)
         parser.add_argument("--nfolds", type=int)
         parser.add_argument("--num-workers-analyze", type=int, default=1)
         parser.add_argument("--overwrite", action="store_true")
 
     def _add_preprocess_args(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--results", type=str)
-        parser.add_argument("--numpy", type=str)
+        parser.add_argument("--results", type=str, required=True)
+        parser.add_argument("--numpy", type=str, required=True)
         parser.add_argument("--no-preprocess", action="store_true")
         parser.add_argument("--compute-dtms", action="store_true")
         parser.add_argument("--overwrite", action="store_true")
 
     def _add_train_args(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--results", type=str)
-        parser.add_argument("--numpy", type=str)
+        parser.add_argument("--results", type=str, required=True)
+        parser.add_argument("--numpy", type=str, required=True)
         parser.add_argument("--model", type=str)
         parser.add_argument("--patch-size", nargs=3, type=int)
         parser.add_argument("--loss", type=str)
@@ -113,13 +112,21 @@ def test_parse_run_all_args_requires_data(monkeypatch):
         entry._parse_run_all_args(argv=[])
 
 
-def test_parse_run_all_args_defaults_results(tmp_path, monkeypatch):
-    """It supplies a default results path when --results is not given."""
+def test_parse_run_all_args_requires_paths(monkeypatch):
+    """It errors when --results or --numpy is missing."""
     _patch_minimal_cli(monkeypatch)
-    monkeypatch.chdir(tmp_path)
-    ns = entry._parse_run_all_args(argv=["--data", "d.json"])
-    assert Path(ns.results) == (tmp_path / "results").resolve()
-    assert Path(ns.numpy) == (tmp_path / "numpy").resolve()
+    with pytest.raises(SystemExit):
+        entry._parse_run_all_args(argv=["--data", "d.json", "--numpy", "n"])
+    with pytest.raises(SystemExit):
+        entry._parse_run_all_args(argv=["--data", "d.json", "--results", "r"])
+
+
+def test_parse_run_all_args_real_parser_requires_paths(capsys):
+    """With MIST's real parser, missing paths are named in the error."""
+    with pytest.raises(SystemExit):
+        entry._parse_run_all_args(argv=["--data", "d.json"])
+    err = capsys.readouterr().err
+    assert "--results" in err and "--numpy" in err
 
 
 def test_parse_run_all_args_explicit_values(monkeypatch, tmp_path):
@@ -371,7 +378,9 @@ def test_run_all_entry_forwards_num_workers_analyze(monkeypatch):
     monkeypatch.setattr(entry, "preprocess_entry", lambda _: None, raising=True)
     monkeypatch.setattr(entry, "train_entry", lambda _: None, raising=True)
 
-    entry.run_all_entry(argv=["--data", "d.json", "--num-workers-analyze", "4"])
+    entry.run_all_entry(
+        argv=["--data", "d.json", "--results", "r", "--numpy", "n", "--num-workers-analyze", "4"]
+    )
 
     assert "--num-workers-analyze" in calls["analyze"]
     assert calls["analyze"][calls["analyze"].index("--num-workers-analyze") + 1] == "4"
@@ -394,6 +403,10 @@ def test_run_all_entry_forwards_every_train_flag_except_resume(monkeypatch):
         argv=[
             "--data",
             "d.json",
+            "--results",
+            "r",
+            "--numpy",
+            "n",
             "--val-percent",
             "0.1",
             "--validate-every",
@@ -427,4 +440,6 @@ def test_run_all_entry_forwards_every_train_flag_except_resume(monkeypatch):
 def test_run_all_entry_rejects_resume():
     """--resume errors and points to mist_train --resume."""
     with pytest.raises(SystemExit):
-        entry._parse_run_all_args(argv=["--data", "d.json", "--resume"])
+        entry._parse_run_all_args(
+            argv=["--data", "d.json", "--results", "r", "--numpy", "n", "--resume"]
+        )

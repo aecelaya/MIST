@@ -11,7 +11,7 @@ from mist.cli import args as argmod
 
 def prepare_analyze_dirs(cli: argparse.Namespace) -> Path:
     """Create output tree for the *analyze* command."""
-    results_dir = Path(cli.results or "./results").expanduser().resolve()
+    results_dir = Path(cli.results).expanduser().resolve()
     results_dir.mkdir(parents=True, exist_ok=True)
     return results_dir
 

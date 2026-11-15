@@ -1203,7 +1203,7 @@ gives the data loader workers the host's shared memory; without it, set
 ## Custom cross validation
 
 By default, MIST uses a **random five-fold cross validation** split. The folds
-are stored in the file `./results/train_paths.csv`, which maps each case to its
+are stored in `train_paths.csv` in the results directory, which maps each case to its
 assigned fold.
 
 You can manually edit this file to customize how folds are assigned. For

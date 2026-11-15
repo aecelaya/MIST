@@ -13,6 +13,8 @@ In short:
   Old data still trains, just more slowly.
 - **Expect different training results** from 2.x with the same config.
 - With PyTorch 2.9 on NVIDIA GPUs, **upgrade cuDNN** to 9.15 or later.
+- **Pass `--results` and `--numpy` every time.** They no longer default to
+  `./results` and `./numpy` (see [Required paths](#required-paths)).
 
 ## Installing
 
@@ -83,6 +85,22 @@ MIST 2.x, including 2.5.0rc0:
   memory map instead, which is much slower on network filesystems such as NFS.
 
 Old data still trains. `mist_train` warns about each of these and goes on.
+
+## Required paths
+
+`--results` and `--numpy` are now required wherever a command uses them:
+
+| Command                                | Required                          |
+| -------------------------------------- | --------------------------------- |
+| `mist_analyze`                         | `--data`, `--results`             |
+| `mist_preprocess`, `mist_train`        | `--results`, `--numpy`            |
+| `mist_run_all`                         | `--data`, `--results`, `--numpy`  |
+| `mist_finalize`                        | `--results`                       |
+
+In 2.x, leaving them out wrote `results/` and `numpy/` into the current
+directory, which is easy to do by accident in a data folder on shared storage.
+`mist_analyze` without `--results` crashed. Scripts that already pass both paths
+need no change.
 
 ## Why training results differ from 2.x
 

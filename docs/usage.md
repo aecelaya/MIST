@@ -26,8 +26,8 @@ MIST also provides commands for **inference**, **ensembling**,
 order:
 
 - `--data` (**required**): Path to your dataset JSON file.
-- `--numpy`: Path to save preprocessed NumPy files. _(default: `./numpy`)_
-- `--results`: Path to save pipeline outputs. _(default: `./results`)_
+- `--numpy` (**required**): Path to save preprocessed NumPy files.
+- `--results` (**required**): Path to save pipeline outputs.
 
 It also passes on these flags from the three commands below: `--nfolds`,
 `--num-workers-analyze`, `--verify`, `--num-workers-preprocess`,
@@ -60,7 +60,7 @@ See below for more details about each command and how to run them individually.
 
 ## Output
 
-The output of the MIST pipeline is stored under the `./results` directory, with
+The output of the MIST pipeline is stored in the `--results` directory, with
 the following structure:
 
 ```text
@@ -106,7 +106,7 @@ Run analysis alone with the `mist_analyze` command. This command has the
 following arguments:
 
 - `--data` (**required**): Path to your dataset JSON file.
-- `--results`: Directory to save analysis outputs. _(default: `./results`)_
+- `--results` (**required**): Directory to save analysis outputs.
 - `--nfolds`: How many folds to split the dataset into. _(default: 5)_
 - `--num-workers-analyze`: Number of parallel workers for dataset analysis.
   _(default: 1)_
@@ -139,7 +139,7 @@ To run the preprocessing portion of the MIST pipeline only, use the
 `mist_preprocess` command. This command has the following arguments:
 
 - `--results` (**required**): Path to the output of the analysis step.
-- `--numpy`: Path to save the preprocessed NumPy files. _(default: `./numpy`)_
+- `--numpy` (**required**): Path to save the preprocessed NumPy files.
 - `--num-workers-preprocess`: Number of parallel workers for preprocessing.
   _(default: 1)_
 - `--compute-dtms`: Compute per-class Distance Transform Maps (DTMs) from ground
@@ -188,9 +188,9 @@ training settings also save the new value to `config.json`. Defaults below are
 those of a new `config.json`; without the flag, `mist_train` uses whatever the
 config says. This command has the following arguments:
 
-- `--numpy`: Path to the preprocessed NumPy data. _(default: `./numpy`)_
-- `--results`: Path to the output of the analysis step, where training writes
-  models, logs, and predictions. _(default: `./results`)_
+- `--numpy` (**required**): Path to the preprocessed NumPy data.
+- `--results` (**required**): Path to the output of the analysis step, where
+  training writes models, logs, and predictions.
 - `--overwrite`: Train even if `results.csv` already exists. Without it,
   `mist_train` stops.
 
@@ -281,11 +281,11 @@ mist_train --numpy /path/to/preprocessed/data \
 ```
 
 At the end of the training loop, MIST will run inference on the held out fold
-and write the predictions to `./results/predictions/train/raw`. If this
+and write the predictions to `predictions/train/raw` in `--results`. If this
 invocation trained every configured fold (the default, and the case in the
 example above), it then evaluates the results with the metrics specified in the
 `evaluation` entry of the configuration file, saving the computed metrics to
-`./results/results.csv`. If `--folds` was used to train only a subset of the
+`results.csv` in `--results`. If `--folds` was used to train only a subset of the
 folds (e.g. one fold per node on an HPC cluster), this step is skipped instead —
 see [Finalizing a distributed run](#finalizing-a-distributed-run) below.
 
@@ -342,8 +342,8 @@ for the full workflow.
 
 The `mist_finalize` command takes the following arguments:
 
-- `--results`: Path to the MIST results directory shared by every per-fold job.
-  _(default: `./results`)_
+- `--results` (**required**): Path to the MIST results directory shared by every
+  per-fold job.
 - `--num-workers-evaluate`: Number of parallel workers for evaluation.
   _(default: `1`)_
 - `--device`: Device for held-out test-set inference (ignored if no test set is
@@ -394,8 +394,10 @@ The main MIST pipeline is responsible for training and evaluating models. The
 
 The `mist_predict` command uses the following arguments:
 
-- `--models-dir`: (**required**) Path to the `./results/models` directory.
-- `--config`: (**required**) Path to the `./results/config.json` file.
+- `--models-dir`: (**required**) Path to the `models` directory in your results
+  folder.
+- `--config`: (**required**) Path to the `config.json` file in your results
+  folder.
 - `--paths-csv`: (**required**) Path to CSV file containing patient IDs and
   paths to imaging data. Must have an `id` column and one column per image type
   matching the dataset's image keys (e.g., `t1`, `t2`). See the table below for

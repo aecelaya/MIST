@@ -43,6 +43,10 @@ checks this against results folders trained by 2.4.1 and 2.5.0rc0.
   validation from 1:48 to 1:31. Existing configs keep their value.
 - `training.dali_foreground_prob` is now `training.foreground_prob`. Configs that
   use the old name keep working.
+- **`--results` and `--numpy` are required.** `mist_analyze`, `mist_preprocess`,
+  `mist_train`, `mist_run_all`, and `mist_finalize` no longer default to
+  `./results` and `./numpy`, and `mist_analyze` and `mist_run_all` also require
+  `--data`. `mist_analyze` without `--results` used to crash with a `TypeError`.
 
 ### Removed
 

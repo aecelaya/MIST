@@ -186,14 +186,14 @@ def test_add_analyzer_args_defaults_and_parsing():
     parser = _mk_parser()
     args_mod.add_analyzer_args(parser)
 
-    # No args specified -> defaults.
-    ns = parser.parse_args([])
-    assert hasattr(ns, "data")
-    assert hasattr(ns, "results")
-    assert hasattr(ns, "nfolds")
-    assert hasattr(ns, "overwrite")
-    assert ns.data is None
-    assert ns.results is None
+    # --data and --results are required.
+    with pytest.raises(SystemExit):
+        parser.parse_args([])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--data", "d.json"])
+
+    # Defaults for everything else.
+    ns = parser.parse_args(["--data", "d.json", "--results", "out"])
     assert ns.nfolds is None
     assert ns.verify is False
     assert ns.overwrite is False
@@ -228,10 +228,14 @@ def test_add_preprocess_args_defaults_and_parsing():
     parser = _mk_parser()
     args_mod.add_preprocess_args(parser)
 
-    # Defaults.
-    ns = parser.parse_args([])
-    assert ns.results is None
-    assert ns.numpy is None
+    # --results and --numpy are required.
+    with pytest.raises(SystemExit):
+        parser.parse_args([])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--results", "out"])
+
+    # Defaults for everything else.
+    ns = parser.parse_args(["--results", "out", "--numpy", "npdir"])
     assert ns.no_preprocess is False
     assert ns.compute_dtms is False
     assert ns.overwrite is False
@@ -255,7 +259,7 @@ def test_add_preprocess_args_defaults_and_parsing():
     assert ns.overwrite is True
 
     # Explicit boolean_flag false.
-    ns = parser.parse_args(["--no-preprocess", "false"])
+    ns = parser.parse_args(["--results", "out", "--numpy", "npdir", "--no-preprocess", "false"])
     assert ns.no_preprocess is False
 
 
@@ -294,10 +298,14 @@ def test_add_train_args_defaults_and_basic_parse(patched_registries):
     parser = _mk_parser()
     args_mod.add_train_args(parser)
 
-    # defaults
-    ns = parser.parse_args([])
-    assert ns.results is None
-    assert ns.numpy is None
+    # --results and --numpy are required.
+    with pytest.raises(SystemExit):
+        parser.parse_args([])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--numpy", "npdir"])
+
+    # Defaults for everything else.
+    ns = parser.parse_args(["--results", "out", "--numpy", "npdir"])
     assert ns.model is None
     assert ns.patch_size is None
     assert ns.loss is None
@@ -444,5 +452,5 @@ def test_add_train_args_boolean_flags_explicit_false(patched_registries):
     args_mod.add_train_args(parser)
 
     # --overwrite is a boolean_flag; ensure explicit false works.
-    ns = parser.parse_args(["--overwrite", "false"])
+    ns = parser.parse_args(["--results", "out", "--numpy", "npdir", "--overwrite", "false"])
     assert ns.overwrite is False

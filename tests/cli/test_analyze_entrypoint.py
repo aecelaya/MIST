@@ -33,7 +33,7 @@ def _patch_argparse(min_args: list[str], monkeypatch) -> None:
     def _add_analyzer_args(parser: argparse.ArgumentParser) -> None:
         # Minimal set needed by the entrypoint and Analyzer.
         parser.add_argument("--data", required=True)
-        parser.add_argument("--results", default="")
+        parser.add_argument("--results", required=True)
         parser.add_argument("--overwrite", action="store_true")
 
     monkeypatch.setattr(entry.argmod, "ArgParser", _mk_parser, raising=True)
@@ -50,15 +50,13 @@ def _patch_argparse(min_args: list[str], monkeypatch) -> None:
 # ============================================================================
 
 
-def test_prepare_analyze_dirs_defaults_to_results_in_cwd(tmp_path, monkeypatch):
-    """Without --results, it should create ./results under the CWD."""
+def test_analyze_entry_requires_results(tmp_path, monkeypatch, capsys):
+    """Without --results, it errors before creating anything."""
     monkeypatch.chdir(tmp_path)
-
-    cli = argparse.Namespace(results="")
-    out = entry.prepare_analyze_dirs(cli)
-
-    assert out == (tmp_path / "results").resolve()
-    assert out.exists() and out.is_dir()
+    with pytest.raises(SystemExit):
+        entry.analyze_entry(["--data", str(tmp_path / "ds.json")])
+    assert "--results" in capsys.readouterr().err
+    assert not (tmp_path / "results").exists()
 
 
 def test_prepare_analyze_dirs_respects_custom_and_expands(tmp_path, monkeypatch):
@@ -222,30 +220,3 @@ def test_num_workers_analyze_defaults_to_one(tmp_path, monkeypatch):
     entry.analyze_entry(argv)
 
     assert created["analyzer"].cli.num_workers_analyze == 1
-
-
-def test_analyze_entry_uses_default_results_when_not_provided(tmp_path, monkeypatch):
-    """Without --results, should create ./results (under CWD) and still run."""
-    _patch_argparse(["--data", "x"], monkeypatch)
-    monkeypatch.chdir(tmp_path)
-
-    created = {}
-
-    def _factory(cli_ns):
-        a = _DummyAnalyzer(cli_ns)
-        created["analyzer"] = a
-        return a
-
-    monkeypatch.setattr(entry, "Analyzer", _factory, raising=True)
-
-    argv = ["--data", str(tmp_path / "ds.json"), "--overwrite"]
-    entry.analyze_entry(argv)
-
-    a = created["analyzer"]
-    # Analyzer.run() was invoked.
-    assert a.run_called is True
-    # Default directory was created at ./results under CWD.
-    default_dir = tmp_path / "results"
-    assert default_dir.exists() and default_dir.is_dir()
-    # Namespace wasn't mutated (results remains empty string).
-    assert a.cli.results == ""

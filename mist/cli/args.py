@@ -90,8 +90,8 @@ class ArgParser(ArgumentParser):
 def add_analyzer_args(parser: ArgParser) -> None:
     """Add arguments for the Analyzer class."""
     g = parser.add_argument_group("Analyzer")
-    g.add_argument("--data", type=str, help="Path to dataset JSON file.")
-    g.add_argument("--results", type=str, help="Path to output of MIST pipeline.")
+    g.add_argument("--data", type=str, required=True, help="Path to dataset JSON file.")
+    g.add_argument("--results", type=str, required=True, help="Path to output of MIST pipeline.")
     g.add_argument("--nfolds", type=int, help="Number of cross-validation folds.")
     g.add_argument(
         "--num-workers-analyze",
@@ -113,8 +113,8 @@ def add_analyzer_args(parser: ArgParser) -> None:
 def add_preprocess_args(parser: ArgParser) -> None:
     """Add arguments for the preprocessing pipeline."""
     g = parser.add_argument_group("Preprocess")
-    g.add_argument("--results", type=str, help="Path to output of MIST pipeline.")
-    g.add_argument("--numpy", type=str, help="Path to save preprocessed NumPy data.")
+    g.add_argument("--results", type=str, required=True, help="Path to output of MIST pipeline.")
+    g.add_argument("--numpy", type=str, required=True, help="Path to preprocessed NumPy data.")
     g.add_argument(
         "--num-workers-preprocess",
         type=positive_int,
@@ -153,8 +153,8 @@ def add_train_args(parser: ArgParser) -> None:
     """Add arguments for the training pipeline."""
     g = parser.add_argument_group("Train")
     # Input data.
-    g.add_argument("--results", type=str, help="Path to output of MIST pipeline.")
-    g.add_argument("--numpy", type=str, help="Path to save preprocessed NumPy data.")
+    g.add_argument("--results", type=str, required=True, help="Path to output of MIST pipeline.")
+    g.add_argument("--numpy", type=str, required=True, help="Path to preprocessed NumPy data.")
 
     # Model.
     g.add_argument(
