@@ -11,12 +11,6 @@ theme:
   highlightjs: true
 plugins:
   - search
-  - mkdocstrings:
-      handlers:
-        # See: https://mkdocstrings.github.io/python/usage/
-        python:
-          options:
-            docstring_style: sphinx
 markdown_extensions:
   - markdown_include.include:
       base_path: .
@@ -26,10 +20,4 @@ markdown_extensions:
   - pymdownx.arithmatex:
         generic: true
 extra_javascript:
-  - javascripts/katex.js
-  - https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.7/katex.min.js
-  - https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.7/contrib/auto-render.min.js
-  - javascripts/mathjax.js
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
-extra_css:
-  - https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.7/katex.min.css
