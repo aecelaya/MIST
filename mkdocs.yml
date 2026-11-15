@@ -22,6 +22,7 @@ markdown_extensions:
       base_path: .
   - tables
   - admonition
+  - pymdownx.superfences
   - pymdownx.arithmatex:
         generic: true
 extra_javascript:
