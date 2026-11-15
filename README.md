@@ -73,8 +73,9 @@ mist_predict --models-dir /path/to/results/models \
 
 ## Key Features
 
-- **Automatic configuration** — analysis step determines target spacing, patch
-  size, normalization, and foreground cropping from your data
+- **Automatic configuration** — analysis chooses target spacing,
+  normalization, and foreground cropping from your data; the first training run
+  chooses patch size, batch size, and precision for the GPU
 - **Five-fold cross-validation** by default, with custom fold assignment support
 - **Multi-GPU training** via PyTorch DDP on NVIDIA CUDA or AMD ROCm; uses all
   visible GPUs automatically
@@ -83,7 +84,7 @@ mist_predict --models-dir /path/to/results/models \
   NVIDIA-specific dependencies
 - **Sliding window inference** with configurable overlap and patch blending
 - **Test-time augmentation** and **multi-model ensembling** at inference
-- **Postprocessing** with learnable, per-class morphological strategies
+- **Postprocessing** with per-class morphological strategies defined in JSON
 - **CPU training and inference** — the full pipeline, `mist_train` included,
   runs on any machine, including Macs and laptops without an NVIDIA GPU
 
@@ -146,6 +147,13 @@ Full documentation, including configuration reference and advanced topics, is at
 
 ## What's New
 
+- November 2026 — **MIST 3.0** (release candidate) — NVIDIA DALI is gone, and
+  MIST's own data loader is the only one, on NVIDIA, AMD, and CPU machines. It
+  trained full LiTS in 13 s per epoch on an H100, against 67 s with DALI.
+  Planning at training time, FP16, nnU-Net-style augmentation, and the new
+  default `nnunet-plain` come from 2.5.0rc0. Models trained with 2.x keep
+  working; see
+  [Upgrading to 3.0](https://mist-medical.readthedocs.io/en/latest/upgrading/).
 - November 2026 — **MIST 2.4.0** — new ResEnc UNet (`resenc`), Primus, and
   PrimusV2 architectures, and fine-tuning from the openly available
   nnFoundationCNN and nnFoundationViT pretrained encoders with

@@ -17,36 +17,20 @@ a configuration file for when you need more control.
 
 ## Installation
 
-**CPU** (default — runs the full pipeline: train, predict, evaluate, everything.
-Works on Mac):
-
 ```console
 pip install mist-medical
 ```
 
-The same command works on an **NVIDIA GPU**. With PyTorch 2.9, also run
-`pip install -U "nvidia-cudnn-cu12>=9.15"` (see
-[Getting started](getting_started.md)). Upgrading from MIST 2.x? See
-[Upgrading to 3.0](upgrading.md).
-
-**AMD ROCm GPU** (install a ROCm-enabled PyTorch build first — PyPI's default
-`torch` wheel has no ROCm support — matching your driver's ROCm version, then
-MIST on top with no extra needed):
-
-```console
-pip install torch --index-url https://download.pytorch.org/whl/rocm6.4
-pip install mist-medical
-```
-
-See
-[Accelerator support](advanced_topics.md#accelerator-support-nvidia-amd-rocm-cpu)
-for details and how to pick the right `rocmX.Y` version for your machine.
+This runs the whole pipeline on CPUs and NVIDIA GPUs. AMD GPUs need a ROCm
+build of PyTorch first, and NVIDIA GPUs with PyTorch 2.9 need a newer cuDNN for
+fast mixed precision. [Getting started](getting_started.md) covers both.
+Upgrading from MIST 2.x? See [Upgrading to 3.0](upgrading.md).
 
 ## Key Features
 
-- **Automatic configuration** — analysis step determines target spacing, patch
-  size, normalization, and foreground cropping from your data and available GPU
-  memory
+- **Automatic configuration** — analysis chooses target spacing,
+  normalization, and foreground cropping from your data; the first training run
+  chooses patch size, batch size, and precision for the GPU
 - **Five-fold cross-validation** by default, with custom fold assignment support
 - **Multi-GPU training** via PyTorch DDP on NVIDIA CUDA or AMD ROCm; uses all
   visible GPUs automatically
@@ -62,21 +46,19 @@ for details and how to pick the right `rocmX.Y` version for your machine.
 
 ## Supported Architectures
 
-| Model                                    | Key                                                                    |
-| ---------------------------------------- | ---------------------------------------------------------------------- |
-| nnU-Net (default)                        | `nnunet-plain`                                                         |
-| nnU-Net Residual                         | `nnunet-res`, `nnunet`                                                 |
-| nnU-Net Pocket                           | `nnunet-pocket`                                                        |
-| ResEnc UNet                              | `resenc`                                                               |
-| Primus (medium / large / X)              | `primus-medium`, `primus-large`, `primus-x`                            |
-| PrimusV2 (small / base / medium / large) | `primusv2-small`, `primusv2-base`, `primusv2-medium`, `primusv2-large` |
-| MedNeXt (small / base / medium / large)  | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`     |
-| FMG-Net                                  | `fmgnet`                                                               |
-| W-Net                                    | `wnet`                                                                 |
-| Swin UNETR (small / base / large)        | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                 |
+nnU-Net (`nnunet-plain`, the default), residual and pocket nnU-Net, ResEnc,
+Primus and PrimusV2, MedNeXt, FMG-Net, W-Net, and SwinUNETR. See
+[Network architectures](advanced_topics.md#network-architectures) for the keys
+to use with `--model`.
 
 ## What's New
 
+- November 2026 — **MIST 3.0** (release candidate) — NVIDIA DALI is gone, and
+  MIST's own data loader is the only one, on NVIDIA, AMD, and CPU machines. It
+  trained full LiTS in 13 s per epoch on an H100, against 67 s with DALI.
+  Planning at training time, FP16, nnU-Net-style augmentation, and the new
+  default `nnunet-plain` come from 2.5.0rc0. Models trained with 2.x keep
+  working; see [Upgrading to 3.0](upgrading.md).
 - November 2026 — **MIST 2.4.0** — new ResEnc UNet (`resenc`), Primus, and
   PrimusV2 architectures, and fine-tuning from the openly available
   nnFoundationCNN and nnFoundationViT pretrained encoders with

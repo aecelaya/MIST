@@ -8,20 +8,16 @@ Getting Started
     required. It's the fastest way to see how MIST goes from raw NIfTI files to
     trained models, predictions, and evaluation.
 
-### System Requirements
+## System Requirements
 
-MIST runs the full pipeline — analyze, preprocess, **train**, predict, evaluate
-— on **CPU**, with no NVIDIA-specific dependencies, and sufficient memory to
-handle 3D medical images. CPU training is slower than GPU-accelerated training,
-so scale patch size, batch size, and epochs accordingly.
+MIST runs every step, training included, on a CPU, an NVIDIA GPU, or an AMD
+ROCm GPU. A GPU is optional but makes training far faster. On a CPU, use a
+smaller patch, batch size, and number of epochs. You also need enough RAM to
+hold your 3D images.
 
-An **NVIDIA GPU** is optional but recommended. An **AMD ROCm GPU** also works
-(see
-[Accelerator support](advanced_topics.md#accelerator-support-nvidia-amd-rocm-cpu)).
+## Install
 
-### Install
-
-#### CPU (default)
+### CPU (default)
 
 Runs the full pipeline, including training, on any machine — laptops, Macs,
 Linux workstations, HPC nodes without a GPU:
@@ -30,29 +26,33 @@ Linux workstations, HPC nodes without a GPU:
 pip install mist-medical
 ```
 
-#### NVIDIA GPU
+### NVIDIA GPU
 
-The same command as for CPU works:
-
-```console
-pip install mist-medical
-```
+Use the same command as for CPU. With PyTorch 2.9, also upgrade cuDNN:
 
 !!! warning "PyTorch 2.9 and cuDNN"
 
     PyTorch 2.9's CUDA wheels come with cuDNN 9.10, which runs 3D convolutions
     in BF16 and FP16 about 3x slower than FP32, so training gets nothing from
-    mixed precision. `mist_train` warns when it finds this. Install a newer
-    cuDNN alongside PyTorch (use `cu13` instead of `cu12` with CUDA 13 builds):
+    mixed precision. `mist_train` warns when it finds this. Install cuDNN 9.15
+    or later alongside PyTorch (use `cu13` instead of `cu12` with CUDA 13
+    builds):
 
     ```console
     pip install -U "nvidia-cudnn-cu12>=9.15"
     ```
 
     pip will report that torch requires an older cuDNN. That's expected, and
-    training works.
+    training works. To check which cuDNN PyTorch loads (91500 or higher is
+    9.15 or later):
 
-#### AMD ROCm GPU
+    ```console
+    python -c "import torch; print(torch.backends.cudnn.version())"
+    ```
+
+    The [Docker image](advanced_topics.md#docker) already has the newer cuDNN.
+
+### AMD ROCm GPU
 
 PyPI's default `torch` wheel has no ROCm support, so install a ROCm-enabled
 PyTorch build _first_ — matching your machine's installed ROCm version, which
@@ -66,17 +66,18 @@ pip install mist-medical
 
 Swap `rocm6.4` for whichever ROCm release matches your driver (see the
 [ROCm PyTorch install docs](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/3rd-party/pytorch-install.html)
-for the full list of supported versions). Verify it took before installing MIST:
+for the full list of supported versions). To check that PyTorch sees the GPU
+through ROCm:
 
 ```console
 python -c "import torch; print(torch.__version__, torch.version.hip, torch.cuda.is_available())"
 ```
 
-You want a version string ending in `+rocmX.Y`, a non-`None`
-`torch.version.hip`, and `True` — that combination is what MIST's hardware
-detection checks for.
+You want a version string ending in `+rocmX.Y`, a `torch.version.hip` that
+isn't `None`, and `True`. MIST treats the GPU as AMD ROCm when
+`torch.cuda.is_available()` is `True` and `torch.version.hip` is set.
 
-#### Development install
+### Development install
 
 To install MIST and customize the underlying code (e.g., add a loss function or
 new architecture), clone the repo and install in editable mode. On AMD ROCm,
@@ -88,7 +89,7 @@ cd MIST
 pip install -e .          # CPU, NVIDIA, or AMD ROCm
 ```
 
-### Data Format
+## Data Format
 
 The MIST pipeline assumes that your train and test data directories are set up
 in the following structure.
@@ -184,3 +185,8 @@ The same dataset JSON using relative paths:
     location (or a different machine) without needing to edit the paths, as long
     as the relative structure between the JSON file and the data directories is
     preserved.
+
+## Next steps
+
+Run the whole pipeline with `mist_run_all`, or each step on its own. See
+[Usage](usage.md).
