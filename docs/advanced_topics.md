@@ -28,7 +28,7 @@ Below is an example of a valid `config.json` file.
 
 ```json
 {
-  "mist_version": "2.5.0",
+  "mist_version": "3.0.0",
 
   "dataset_info": {
     "task": "ivygap",
@@ -75,7 +75,7 @@ Below is an example of a valid `config.json` file.
     "min_steps_per_epoch": 250,
     "batch_size_per_gpu": "auto",
     "gpu_memory_budget_gb": 8,
-    "dali_foreground_prob": 0.6,
+    "foreground_prob": 0.6,
 
     "loss": {
       "name": "dice_ce",
@@ -108,7 +108,7 @@ Below is an example of a valid `config.json` file.
 
     "hardware": {
       "num_gpus": 1,
-      "num_cpu_workers": 8,
+      "num_cpu_workers": 4,
       "master_addr": "localhost",
       "master_port": 12345,
       "communication_backend": "nccl",
@@ -1370,8 +1370,7 @@ only in-plane would not leave a valid distance map, so quasi-2D patches are not
 scaled when DTMs are used; they are still rotated.
 
 Augmentation runs in PyTorch on each training batch once it is on the training
-device, so the DALI and generic (CPU and ROCm) data loaders apply the same
-transforms.
+device, so it is the same on NVIDIA, AMD ROCm, and CPU machines.
 
 ### How to customize
 
@@ -1405,8 +1404,9 @@ Disable noise and blur while keeping other augmentations active:
 
 ## Foreground sampling probability
 
-The `training.dali_foreground_prob` key controls the probability that a sampled
-training patch contains foreground (non-zero labels). Despite its name, it applies to both data loaders. This is useful in medical
+The `training.foreground_prob` key controls the probability that a sampled
+training patch contains foreground (non-zero labels). MIST 2.x configs call it
+`dali_foreground_prob`, which MIST still reads. This is useful in medical
 segmentation tasks where most voxels are background, ensuring the model sees a
 balanced mix of positive and negative regions during training.
 
@@ -1462,12 +1462,9 @@ edit it by hand, or restore `"auto"`, to get it to re-resolve.
 **`training.hardware.data_loader`** is `"generic"`: MIST's own pure-PyTorch data
 loader, on every machine. It reads only each patch from memory-mapped files, in
 CPU worker processes that last for the whole fold, and pads patches that run
-past the image edge on the GPU. Configs from before 2.5.0 that say `"auto"` get
-it too. Setting `"dali"` uses NVIDIA DALI instead, which needs an NVIDIA GPU and
-`pip install "mist-medical[dali]"`. In benchmarks the generic loader matched or
-beat DALI: about 4 times faster on LiTS-sized images, where DALI reads whole
-volumes for each patch, and as fast or faster on BraTS-sized ones. Both loaders
-feed the same augmentation, which runs on the training device.
+past the image edge on the GPU. Configs from before 3.0 that say `"auto"` or
+`"dali"` get it too; `"dali"` prints a warning, since MIST 3.0 removed NVIDIA
+DALI (see [Upgrading to 3.0](upgrading.md)).
 
 CPU-only training is single-process — MIST does not (yet) support distributed
 training across multiple CPU processes, only across multiple GPUs (see
@@ -1613,18 +1610,16 @@ Training uses a different mechanism from analysis/preprocessing/evaluation, and
 it depends on the data loader (see
 [Accelerator support](#accelerator-support-nvidia-amd-rocm-cpu) above).
 
-MIST's generic data loader, the default, is a `torch.utils.data.DataLoader` that
-reads patches in separate worker processes while the accelerator trains on the
-current batch. With `"data_loader": "dali"`, DALI's parallelism comes from CPU
-threads _within_ its pipeline instead.
-
-Either way, the number of workers/threads is set via
-`training.hardware.num_cpu_workers` in `config.json` (default: `8`). With the
-generic loader, validation and prediction read whole volumes, so they use at most
-2 workers, each reading one volume ahead, to keep shared memory (`/dev/shm`)
-small. Training batches go through shared memory too: about
-`num_cpu_workers` × 4 batches per GPU, roughly 3 GiB per GPU for a 128³ patch at
-batch size 2. In a container, give `/dev/shm` at least that much (for example,
+MIST's data loader is a `torch.utils.data.DataLoader` that reads patches in
+separate worker processes while the accelerator trains on the current batch.
+The number of workers per GPU is set via `training.hardware.num_cpu_workers` in
+`config.json` (default: `4`; `8` in configs from before 3.0). On two A100s with
+LiTS, 4 workers per GPU trained as fast as using every core, and the first epoch
+and validation were faster. Validation and prediction read whole volumes, so they
+use at most 2 workers, each reading one volume ahead, to keep shared memory
+(`/dev/shm`) small. Training batches go through shared memory too: about
+`num_cpu_workers` × 4 batches per GPU, roughly 1.5 GiB per GPU for a 128³ patch
+at batch size 2 with 4 workers. In a container, give `/dev/shm` at least that much (for example,
 `docker run --shm-size=16g`). There is no
 CLI flag for this — it is a hardware-tuning setting that belongs in the
 configuration file alongside the rest of the training hardware parameters. Edit
@@ -1641,9 +1636,8 @@ default assumes:
 
     `num_cpu_workers` is not the same as the `--num-workers-*` flags. It does
     not control how many patients are loaded in parallel — it controls how
-    many CPU threads/processes the active data loader (DALI or MIST's
-    generic loader) uses internally to prepare the next batch while the
-    current batch is on the accelerator.
+    many worker processes the data loader uses to prepare the next batch
+    while the current batch is on the accelerator.
 
 ## Evaluation metrics
 

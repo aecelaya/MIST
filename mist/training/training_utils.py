@@ -246,7 +246,7 @@ def get_npy_paths(
 
 
 def preprocessed_data_problems(numpy_dir: Path) -> list[str]:
-    """Find signs that the data was preprocessed by a MIST before 2.5.0.
+    """Find signs that the data was preprocessed by MIST 2.x.
 
     Checks one label file, since mist_preprocess saves them all the same way.
 

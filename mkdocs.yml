@@ -4,6 +4,7 @@ nav:
   - Getting Started: getting_started.md
   - Usage: usage.md
   - Advanced Topics: advanced_topics.md
+  - Upgrading to 3.0: upgrading.md
   - Changelog: changelog.md
 theme:
   name: readthedocs

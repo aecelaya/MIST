@@ -24,10 +24,10 @@ Works on Mac):
 pip install mist-medical
 ```
 
-The same command works on an **NVIDIA GPU**. The `[dali]` extra
-(`pip install "mist-medical[dali]"`, also available as `[train]`) installs NVIDIA
-DALI, which MIST only uses when `training.hardware.data_loader` is set to
-`"dali"`.
+The same command works on an **NVIDIA GPU**. With PyTorch 2.9, also run
+`pip install -U "nvidia-cudnn-cu12>=9.15"` (see
+[Getting started](getting_started.md)). Upgrading from MIST 2.x? See
+[Upgrading to 3.0](upgrading.md).
 
 **AMD ROCm GPU** (install a ROCm-enabled PyTorch build first — PyPI's default
 `torch` wheel has no ROCm support — matching your driver's ROCm version, then
@@ -85,9 +85,6 @@ for details and how to pick the right `rocmX.Y` version for your machine.
 - October 2026 — **MIST 2.3.0, the first stable release** — CPU and AMD ROCm
   training, `mist_finalize` for per-fold distributed training, probability-level
   and parallel ensembling, and no more ANTs dependency.
-  `pip install --upgrade mist-medical`, or
-  `pip install --upgrade "mist-medical[dali]"` for DALI-accelerated data loading
-  on NVIDIA GPUs (highly recommended).
 - July 2026 — **Interactive Colab demo** — run the full pipeline on a free Colab
   GPU with the
   [heart segmentation notebook](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_heart_demo.ipynb).

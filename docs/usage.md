@@ -153,9 +153,10 @@ To run the preprocessing portion of the MIST pipeline only, use the
 The output folder has `images`, `labels`, and, with `--compute-dtms`, `dtms`
 folders of NumPy arrays, one per case. It also has a `foreground` folder with the
 locations of each label class in each case, which training uses to center patches
-on foreground without scanning every label. Data preprocessed before MIST 2.5.0
-lacks this folder and stores labels in a slower layout; training still works, but
-warns, and runs faster after `mist_preprocess` is run again.
+on foreground without scanning every label. Data preprocessed by MIST 2.x
+(including 2.5.0rc0) lacks this folder, and data from before 2.5.0rc0 also stores
+labels in a slower layout. Training still works, but warns, and runs faster after
+`mist_preprocess` is run again (see [Upgrading to 3.0](upgrading.md)).
 
 ### Example
 

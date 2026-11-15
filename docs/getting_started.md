@@ -38,11 +38,6 @@ The same command as for CPU works:
 pip install mist-medical
 ```
 
-The `[dali]` extra (`pip install "mist-medical[dali]"`, also available as
-`[train]`) installs NVIDIA DALI, which MIST only uses when
-`training.hardware.data_loader` is set to `"dali"`. MIST's default data loader
-needs no extra.
-
 !!! warning "PyTorch 2.9 and cuDNN"
 
     PyTorch 2.9's CUDA wheels come with cuDNN 9.10, which runs 3D convolutions
@@ -91,7 +86,6 @@ install the ROCm PyTorch wheel first, as above:
 git clone https://github.com/mist-medical/MIST.git
 cd MIST
 pip install -e .          # CPU, NVIDIA, or AMD ROCm
-pip install -e ".[dali]"  # Adds NVIDIA DALI, for "data_loader": "dali"
 ```
 
 ### Data Format
