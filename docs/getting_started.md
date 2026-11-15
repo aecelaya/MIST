@@ -19,8 +19,8 @@ hold your 3D images.
 
 ### Default
 
-Runs the full pipeline, including training, on any machine — laptops, Macs,
-Linux workstations, HPC nodes without a GPU:
+Runs the full pipeline, including training, on any machine. This includes
+laptops, Linux workstations, HPC nodes, etc.
 
 ```console
 pip install mist-medical
