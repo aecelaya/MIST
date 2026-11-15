@@ -17,7 +17,7 @@ hold your 3D images.
 
 ## Install
 
-### CPU (default)
+### Default
 
 Runs the full pipeline, including training, on any machine — laptops, Macs,
 Linux workstations, HPC nodes without a GPU:
