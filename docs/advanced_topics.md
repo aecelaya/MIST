@@ -312,28 +312,16 @@ MIST's default network architecture is `nnunet-plain`, a plain convolutional
 U-Net with two deep supervision heads. Choose another with `--model` or
 `model.architecture`:
 
-| Architecture         | `model.architecture` |
-| -------------------- | -------------------- |
-| nnUNet (default)     | `nnunet-plain`       |
-| nnUNet (residual)    | `nnunet-res` (alias `nnunet`) |
-| nnUNet (pocket)      | `nnunet-pocket`      |
-| ResEnc UNet          | `resenc`             |
-| MedNeXt (small)      | `mednext-small`      |
-| MedNeXt (base)       | `mednext-base`       |
-| MedNeXt (medium)     | `mednext-medium`     |
-| MedNeXt (large)      | `mednext-large`      |
-| FMG-Net              | `fmgnet`             |
-| W-Net                | `wnet`               |
-| SwinUNETR-V2 (small) | `swinunetr-small`    |
-| SwinUNETR-V2 (base)  | `swinunetr-base`     |
-| SwinUNETR-V2 (large) | `swinunetr-large`    |
-| Primus (medium)      | `primus-medium`      |
-| Primus (large)       | `primus-large`       |
-| PrimusX              | `primus-x`           |
-| PrimusV2 (small)     | `primusv2-small`     |
-| PrimusV2 (base)      | `primusv2-base`      |
-| PrimusV2 (medium)    | `primusv2-medium`    |
-| PrimusV2 (large)     | `primusv2-large`     |
+| Model        | Variants (`model.architecture`)                                          |
+| ------------ | ------------------------------------------------------------------------ |
+| nnU-Net      | `nnunet-plain` (default), `nnunet-res` (alias `nnunet`), `nnunet-pocket` |
+| ResEnc UNet  | `resenc`                                                                 |
+| MedNeXt      | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`       |
+| SwinUNETR-V2 | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                   |
+| Primus       | `primus-medium`, `primus-large`, `primus-x`                              |
+| PrimusV2     | `primusv2-small`, `primusv2-base`, `primusv2-medium`, `primusv2-large`   |
+| FMG-Net      | `fmgnet`                                                                 |
+| W-Net        | `wnet`                                                                   |
 
 `nnunet-plain` has two plain convolutions per stage and no limit on depth: an
 axis is downsampled while its spacing is under twice the finest spacing among

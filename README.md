@@ -90,18 +90,16 @@ mist_predict --models-dir /path/to/results/models \
 
 ## Supported Architectures
 
-| Model                                    | Key                                                                    |
-| ---------------------------------------- | ---------------------------------------------------------------------- |
-| nnU-Net (default)                        | `nnunet-plain`                                                         |
-| nnU-Net Residual                         | `nnunet-res`, `nnunet`                                                 |
-| nnU-Net Pocket                           | `nnunet-pocket`                                                        |
-| ResEnc UNet                              | `resenc`                                                               |
-| Primus (medium / large / X)              | `primus-medium`, `primus-large`, `primus-x`                            |
-| PrimusV2 (small / base / medium / large) | `primusv2-small`, `primusv2-base`, `primusv2-medium`, `primusv2-large` |
-| MedNeXt (small / base / medium / large)  | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`     |
-| FMG-Net                                  | `fmgnet`                                                               |
-| W-Net                                    | `wnet`                                                                 |
-| Swin UNETR (small / base / large)        | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                 |
+| Model        | Variants                                                                 |
+| ------------ | ------------------------------------------------------------------------ |
+| nnU-Net      | `nnunet-plain` (default), `nnunet-res` (alias `nnunet`), `nnunet-pocket` |
+| ResEnc UNet  | `resenc`                                                                 |
+| MedNeXt      | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`       |
+| SwinUNETR-V2 | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                   |
+| Primus       | `primus-medium`, `primus-large`, `primus-x`                              |
+| PrimusV2     | `primusv2-small`, `primusv2-base`, `primusv2-medium`, `primusv2-large`   |
+| FMG-Net      | `fmgnet`                                                                 |
+| W-Net        | `wnet`                                                                   |
 
 Change the architecture in `config.json` or pass `--model <key>` at the command
 line.
