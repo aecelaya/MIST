@@ -47,8 +47,8 @@ it may say `false`. Set it back to `"auto"` to run the test again.
 
 **Inference on results folders from 2.x and 2.5.0rc0.** `mist_predict`,
 `test_on_fold`, and `mist_evaluate` read old `config.json` files and
-checkpoints. The network 2.x called `nnunet` is
-still found under that name (3.0 calls it `nnunet-res`).
+checkpoints. The network 2.x called `nnunet` is still found under that name
+(3.0 calls it `nnunet-res`).
 
 Predicted labels may differ slightly at boundaries for results folders from
 before 2.5.0. Those versions took the argmax at the training spacing and
@@ -78,7 +78,7 @@ MIST 2.x, including 2.5.0rc0:
 - 3.0 saves the locations of each foreground class in a `foreground` folder next
   to the labels. Without it, each data loader worker scans every label it reads
   to find foreground, which is slow for large images such as abdominal CT.
-- Releases before 2.5.0rc0 saved labels in Fortran order. The data loader can't
+- MIST 2.4.0 and earlier saved labels in Fortran order. The data loader can't
   read patches from those with positioned reads, so it copies them through a
   memory map instead, which is much slower on network filesystems such as NFS.
 
