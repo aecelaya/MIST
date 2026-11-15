@@ -5,7 +5,7 @@ import pytest
 # MIST imports.
 from mist.models.model_registry import get_model_from_registry
 from mist.models.resenc.mist_resenc import ResEncUNet
-from mist.models.resenc.resenc_registry import create_resenc
+from mist.models.resenc.resenc_registry import create_resenc, create_resenc_pocket
 
 
 @pytest.fixture
@@ -40,3 +40,18 @@ def test_create_resenc_missing_key_raises(valid_config, missing_key):
     del valid_config[missing_key]
     with pytest.raises(ValueError, match=f"Missing required key '{missing_key}'"):
         create_resenc(**valid_config)
+
+
+def test_resenc_pocket_is_registered(valid_config):
+    """resenc-pocket builds a ResEncUNet with 32 filters in every stage."""
+    model = get_model_from_registry("resenc-pocket", **valid_config)
+    assert isinstance(model, ResEncUNet)
+    assert model.use_deep_supervision
+    assert set(model.encoder.output_channels) == {32}
+
+
+def test_create_resenc_pocket_missing_key_raises(valid_config):
+    """resenc-pocket checks its configuration like resenc."""
+    del valid_config["patch_size"]
+    with pytest.raises(ValueError, match="Missing required key 'patch_size'"):
+        create_resenc_pocket(**valid_config)

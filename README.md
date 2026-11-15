@@ -93,7 +93,7 @@ mist_predict --models-dir /path/to/results/models \
 | Model        | Variants                                                                 |
 | ------------ | ------------------------------------------------------------------------ |
 | nnU-Net      | `nnunet-plain` (default), `nnunet-res` (alias `nnunet`), `nnunet-pocket` |
-| ResEnc UNet  | `resenc`                                                                 |
+| ResEnc UNet  | `resenc`, `resenc-pocket`                                                |
 | MedNeXt      | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`       |
 | SwinUNETR-V2 | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                   |
 | Primus       | `primus-medium`, `primus-large`, `primus-x`                              |

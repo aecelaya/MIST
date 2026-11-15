@@ -68,6 +68,7 @@ _ADAPTIVE_ARCHITECTURES = {
     "nnunet-res",
     "nnunet-pocket",
     "resenc",
+    "resenc-pocket",
     "fmgnet",
     "wnet",
 }
@@ -77,7 +78,7 @@ _ADAPTIVE_ARCHITECTURES = {
 # stages or changes some kernels, so the shared stages still transfer exactly
 # and the rest keep their random initialization. Mismatches warn instead of
 # raising for these.
-_STAGEWISE_ARCHITECTURES = {"resenc", "nnunet-plain"}
+_STAGEWISE_ARCHITECTURES = {"resenc", "resenc-pocket", "nnunet-plain"}
 
 
 def validate_encoder_compatibility(

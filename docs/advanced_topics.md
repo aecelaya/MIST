@@ -295,7 +295,7 @@ and _fixed_ topology:
 | ------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `nnunet-plain`            | Depends on the planned depth        | No depth limit: an axis must be divisible by `2^(times it's downsampled)`; raises an error at model construction if violated. For example, 256 is downsampled six times and needs a multiple of 64 |
 | `nnunet-res`, `nnunet`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: the low-res axis uses stride-1, so any value is valid there                      |
-| `resenc`                  | Multiples of 32 on downsampled axes | Same adaptive topology as `nnunet-res`                                                                     |
+| `resenc`, `resenc-pocket` | Multiples of 32 on downsampled axes | Same adaptive topology as `nnunet-res`                                                                     |
 | `fmgnet`, `wnet`          | Multiples of 32 on downsampled axes | Same adaptive topology as `nnunet-res`                                                                     |
 | `mednext-*`               | All dimensions divisible by **16**  | Fixed 4-stage encoder (`2⁴ = 16`); no adaptation for anisotropic axes                                      |
 | `swinunetr-*`             | All dimensions divisible by **32**  | Fixed: `patch_size=2` tokenizer × 4 downsampling stages; raises an error at model construction if violated |
@@ -315,7 +315,7 @@ U-Net with two deep supervision heads. Choose another with `--model` or
 | Model        | Variants (`model.architecture`)                                          |
 | ------------ | ------------------------------------------------------------------------ |
 | nnU-Net      | `nnunet-plain` (default), `nnunet-res` (alias `nnunet`), `nnunet-pocket` |
-| ResEnc UNet  | `resenc`                                                                 |
+| ResEnc UNet  | `resenc`, `resenc-pocket`                                                |
 | MedNeXt      | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`       |
 | SwinUNETR-V2 | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                   |
 | Primus       | `primus-medium`, `primus-large`, `primus-x`                              |
@@ -370,6 +370,19 @@ The encoder's parameter names and shapes match nnU-Net's `ResidualEncoderUNet`,
 so encoder weights pretrained with nnU-Net or nnssl (for example,
 nnFoundationCNN) load directly with `--pretrained-weights`. See
 [Checkpoints from other frameworks](#checkpoints-from-other-frameworks).
+
+`resenc-pocket` keeps 32 filters in every stage, as `nnunet-pocket` does, with
+the same stages and residual blocks as `resenc`. At six stages it has about
+1.8M parameters, against about 102M for `resenc`. Because the widths differ,
+`resenc` checkpoints such as nnFoundationCNN don't load into it. Encoder
+weights do transfer between `resenc-pocket` models, stage by stage, as they do
+for `resenc`.
+
+```console
+mist_train --numpy /path/to/preprocessed/npy/files \
+           --results /path/to/results/folder \
+           --model resenc-pocket
+```
 
 ### Primus and PrimusV2
 

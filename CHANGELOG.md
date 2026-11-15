@@ -58,6 +58,10 @@ checks this against results folders trained by 2.4.1 and 2.5.0rc0.
 
 ### Added
 
+- **`resenc-pocket`**: the ResEnc UNet with 32 filters in every stage, as
+  `nnunet-pocket` is to `nnunet-res`. It has the same stages and residual blocks
+  as `resenc` and about 1.8M parameters at six stages. Encoder weights transfer
+  between `resenc-pocket` models stage by stage; `resenc` checkpoints don't fit.
 - **FP16 mixed precision.** `training.amp: "fp16"` trains in FP16 on any GPU,
   including those without BF16 hardware, such as the V100, T4, and Quadro RTX
   6000, and the automatic test can now choose it (see `training.amp` below). Training scales gradients, computes the
