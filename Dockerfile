@@ -13,6 +13,9 @@ RUN pip install --no-cache-dir mist-medical
 # fixes it. pip warns that torch pins 9.10; PyTorch works with the newer cuDNN.
 RUN pip install --no-cache-dir -U "nvidia-cudnn-cu12>=9.15"
 
+# Fail the build if PyTorch still loads the old cuDNN. This needs no GPU.
+RUN python -c "import torch; v = torch.backends.cudnn.version(); print('cuDNN', v); assert v and v >= 91500, v"
+
 # Create app directory.
 RUN mkdir /app
 WORKDIR /app

@@ -27,15 +27,8 @@ a configuration file for when you need more control.
 pip install mist-medical
 ```
 
-This works on CPUs and NVIDIA GPUs. On NVIDIA GPUs with PyTorch 2.9, also
-upgrade cuDNN, or mixed-precision training runs about 3x slower:
-
-```bash
-pip install -U "nvidia-cudnn-cu12>=9.15"
-```
-
-For AMD GPUs, install a ROCm build of PyTorch first (see
-[Accelerator support](https://mist-medical.readthedocs.io/en/latest/advanced_topics/#accelerator-support-nvidia-amd-rocm-cpu)).
+This works on CPUs and NVIDIA GPUs. For AMD GPUs, install a ROCm build of
+PyTorch first (see [Accelerator support](https://mist-medical.readthedocs.io/en/latest/advanced_topics/#accelerator-support-nvidia-amd-rocm-cpu)).
 Docker: `docker pull mistmedical/mist:latest`. Upgrading from 2.x? See
 [Upgrading to 3.0](https://mist-medical.readthedocs.io/en/latest/upgrading/).
 
