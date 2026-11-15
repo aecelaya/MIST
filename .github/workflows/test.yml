@@ -59,9 +59,29 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e ".[dev]" pytest-cov coverage-badge "setuptools<81"
 
+    # Results folders trained by older releases, for tests/compat. They're too
+    # large for git, so they live on a release. Until that release exists the
+    # compat tests skip; once it does, set MIST_REQUIRE_COMPAT to "1" below so
+    # a missing download fails instead.
+    - name: Download inference compatibility fixtures
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        mkdir -p tests/compat/fixtures "$RUNNER_TEMP/compat"
+        if gh release download compat-fixtures-v1 --repo mist-medical/MIST \
+            --pattern 'mist-compat-*.tar.gz' --dir "$RUNNER_TEMP/compat"; then
+          for archive in "$RUNNER_TEMP"/compat/*.tar.gz; do
+            tar -xzf "$archive" -C tests/compat/fixtures
+          done
+        else
+          echo "No compat-fixtures-v1 release; tests/compat will skip."
+        fi
+
     # Run the full suite under coverage. term-missing prints uncovered lines in
     # the log; the xml report feeds coverage-badge, which renders coverage.svg.
     - name: Run tests and generate coverage report
+      env:
+        MIST_REQUIRE_COMPAT: "0"
       run: |
         pytest --cov=mist --cov-report=term-missing --cov-report=xml
         coverage-badge -o coverage.svg -f

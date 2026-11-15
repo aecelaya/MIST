@@ -151,3 +151,5 @@ cython_debug/
 .vscode/
 
 .DS_Store
+# Inference compatibility fixtures (large; see tests/compat/generate_fixtures.py)
+tests/compat/fixtures/
