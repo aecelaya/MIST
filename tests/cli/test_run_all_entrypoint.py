@@ -375,3 +375,56 @@ def test_run_all_entry_forwards_num_workers_analyze(monkeypatch):
 
     assert "--num-workers-analyze" in calls["analyze"]
     assert calls["analyze"][calls["analyze"].index("--num-workers-analyze") + 1] == "4"
+
+
+def test_run_all_entry_forwards_every_train_flag_except_resume(monkeypatch):
+    """Every mist_train flag except --resume reaches train_entry."""
+    from mist.cli import args as real_argmod  # pylint: disable=import-outside-toplevel
+
+    parser = real_argmod.ArgParser()
+    real_argmod.add_train_args(parser)
+    train_dests = {a.dest for a in parser._actions if a.dest != "help"}
+
+    captured = []
+    monkeypatch.setattr(entry, "analyze_entry", lambda _: None, raising=True)
+    monkeypatch.setattr(entry, "preprocess_entry", lambda _: None, raising=True)
+    monkeypatch.setattr(entry, "train_entry", captured.extend, raising=True)
+
+    entry.run_all_entry(
+        argv=[
+            "--data",
+            "d.json",
+            "--val-percent",
+            "0.1",
+            "--validate-every",
+            "5",
+            "--pretrained-weights",
+            "w.pt",
+            "--pretrained-config",
+            "c.json",
+            "--input-channel-strategy",
+            "first",
+        ]
+    )
+
+    def _value(flag):
+        return captured[captured.index(flag) + 1]
+
+    assert _value("--val-percent") == "0.1"
+    assert _value("--validate-every") == "5"
+    assert _value("--pretrained-weights") == "w.pt"
+    assert _value("--pretrained-config") == "c.json"
+    assert _value("--input-channel-strategy") == "first"
+
+    # Guard against new train flags that run_all silently drops.
+    import inspect  # pylint: disable=import-outside-toplevel
+
+    source = inspect.getsource(entry.run_all_entry)
+    missing = {d for d in train_dests - {"resume"} if f'"{d}"' not in source}
+    assert not missing, f"mist_run_all does not forward: {sorted(missing)}"
+
+
+def test_run_all_entry_rejects_resume():
+    """--resume errors and points to mist_train --resume."""
+    with pytest.raises(SystemExit):
+        entry._parse_run_all_args(argv=["--data", "d.json", "--resume"])

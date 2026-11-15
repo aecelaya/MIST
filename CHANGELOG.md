@@ -207,6 +207,10 @@ checks this against results folders trained by 2.4.1 and 2.5.0rc0.
   saves each case's foreground locations in a new `foreground` folder, and the
   generic loader uses them. Training warns about data without them; run
   `mist_preprocess` again to save them.
+- **`mist_run_all` passes all training flags on to training.** It used to
+  accept `--val-percent`, `--validate-every`, `--pretrained-weights`,
+  `--pretrained-config`, and `--input-channel-strategy` and then ignore them.
+  It now rejects `--resume` with an error that points to `mist_train --resume`.
 
 ## 2.4.1 — 2026-11-09
 

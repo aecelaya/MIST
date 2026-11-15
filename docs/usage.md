@@ -34,14 +34,12 @@ It also passes on these flags from the three commands below: `--nfolds`,
 `--no-preprocess`, `--compute-dtms`, `--model`, `--patch-size`, `--loss`,
 `--composite-loss-weighting`, `--epochs`, `--warmup-epochs`,
 `--batch-size-per-gpu`, `--learning-rate`, `--lr-scheduler`, `--optimizer`,
-`--l2-penalty`, `--folds`, `--num-workers-evaluate`, and `--overwrite`.
+`--l2-penalty`, `--folds`, `--num-workers-evaluate`, `--val-percent`,
+`--validate-every`, `--pretrained-weights`, `--pretrained-config`,
+`--input-channel-strategy`, and `--overwrite`.
 
-!!! warning
-
-    `mist_run_all` accepts but ignores `--val-percent`, `--validate-every`,
-    `--resume`, `--pretrained-weights`, `--pretrained-config`, and
-    `--input-channel-strategy`. Use `mist_train` for those, or set the first
-    two in `config.json`.
+`mist_run_all` doesn't accept `--resume`, because it reruns the analysis. To
+continue an interrupted run, use `mist_train --resume`.
 
 !!! note
 

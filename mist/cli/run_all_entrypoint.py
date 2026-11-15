@@ -59,6 +59,13 @@ def _parse_run_all_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Minimal top-level validation.
     if not getattr(ns, "data", None):
         parser.error("Missing required argument for analyze: --data")
+    if getattr(ns, "resume", False):
+        # mist_run_all reruns analyze, which stops on an existing config.json
+        # unless --overwrite is given, and --overwrite conflicts with --resume.
+        parser.error(
+            "--resume is not supported by mist_run_all. Use mist_train "
+            "--resume to continue an interrupted training run."
+        )
     return ns
 
 
@@ -98,6 +105,11 @@ def run_all_entry(argv: list[str] | None = None) -> None:
         "l2_penalty",
         "folds",
         "num_workers_evaluate",
+        "val_percent",
+        "validate_every",
+        "pretrained_weights",
+        "pretrained_config",
+        "input_channel_strategy",
         "overwrite",
     ]
 

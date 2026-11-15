@@ -1254,7 +1254,7 @@ points to the validation curve, so it doesn't affect the saved model. With
 model, so use a lower value if you want to choose among more epochs.
 
 `mist_train --val-percent` overrides this setting and saves it to
-`config.json`. `mist_run_all` ignores the flag.
+`config.json`. `mist_run_all` passes it on to training.
 
 ### Example
 
