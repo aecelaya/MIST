@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 
 from mist.utils import io
-from tests.regression.ants_sitk.fixtures import generate_dataset
-from tests.regression.ants_sitk.harness import run_pipeline
-from tests.regression.multi_process import spawn_training
+from tests.fixtures.fixtures import generate_dataset
+from tests.fixtures.harness import run_pipeline
+from tests.integration import spawn_training
 
 
 # At this patch, resenc has more decoder stages than deep supervision uses, which

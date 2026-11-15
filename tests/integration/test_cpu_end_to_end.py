@@ -1,13 +1,9 @@
-"""Stage 4 release gate: a full CPU-only MIST run using the generic loader.
+"""A full CPU-only MIST run: analyze, preprocess, train, evaluate, predict.
 
-Runs analyze -> preprocess -> train (a couple epochs, all folds) -> predict
-end to end on synthetic data, on this real CPU-only machine, confirming
-`training.hardware.data_loader` resolves to `"generic"` and the whole
-pipeline completes without ever touching DALI -- this is the actual
-"does this work" check promised by `cpu_rocm_support_plan.md`'s Stage 4
-release gate, not just mocked unit tests. It's also the first point in the
-whole CPU/ROCm plan where CPU *training* (not just analyze/preprocess, see
-`test_stage0_baseline.py`) actually runs.
+Runs the whole pipeline end to end on synthetic data (a couple of epochs, all
+folds), confirming `training.hardware.data_loader` resolves to `"generic"` and
+every stage completes on a machine without a GPU, with real code rather than
+mocks.
 """
 
 from pathlib import Path
@@ -18,8 +14,8 @@ import pytest
 from mist.cli.inference_entrypoint import inference_entry
 from mist.cli.train_entrypoint import train_entry
 from mist.utils import io
-from tests.regression.ants_sitk.fixtures import generate_dataset
-from tests.regression.ants_sitk.harness import run_pipeline
+from tests.fixtures.fixtures import generate_dataset
+from tests.fixtures.harness import run_pipeline
 
 
 @pytest.mark.parametrize("model", [None, "nnunet-pocket"], ids=["default", "pocket"])
@@ -79,8 +75,7 @@ def test_full_cpu_pipeline_trains_and_predicts_with_generic_loader(
     assert (results_dir / "results.csv").is_file()
 
     # mist_predict on the original (raw) images -- a separate code path from
-    # training/evaluation, confirming the end-to-end CPU story holds for
-    # inference too, per the Stage 4 release gate.
+    # training/evaluation, so inference on CPU is checked too.
     paths_csv = tmp_path / "predict_paths.csv"
     pd.DataFrame(
         {

@@ -12,8 +12,7 @@ slow or unsupported path.
 
 This module also detects which accelerator (CUDA, AMD ROCm, or CPU-only) MIST
 is running on, so training can pick a working `torch.distributed` backend and
-data loader without the user having to know these details themselves — see
-``cpu_rocm_support_plan.md`` Stage 1.
+data loader without the user having to know these details themselves.
 """
 
 import contextlib

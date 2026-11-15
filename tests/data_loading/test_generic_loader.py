@@ -6,7 +6,7 @@ Split into two groups:
   anchor placement, foreground selection, positioned reads.
 * Integration tests running the full get_training_dataset /
   get_validation_dataset / get_test_dataset entry points against real
-  preprocessed fixture data (reusing tests/regression/ants_sitk's harness),
+  preprocessed fixture data (from tests/fixtures),
   since that's the only way to exercise the actual .next()/.reset() iterator
   contract end to end -- including a synthetic "does it train" check with
   augmentation enabled.
@@ -36,8 +36,8 @@ from mist.data_loading import augmentation
 from mist.data_loading import generic_loader as gl
 from mist.preprocessing import foreground_locations as fl
 from mist.utils import hardware
-from tests.regression.ants_sitk.fixtures import generate_dataset
-from tests.regression.ants_sitk.harness import run_pipeline
+from tests.fixtures.fixtures import generate_dataset
+from tests.fixtures.harness import run_pipeline
 
 # --------------------------------------------------------------------------- #
 # _shard_indices
@@ -344,7 +344,7 @@ def test_multiprocessing_context_none_when_no_workers():
 def test_multiprocessing_context_fork_on_non_windows(monkeypatch):
     """ "fork" is requested explicitly on Linux/macOS -- see module docstring
     for why this matters on macOS specifically (a confirmed indefinite hang
-    with the platform default "spawn", found via a real Stage 4 CPU run)."""
+    with the platform default "spawn", found in a real CPU training run)."""
     monkeypatch.setattr(gl.platform, "system", lambda: "Darwin")
     assert gl._multiprocessing_context(4) == "fork"
 

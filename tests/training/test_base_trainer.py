@@ -918,8 +918,8 @@ def test_update_num_gpus_is_zero_on_cpu(tmp_pipeline, mist_args, monkeypatch):
 
     Regression guard for a real bug: this used to unconditionally raise
     "CUDA is not available" here, which meant CPU-only training could never
-    even construct a trainer -- found via a real end-to-end CPU training run
-    (cpu_rocm_support_plan.md Stage 4), not by this mocked test alone.
+    even construct a trainer. tests/integration/test_cpu_end_to_end.py checks
+    it in a real run.
     """
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=False)
 
