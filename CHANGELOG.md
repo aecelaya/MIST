@@ -6,10 +6,10 @@ All notable changes to MIST are listed here, newest first. MIST follows
 ## 3.0.0rc0 — 2026-11-16
 
 MIST 3.0 removes NVIDIA DALI and makes MIST's own data loader the only one. It
-also includes everything in 2.5.0rc0 (planning at training time, FP16,
-nnU-Net-style augmentation, `nnunet-plain`, probability resampling, and the
-rest below). 2.5.0 was never released as final: 2.5.0rc0, on PyPI as tag
-`v2.5.0-rc`, became this release. See
+also includes everything in 2.5.0rc0 (planning at training time, FP16, new
+augmentation, `nnunet-plain`, probability resampling, and the rest below).
+2.5.0 was never released as final: 2.5.0rc0, on PyPI as tag `v2.5.0-rc`, became
+this release. See
 [Upgrading to 3.0](https://mist-medical.readthedocs.io/en/latest/upgrading/).
 
 **Inference on results folders from 2.x and 2.5.0rc0 keeps working.**
@@ -73,9 +73,7 @@ checks this against results folders trained by 2.4.1 and 2.5.0rc0.
   `nnunet-plain` 3.5 to 4 times faster than FP32.
 - **`nnunet-plain`** — a plain convolutional U-Net with two convolutions per
   stage, no depth limit, and downsampling of an axis only when its spacing is
-  under twice the finest spacing among axes that can still be downsampled. Its
-  parameter names match nnU-Net's `PlainConvUNet`, so those checkpoints load
-  directly.
+  under twice the finest spacing among axes that can still be downsampled.
 - **`nnunet-res`** — a clearer name for the residual network MIST has called
   `nnunet`.
 
