@@ -75,5 +75,9 @@ jobs:
           # stays pinned in a single place: the ARG default in ./Dockerfile
           # (torch 2.9.1). torch 2.11.0 crashes multi-GPU DDP startup, so do not
           # bump the base image from this workflow.
+          # Pin the image to the released version. Without it pip installs the
+          # latest stable release, so a pre-release image got the previous one.
+          build-args: |
+            MIST_VERSION=${{ env.DOCKER_VERSION }}
           push: true
           tags: ${{ env.DOCKER_TAGS }}
