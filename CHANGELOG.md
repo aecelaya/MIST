@@ -52,9 +52,9 @@ checks this against results folders trained by 2.4.1 and 2.5.0rc0.
 
 - `mist/data_loading/dali_loader.py`, `mist/data_loading/data_loading_utils.py`,
   and the `nvidia-dali-cuda120` dependency of the `[dali]` and `[train]` extras.
-- Benchmarks for DALI, patch reads, precision speed, `torch.compile`, data
-  loading, precision memory, and planning calibration (notebook). `benchmarks/`
-  keeps `calibrate_planning.py`, `check_training.py`, and `check_augmentation.py`.
+- The benchmark notebooks in `examples/` and the manual GPU checks in
+  `tests/regression/gpu/`, including the planner's memory calibration. Git
+  history keeps them. `examples/` keeps the MIST demos.
 
 ### Added
 
@@ -111,9 +111,6 @@ checks this against results folders trained by 2.4.1 and 2.5.0rc0.
   patch.
 - New configs set `training.hardware.data_loader` to `"generic"`, and older
   configs that say `"auto"` get it too.
-- Benchmark notebooks and manual GPU check scripts moved from `examples/` and
-  `tests/regression/gpu/` to a new `benchmarks/` folder, with a README for
-  each. `examples/` keeps the MIST demos.
 - **The patch and batch size are now chosen at the start of training,** from an
   estimate of the network's GPU memory, instead of at analysis from a fixed voxel
   budget. `mist_analyze` leaves both as `"auto"`, and the first `mist_train` plans
