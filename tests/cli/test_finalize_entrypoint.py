@@ -52,11 +52,16 @@ def _write_required_files(results_dir: Path, include_test: bool = False) -> None
 # =============================================================================
 
 
-def test_parse_finalize_args_fallback_results(tmp_path, monkeypatch):
-    """It sets default ./results when --results is not provided."""
-    monkeypatch.chdir(tmp_path)
-    ns = entry._parse_finalize_args(argv=[])
-    assert Path(ns.results) == (tmp_path / "results").resolve()
+def test_parse_finalize_args_requires_results(capsys):
+    """It errors, naming --results, when --results is not provided."""
+    with pytest.raises(SystemExit):
+        entry._parse_finalize_args(argv=[])
+    assert "--results" in capsys.readouterr().err
+
+
+def test_parse_finalize_args_defaults(tmp_path):
+    """Other arguments keep their defaults."""
+    ns = entry._parse_finalize_args(argv=["--results", str(tmp_path)])
     assert ns.num_workers_evaluate == 1
     assert ns.device == "cuda"
 

@@ -39,10 +39,10 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -59,9 +59,29 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e ".[dev]" pytest-cov coverage-badge "setuptools<81"
 
+    # Results folders trained by older releases (2.3.0 through 2.5.0rc0), for
+    # tests/compat. They're too large for git, so they live on the
+    # compat-fixtures-v1 release. MIST_REQUIRE_COMPAT below makes a missing
+    # download fail the tests instead of skipping them.
+    - name: Download inference compatibility fixtures
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        mkdir -p tests/compat/fixtures "$RUNNER_TEMP/compat"
+        if gh release download compat-fixtures-v1 --repo mist-medical/MIST \
+            --pattern 'mist-compat-*.tar.gz' --dir "$RUNNER_TEMP/compat"; then
+          for archive in "$RUNNER_TEMP"/compat/*.tar.gz; do
+            tar -xzf "$archive" -C tests/compat/fixtures
+          done
+        else
+          echo "No compat-fixtures-v1 release; tests/compat will skip."
+        fi
+
     # Run the full suite under coverage. term-missing prints uncovered lines in
     # the log; the xml report feeds coverage-badge, which renders coverage.svg.
     - name: Run tests and generate coverage report
+      env:
+        MIST_REQUIRE_COMPAT: "1"
       run: |
         pytest --cov=mist --cov-report=term-missing --cov-report=xml
         coverage-badge -o coverage.svg -f
@@ -70,7 +90,7 @@ jobs:
     # three jobs don't collide on the artifact name or race on the git push.
     - name: Upload coverage badge
       if: matrix.python-version == '3.12'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: coverage-badge
         path: coverage.svg

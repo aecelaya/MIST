@@ -37,7 +37,7 @@ jobs:
 
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # When triggered by the release publish workflow, check out the exact
           # commit that was released so the image matches the PyPI wheel rather
@@ -61,7 +61,7 @@ jobs:
 
       # Authenticate to Docker Hub so the build-push step can push the image.
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}

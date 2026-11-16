@@ -12,8 +12,7 @@ slow or unsupported path.
 
 This module also detects which accelerator (CUDA, AMD ROCm, or CPU-only) MIST
 is running on, so training can pick a working `torch.distributed` backend and
-data loader without the user having to know these details themselves — see
-``cpu_rocm_support_plan.md`` Stage 1.
+data loader without the user having to know these details themselves.
 """
 
 import contextlib
@@ -112,53 +111,34 @@ def resolve_communication_backend(requested: str) -> str:
 
 
 def resolve_data_loader(requested: str) -> str:
-    """Resolve a requested data loader implementation against hardware.
+    """Resolve a configured data loader to a registered one.
 
-    Mirrors ``resolve_communication_backend``'s "auto" sentinel contract.
-    DALI requires an NVIDIA GPU (``nvidia-dali-cuda120``), so it's only
-    selected automatically on CUDA; ROCm and CPU-only hardware fall back to
-    MIST's generic, accelerator-agnostic loader (see Stage 2-4 of
-    ``cpu_rocm_support_plan.md``). An explicit, non-``"auto"`` value always
-    passes through unchanged.
-
-    On CUDA, "dali" is only returned if it's actually *installed* (i.e.
-    registered in ``mist.data_loading.data_loader_registry``) — a CUDA
-    machine that skipped ``pip install "mist-medical[dali]"`` still detects
-    as CUDA hardware, but has no working "dali" entry to resolve to.
-    Rather than fail training outright over a plausible installation
-    mistake, this warns and falls back to "generic" instead, the same way
-    ``resolve_amp`` warns and downgrades rather than raising.
+    MIST has one data loader, the generic loader, so ``"auto"`` and
+    ``"generic"`` both resolve to it. ``"dali"`` resolves to it too, with a
+    warning: MIST 3.0 removed NVIDIA DALI, and configs written by MIST 2.x may
+    still say ``"dali"``. Inference on those results folders reads this value,
+    so it has to keep working. Any other value passes through, and the registry
+    reports it as unknown.
 
     Args:
-        requested: The configured loader, or ``"auto"`` to detect one.
+        requested: The configured loader: ``"auto"``, ``"generic"``, or
+            ``"dali"`` from a 2.x config.
 
     Returns:
-        The resolved data loader name, as registered in
+        The data loader name, as registered in
         ``mist.data_loading.data_loader_registry``.
     """
-    if requested != "auto":
-        return requested
-    if get_accelerator_type() != "cuda":
+    if requested == "dali":
+        warnings.warn(
+            'training.hardware.data_loader is "dali", but MIST 3.0 removed NVIDIA '
+            'DALI. Using the generic loader. Set it to "generic" to remove this '
+            "warning.",
+            stacklevel=2,
+        )
         return "generic"
-
-    # Local import: avoids a hardware.py <-> mist.data_loading import cycle
-    # (mist.data_loading's own __init__.py imports generic_loader, which
-    # imports this module). Safe here regardless, since by the time any
-    # real training code calls this, mist.data_loading is already fully
-    # imported.
-    from mist.data_loading import data_loader_registry
-
-    if "dali" in data_loader_registry.list_registered_data_loaders():
-        return "dali"
-
-    warnings.warn(
-        "CUDA hardware was detected, but nvidia-dali-cuda120 is not "
-        "installed, so the DALI-accelerated data loader is unavailable. "
-        "Falling back to the generic data loader (slower, but fully "
-        'functional). Install it with: pip install "mist-medical[dali]".',
-        stacklevel=2,
-    )
-    return "generic"
+    if requested == "auto":
+        return "generic"
+    return requested
 
 
 def bf16_supported() -> bool:
@@ -241,6 +221,47 @@ def resolve_amp(requested: bool | str, *, warn: bool = True) -> bool | str:
             stacklevel=2,
         )
     return False
+
+
+# First cuDNN version, as torch.backends.cudnn.version() reports it, that fixes
+# slow FP16 and BF16 3D convolutions under PyTorch 2.9. PyTorch 2.9's CUDA wheels
+# ship cuDNN 9.10, with which most such convolutions fall back to a slow
+# non-cuDNN path: about 3x slower than FP32 for nnunet-plain on an H100.
+_FAST_HALF_CONV3D_CUDNN = 91500
+
+
+def slow_half_precision_warning() -> str | None:
+    """Return a warning if this PyTorch and cuDNN run 3D BF16 and FP16 slowly.
+
+    PyTorch 2.9 with cuDNN older than 9.15 runs most 3D convolutions in BF16
+    and FP16 without cuDNN (pytorch/pytorch#168167). The precision test then
+    keeps FP32, which works but gives up mixed precision's speed and memory
+    savings. A newer cuDNN from PyPI fixes it, though torch's own requirements
+    pin the old one, so this can't be a MIST dependency.
+
+    Returns:
+        A sentence to print as a warning, or None if nothing is wrong.
+    """
+    if get_accelerator_type() != "cuda":
+        return None
+    try:
+        major, minor = (int(part) for part in torch.__version__.split("+")[0].split(".")[:2])
+    except ValueError:
+        return None
+    try:
+        cudnn = torch.backends.cudnn.version()
+    except RuntimeError:
+        # cuDNN refuses to load for this GPU; training reports that itself.
+        return None
+    if (major, minor) < (2, 9) or cudnn is None or cudnn >= _FAST_HALF_CONV3D_CUDNN:
+        return None
+    cuda_major = (torch.version.cuda or "12").split(".")[0]
+    return (
+        f"PyTorch {torch.__version__} with cuDNN {cudnn} runs 3D convolutions in BF16 "
+        "and FP16 about 3x slower than FP32, so training can't benefit from mixed "
+        f'precision. Install a newer cuDNN with: pip install -U "nvidia-cudnn-cu{cuda_major}'
+        ">=9.15\". pip will say torch requires an older version; that's expected."
+    )
 
 
 def resolve_compile(requested: bool) -> bool:

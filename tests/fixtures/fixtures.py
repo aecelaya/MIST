@@ -1,16 +1,10 @@
-"""Deterministic edge-case fixtures for the shared regression test harness.
+"""A small, deterministic MIST-format dataset of edge-case images.
 
-Originally written for the ANTs -> SimpleITK migration (now complete);
-`generate_dataset` is genuinely reused, load-bearing infrastructure for
-unrelated tests that need a small, real, deterministic MIST-format dataset --
-see this package's README. The fixtures are intentionally built with
-SimpleITK only, so their geometry (spacing, origin, direction cosines) was
-originally defined independently of the ANTs-vs-SimpleITK code path the
-migration was changing; that history is why they remain a clean, neutral
-dataset for any test that just needs realistic 3D imaging data.
+`generate_dataset` writes it for tests that need real 3D images and labels. The
+images are built with SimpleITK directly, so their geometry (spacing, origin,
+direction cosines) doesn't depend on MIST's own image code.
 
-Each patient stresses a specific class of bug the original migration plan
-called out (still useful edge cases for any pipeline test, migration or not):
+Each patient stresses a specific class of bug:
 
     iso_small       Tiny isotropic identity-direction volume. Multi-label mask.
     anisotropic     Strongly anisotropic spacing (1, 1, 3). Exercises the
@@ -23,8 +17,7 @@ called out (still useful edge cases for any pipeline test, migration or not):
                     and the "label absent from some slices" edge case.
 
 Arrays are constructed in SimpleITK's native ``(z, y, x)`` index order to avoid
-any ambiguity; MIST's own ``(x, y, z)`` business logic is exactly what the
-golden diff is there to protect.
+any ambiguity; MIST's own ``(x, y, z)`` logic is what tests built on them check.
 """
 
 from __future__ import annotations

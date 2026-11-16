@@ -155,3 +155,45 @@ def test_resenc_pretrained_encoder_transfers_across_channels(tmp_path, base_kwar
     ]
     key = "encoder.stages.3.blocks.5.conv2.conv.weight"
     assert torch.equal(target.state_dict()[key], source.state_dict()[key])
+
+
+# Pocket variant.
+def test_resenc_pocket_keeps_32_filters_per_stage():
+    """resenc-pocket has the same stages and blocks with 32 filters each."""
+    model = ResEncUNet(
+        1, 2, [192, 192, 192], [1.0, 1.0, 1.0], use_deep_supervision=False, use_pocket_model=True
+    )
+    full = ResEncUNet(1, 2, [192, 192, 192], [1.0, 1.0, 1.0], use_deep_supervision=False)
+    assert model.encoder.output_channels == [32] * 6
+    assert [len(s.blocks) for s in model.encoder.stages] == [
+        len(s.blocks) for s in full.encoder.stages
+    ]
+    n_params = sum(p.numel() for p in model.parameters())
+    assert n_params < sum(p.numel() for p in full.parameters()) / 20
+
+
+def test_resenc_pocket_train_with_deep_supervision(base_kwargs):
+    """resenc-pocket returns full-resolution deep supervision outputs."""
+    base_kwargs.update(use_deep_supervision=True, use_pocket_model=True)
+    model = ResEncUNet(**base_kwargs).train()
+    out = model(torch.randn(2, 1, 32, 32, 32))
+    assert out["prediction"].shape == (2, 2, 32, 32, 32)
+    assert [t.shape for t in out["deep_supervision"]] == [(2, 2, 32, 32, 32)] * 2
+
+
+def test_resenc_pocket_encoder_transfers_across_patch_sizes(tmp_path, base_kwargs):
+    """Shared stages of a resenc-pocket encoder load into a deeper one."""
+    base_kwargs["use_pocket_model"] = True
+    source = ResEncUNet(**base_kwargs)
+    weights_path = tmp_path / "source.pt"
+    torch.save(source.state_dict(), weights_path)
+
+    base_kwargs["patch_size"] = [64, 64, 64]
+    target = ResEncUNet(**base_kwargs)
+    target, summary = load_pretrained_encoder(target, str(weights_path), "average")
+
+    # Only the extra stage the deeper target adds keeps its random weights.
+    assert summary["skipped"]
+    assert all(k.startswith("encoder.stages.4.") for k in summary["skipped"])
+    key = "encoder.stages.3.blocks.5.conv2.conv.weight"
+    assert torch.equal(target.state_dict()[key], source.state_dict()[key])

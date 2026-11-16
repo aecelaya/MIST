@@ -336,7 +336,8 @@ def build_base_config() -> dict[str, Any]:
             # GPU memory the plan may use, whatever the GPU, as nnU-Net plans for
             # 8 GB. null plans for the whole GPU.
             "gpu_memory_budget_gb": 8,
-            "dali_foreground_prob": 0.6,
+            # Chance that a training patch is centered on foreground.
+            "foreground_prob": 0.6,
             "loss": {
                 "name": "dice_ce",
                 "composite_loss_weighting": None,
@@ -369,7 +370,7 @@ def build_base_config() -> dict[str, Any]:
             },
             "hardware": {
                 "num_gpus": None,
-                "num_cpu_workers": 8,
+                "num_cpu_workers": 4,
                 "master_addr": "localhost",
                 "master_port": 12345,
                 # Resolved against the current hardware at train time (mirrors
@@ -381,13 +382,9 @@ def build_base_config() -> dict[str, Any]:
                 # training later moves to CPU-only hardware; edit it by hand
                 # (or re-run analyze) to pick up automatic resolution.
                 "communication_backend": "auto",
-                # Same resolve-and-persist story as communication_backend
-                # above: "auto" becomes "dali" on CUDA or "generic" elsewhere,
-                # resolved at train time via hardware.resolve_data_loader().
-                # No CLI flag -- a user who wants to force one edits this
-                # field directly, the same way patch_size or grad_clip_norm
-                # are hand-edited rather than exposed as flags.
-                "data_loader": "auto",
+                # MIST's only data loader since 3.0. Configs from 2.x that say
+                # "dali" get it too, with a warning.
+                "data_loader": "generic",
             },
         },
         "inference": {

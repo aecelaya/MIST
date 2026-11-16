@@ -19,7 +19,8 @@ class PlanningConstants:
     # Fitted to steady training memory on four GPUs (Tesla T4, L4, A100, RTX PRO
     # 6000): U-Net and MedNeXt networks take at most about 10 bytes in FP32. This
     # adds a margin for the first steps, which can take more. The calibration runs
-    # used 5 classes. Known gap: primusv2 networks in FP32 grow faster than this on
+    # used 5 classes (benchmarks/calibrate_planning.py, removed in 3.0.0rc0; see
+    # git history). Known gap: primusv2 networks in FP32 grow faster than this on
     # the A100, L4, and RTX PRO 6000, though not on the T4, and can run out of memory.
     BYTES_PER_ACTIVATION = 12.0
 

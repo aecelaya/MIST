@@ -161,7 +161,7 @@ class _DummyModel:
 
 
 class _DummyLoader:
-    """Minimal DALI-like loader with .next() returning [{'image': tensor}]."""
+    """Minimal loader with .next() returning [{'image': tensor}]."""
 
     def __init__(self, n: int):
         self.n = n
@@ -244,13 +244,13 @@ def fold_runner(mock_mist_config, monkeypatch, tmp_path):
     monkeypatch.setattr(
         ir.model_loader, "load_model_from_config", MagicMock(return_value=_DummyModel())
     )
-    mock_dali_module = MagicMock()
-    mock_dali_module.get_test_dataset = mock_get_test_dataset
+    mock_loader_module = MagicMock()
+    mock_loader_module.get_test_dataset = mock_get_test_dataset
     loader_calls = {}
     monkeypatch.setattr(
         ir.data_loader_registry,
         "get_data_loader_from_registry",
-        lambda name: (loader_calls.__setitem__("name", name), mock_dali_module)[1],
+        lambda name: (loader_calls.__setitem__("name", name), mock_loader_module)[1],
     )
     monkeypatch.setattr(ir.io, "read_json_file", mock_read_json)
     monkeypatch.setattr(ir, "ic", SimpleNamespace(PATIENT_DF_IGNORED_COLUMNS={"id", "fold"}))
@@ -663,12 +663,13 @@ def test_test_on_fold_resolves_auto_data_loader_via_registry(fold_runner, mock_m
     assert fold_runner.loader_calls["name"] == "generic"
 
 
-def test_test_on_fold_respects_explicit_data_loader_override(fold_runner, mock_mist_config):
-    """An explicit config.json value passes through to the registry unchanged."""
+def test_test_on_fold_reads_dali_configs_from_mist_2(fold_runner, mock_mist_config):
+    """A 2.x results folder that trained with DALI predicts with the generic loader."""
     cfg = copy.deepcopy(mock_mist_config)
     cfg["training"]["hardware"]["data_loader"] = "dali"
-    fold_runner.run(fold=0, cfg=cfg)
-    assert fold_runner.loader_calls["name"] == "dali"
+    with pytest.warns(UserWarning, match="removed NVIDIA DALI"):
+        fold_runner.run(fold=0, cfg=cfg)
+    assert fold_runner.loader_calls["name"] == "generic"
 
 
 def test_test_on_fold_raises_if_resolved_loader_is_not_registered(
@@ -676,11 +677,8 @@ def test_test_on_fold_raises_if_resolved_loader_is_not_registered(
 ):
     """An unregistered data_loader name surfaces the registry's own error.
 
-    There's no more DALI-specific special case here -- a resolved-but-
-    unavailable backend (e.g. "dali" resolved on a machine that trained with
-    CUDA, but DALI isn't importable in this process) is just an ordinary
-    registry lookup failure, already covered generically by
-    tests/data_loading/test_data_loader_registry.py. This only confirms
+    An unknown backend is an ordinary registry lookup failure, already covered
+    by tests/data_loading/test_data_loader_registry.py. This only confirms
     test_on_fold doesn't swallow or rewrap that error.
     """
     results_dir, numpy_dir = _prep_dirs(tmp_path)

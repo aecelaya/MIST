@@ -232,7 +232,9 @@ def test_batch_is_capped_by_the_dataset_and_shared_across_gpus():
     assert few.batch_size_per_gpu == constants.MIN_BATCH_SIZE
 
 
-@pytest.mark.parametrize("name", ["nnunet-res", "nnunet-pocket", "nnunet-plain", "resenc"])
+@pytest.mark.parametrize(
+    "name", ["nnunet-res", "nnunet-pocket", "nnunet-plain", "resenc", "resenc-pocket"]
+)
 def test_small_images_still_get_a_patch_the_network_can_build(name):
     """A network needing a minimum depth gets it, padding the small image."""
     plan = _plan(name, median=(20, 20, 16))

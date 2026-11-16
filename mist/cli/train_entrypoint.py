@@ -25,14 +25,7 @@ def _parse_train_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     # Add training-specific args.
     argmod.add_train_args(parser)
-    ns = parser.parse_args(argv)
-
-    # Fallbacks for convenience/consistency with other entrypoints.
-    if not ns.results:
-        ns.results = str(Path("./results").expanduser().resolve())
-    if not ns.numpy:
-        ns.numpy = str(Path("./numpy").expanduser().resolve())
-    return ns
+    return parser.parse_args(argv)
 
 
 def _ensure_required_artifacts(ns: argparse.Namespace) -> tuple[Path, bool]:

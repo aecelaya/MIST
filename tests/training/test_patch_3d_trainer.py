@@ -13,7 +13,7 @@ import torch
 from torch import nn
 
 from mist.data_loading import augmentation
-from mist.data_loading import dali_loader as dl
+from mist.data_loading import generic_loader as dl
 
 # MIST imports.
 from mist.training.trainers import base_trainer as bt
@@ -21,7 +21,7 @@ from mist.training.trainers.patch_3d_trainer import Patch3DTrainer
 
 
 class DummyIter:
-    """Simple DALI-style iterator with .next()[0] and .reset()."""
+    """Simple iterator with .next()[0] and .reset()."""
 
     def __init__(self, batch: dict[str, torch.Tensor], steps: int):
         """Initialize the iterator.
@@ -70,7 +70,7 @@ def no_op_autocast() -> Any:
 def patch_cuda(monkeypatch):
     """Pretend CUDA exists and make .to(...) a no-op (CPU-only tests)."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True, raising=False)
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (8, 0), raising=False)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *_: (8, 0), raising=False)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1, raising=False)
     monkeypatch.setattr(torch.cuda, "set_device", lambda _i: None, raising=False)
     monkeypatch.setattr(nn.Module, "to", lambda self, *a, **k: self, raising=False)
@@ -105,7 +105,7 @@ def tmp_pipeline(tmp_path):
             "epochs": 1000,
             "min_steps_per_epoch": 250,
             "batch_size_per_gpu": 2,
-            "dali_foreground_prob": 0.6,
+            "foreground_prob": 0.6,
             "loss": {
                 "name": "dice_ce",
                 "composite_loss_weighting": None,
@@ -133,8 +133,7 @@ def tmp_pipeline(tmp_path):
                 "master_addr": "localhost",
                 "master_port": 12345,
                 "communication_backend": "nccl",
-                # These tests patch the DALI loader, so pick it explicitly.
-                "data_loader": "dali",
+                "data_loader": "generic",
             },
         },
         "inference": {
@@ -192,7 +191,7 @@ def patch_utils(monkeypatch, tmp_pipeline):
 
 
 def test_build_dataloaders_passes_expected_args(tmp_pipeline, mist_args, monkeypatch):
-    """Test build_dataloaders forwards the correct arguments to dali_loader."""
+    """Test build_dataloaders forwards the correct arguments to the loader."""
     # Capture calls.
     captured = {}
 
@@ -585,3 +584,19 @@ def test_fp16_training_step_scales_gradients_and_computes_the_loss_in_fp32(
 
     assert seen == {"inside_autocast": False, "dtype": torch.float32}
     assert calls == ["scale", "unscale", "step", "update"]
+
+
+@pytest.mark.parametrize(
+    ("training", "expected"),
+    [
+        ({"foreground_prob": 0.3}, 0.3),
+        ({"dali_foreground_prob": 0.4}, 0.4),  # The MIST 2.x name.
+        ({"foreground_prob": 0.3, "dali_foreground_prob": 0.4}, 0.3),
+        ({}, 0.6),
+    ],
+)
+def test_foreground_prob_reads_the_2x_name(training, expected):
+    """Configs from MIST 2.x keep their foreground oversampling rate."""
+    from mist.training.trainers.patch_3d_trainer import foreground_prob
+
+    assert foreground_prob(training) == expected

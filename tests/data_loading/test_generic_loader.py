@@ -1,37 +1,43 @@
-"""Tests for the generic, accelerator-agnostic data loader in MIST.
+"""Tests for MIST's generic data loader.
 
-Split into three groups:
+Split into two groups:
 
-* Pure unit tests (no I/O) for the Stage 2 helper functions -- sharding,
-  padding, anchor placement, foreground selection.
-* Pure unit tests (no I/O) for the Stage 3 augmentation functions -- flips,
-  zoom, noise, blur, brightness, contrast.
-* An integration/smoke test running the full get_training_dataset /
+* Pure unit tests (no I/O) for the helper functions -- sharding, padding,
+  anchor placement, foreground selection, positioned reads.
+* Integration tests running the full get_training_dataset /
   get_validation_dataset / get_test_dataset entry points against real
-  preprocessed fixture data (reusing tests/regression/ants_sitk's harness),
+  preprocessed fixture data (from tests/fixtures),
   since that's the only way to exercise the actual .next()/.reset() iterator
   contract end to end -- including a synthetic "does it train" check with
-  augmentation enabled, per the Stage 3 release gate.
+  augmentation enabled.
 
-See cpu_rocm_support_plan.md Stages 2-3 for the design this is validating
-against: same signatures/contract as dali_loader.py, foreground-oversampling
-rate (not RNG stream) equivalence, DDP sharding with no drops/duplicates, and
-augmentations matching data_loading_constants.py's probabilities/ranges (not
-DALI's exact numerical output).
+What they check: the foreground-oversampling rate, DDP sharding with no drops
+or duplicates, and the .next()/.reset() contract the trainers and inference
+rely on.
 """
 
+import gc
+import multiprocessing
+import os
+import subprocess
+import sys
+import time
 import warnings
+from itertools import islice
+from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 from torch import nn
+from torch.utils.data import DataLoader, Dataset
 
 from mist.data_loading import augmentation
 from mist.data_loading import generic_loader as gl
+from mist.preprocessing import foreground_locations as fl
 from mist.utils import hardware
-from tests.regression.ants_sitk.fixtures import generate_dataset
-from tests.regression.ants_sitk.harness import run_pipeline
+from tests.fixtures.fixtures import generate_dataset
+from tests.fixtures.harness import run_pipeline
 
 # --------------------------------------------------------------------------- #
 # _shard_indices
@@ -51,31 +57,6 @@ def test_shard_indices_partitions_with_no_drops_or_duplicates(num_examples, worl
 
     sizes = [len(shard) for shard in shards]
     assert max(sizes) - min(sizes) <= 1
-
-
-# --------------------------------------------------------------------------- #
-# _pad_to_roi
-# --------------------------------------------------------------------------- #
-
-
-def test_pad_to_roi_is_noop_when_already_large_enough():
-    """No padding is applied when every spatial axis already meets roi_size."""
-    array = np.random.default_rng(0).random((8, 8, 8, 2)).astype(np.float32)
-    padded = gl._pad_to_roi(array, (4, 4, 4))
-    assert padded is array  # Literally the same object, not just equal.
-
-
-def test_pad_to_roi_pads_smaller_axes_with_zeros():
-    """Smaller axes are zero-padded up to roi_size; original data is preserved."""
-    array = np.ones((4, 5, 6, 2), dtype=np.float32)
-    padded = gl._pad_to_roi(array, (8, 8, 8))
-    assert padded.shape == (8, 8, 8, 2)
-    # Original data preserved at the origin corner.
-    assert np.array_equal(padded[:4, :5, :6, :], array)
-    # Padded region is zero-filled.
-    assert np.all(padded[4:, :, :, :] == 0)
-    assert np.all(padded[:, 5:, :, :] == 0)
-    assert np.all(padded[:, :, 6:, :] == 0)
 
 
 # --------------------------------------------------------------------------- #
@@ -110,7 +91,9 @@ def test_foreground_anchor_center_returns_none_without_foreground():
     """No foreground voxels anywhere -> None (caller falls back to random)."""
     label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
     rng = np.random.default_rng(0)
-    assert gl._foreground_anchor_center(label, labels=[1, 2], rng=rng) is None
+    locations = fl.find(label, [1, 2], rng)
+    assert locations == {}
+    assert gl._foreground_anchor_center(locations, labels=[1, 2], rng=rng) is None
 
 
 def test_foreground_anchor_center_finds_the_only_voxel():
@@ -118,7 +101,8 @@ def test_foreground_anchor_center_finds_the_only_voxel():
     label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
     label[3, 4, 5, 0] = 1
     rng = np.random.default_rng(0)
-    assert gl._foreground_anchor_center(label, labels=[1, 2], rng=rng) == (3, 4, 5)
+    locations = fl.find(label, [1, 2], rng)
+    assert gl._foreground_anchor_center(locations, labels=[1, 2], rng=rng) == (3, 4, 5)
 
 
 def test_foreground_anchor_center_falls_back_to_any_nonzero_voxel():
@@ -126,7 +110,70 @@ def test_foreground_anchor_center_falls_back_to_any_nonzero_voxel():
     label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
     label[1, 2, 3, 0] = 9  # Not in the configured `labels` list below.
     rng = np.random.default_rng(0)
-    assert gl._foreground_anchor_center(label, labels=[1, 2], rng=rng) == (1, 2, 3)
+    locations = fl.find(label, [1, 2], rng)
+    assert gl._foreground_anchor_center(locations, labels=[1, 2], rng=rng) == (1, 2, 3)
+
+
+def test_foreground_locations_caps_each_class(monkeypatch):
+    """Large classes keep a bounded subset of real, distinct locations."""
+    monkeypatch.setattr(fl, "MAX_LOCATIONS", 50)
+    label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
+    label[:5] = 1  # 500 voxels, over the cap.
+    label[9, 9, 9, 0] = 2  # One voxel, under it.
+    locations = fl.find(label, [1, 2], np.random.default_rng(0))
+    assert locations[1].shape == (50, 3)
+    assert len({tuple(c) for c in locations[1].tolist()}) == 50
+    assert np.all(locations[1][:, 0] < 5)
+    assert locations[2].tolist() == [[9, 9, 9]]
+
+
+def test_foreground_anchor_center_weights_classes_equally():
+    """A tiny class is picked as often as a huge one."""
+    label = np.zeros((20, 20, 20, 1), dtype=np.uint8)
+    label[:10] = 1
+    label[19, 19, 19, 0] = 2
+    rng = np.random.default_rng(0)
+    locations = fl.find(label, [1, 2], rng)
+    picks = [gl._foreground_anchor_center(locations, [1, 2], rng) for _ in range(1000)]
+    assert 0.4 < np.mean([p == (19, 19, 19) for p in picks]) < 0.6
+
+
+def test_dataset_scans_each_label_once(tmp_path, monkeypatch):
+    """Foreground locations are found once per case, then reused."""
+    array = np.zeros((10, 10, 10, 1), dtype=np.float32)
+    array[5, 5, 5, 0] = 1
+    paths = [str(tmp_path / f"{i}.npy") for i in range(2)]
+    for path in paths:
+        np.save(path, array)
+
+    calls = []
+    real = fl.find
+    monkeypatch.setattr(fl, "find", lambda *a, **k: calls.append(1) or real(*a, **k))
+    dataset = gl._PatchTrainingDataset(paths, paths, None, (4, 4, 4), [1], 1.0, True)
+    for _ in range(5):
+        dataset[0]
+        dataset[1]
+    assert len(calls) == 2
+
+
+def test_dataset_uses_saved_foreground_locations(tmp_path, monkeypatch):
+    """Locations saved by mist_preprocess are used instead of scanning the label."""
+    (tmp_path / "labels").mkdir()
+    (tmp_path / fl.FOLDER).mkdir()
+    label = np.zeros((10, 10, 10, 1), dtype=np.uint8)
+    label[5, 5, 5, 0] = 1
+    path = tmp_path / "labels" / "case.npy"
+    np.save(path, label)
+    # A saved location that differs from the label's shows which one was used.
+    fl.save(fl.path_for(path), {1: np.array([[2, 2, 2]], dtype=np.uint16)}, [1])
+
+    def no_scan(*_args, **_kwargs):
+        raise AssertionError("The label was scanned.")
+
+    monkeypatch.setattr(fl, "find", no_scan)
+    dataset = gl._PatchTrainingDataset([str(path)], [str(path)], None, (4, 4, 4), [1], 1.0, True)
+    dataset[0]
+    assert dataset._foreground_cache[0][1].tolist() == [[2, 2, 2]]
 
 
 # --------------------------------------------------------------------------- #
@@ -241,7 +288,7 @@ def test_load_case_returns_a_memory_mapped_array(tmp_path):
 
 
 def test_validate_train_and_eval_inputs_rejects_empty_images():
-    """No images raises, mirroring dali_loader.py's validation."""
+    """No images raises."""
     with pytest.raises(ValueError, match="No images found"):
         gl._validate_train_and_eval_inputs([], ["a.npy"])
 
@@ -297,7 +344,7 @@ def test_multiprocessing_context_none_when_no_workers():
 def test_multiprocessing_context_fork_on_non_windows(monkeypatch):
     """ "fork" is requested explicitly on Linux/macOS -- see module docstring
     for why this matters on macOS specifically (a confirmed indefinite hang
-    with the platform default "spawn", found via a real Stage 4 CPU run)."""
+    with the platform default "spawn", found in a real CPU training run)."""
     monkeypatch.setattr(gl.platform, "system", lambda: "Darwin")
     assert gl._multiprocessing_context(4) == "fork"
 
@@ -348,6 +395,120 @@ def test_prefetch_factor_set_when_workers_present():
 
 
 # --------------------------------------------------------------------------- #
+# Long-lived training workers
+# --------------------------------------------------------------------------- #
+
+
+def test_endless_sampler_covers_every_index_each_pass():
+    """Each pass holds every index once, and passes keep coming in new orders."""
+    sampler = gl._EndlessShuffleSampler(5, torch.Generator().manual_seed(0))
+    drawn = list(islice(iter(sampler), 15))
+    passes = [drawn[:5], drawn[5:10], drawn[10:]]
+    assert all(sorted(p) == list(range(5)) for p in passes)
+    assert passes[0] != passes[1] or passes[1] != passes[2]
+
+
+class _PidDataset(Dataset):
+    """Report which process produced each item."""
+
+    def __len__(self):
+        return 3
+
+    def __getitem__(self, index):
+        return {"pid": torch.tensor(os.getpid())}
+
+
+def _endless_iterator(num_workers):
+    return gl.GenericIterator(
+        DataLoader(
+            _PidDataset(),
+            batch_size=2,
+            sampler=gl._EndlessShuffleSampler(3, torch.Generator().manual_seed(0)),
+            num_workers=num_workers,
+            multiprocessing_context=gl._multiprocessing_context(num_workers),
+        ),
+        device=torch.device("cpu"),
+        endless=True,
+    )
+
+
+def test_endless_iterator_keeps_its_workers_across_passes_and_resets():
+    """The same worker processes serve many passes and epoch boundaries."""
+    iterator = _endless_iterator(num_workers=2)
+    pids = set()
+    for _ in range(3):
+        for _ in range(6):  # Two passes' worth of batches.
+            pids.update(iterator.next()[0]["pid"].tolist())
+        iterator.reset()
+    assert 1 <= len(pids) <= 2
+    assert os.getpid() not in pids
+
+
+def test_endless_iterator_works_without_workers():
+    """With no workers, batches come from this process and stay full-sized."""
+    iterator = _endless_iterator(num_workers=0)
+    for _ in range(5):
+        batch = iterator.next()[0]
+        assert batch["pid"].tolist() == [os.getpid()] * 2
+    iterator.reset()
+    assert iterator.next()[0]["pid"].shape == (2,)
+
+
+def test_dropping_an_endless_iterator_stops_its_workers():
+    """Workers don't outlive their fold's iterator."""
+    before = set(multiprocessing.active_children())
+    iterator = _endless_iterator(num_workers=2)
+    iterator.next()
+    assert set(multiprocessing.active_children()) - before
+    del iterator
+    gc.collect()
+    deadline = time.monotonic() + 20
+    while set(multiprocessing.active_children()) - before and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not set(multiprocessing.active_children()) - before
+
+
+def test_process_with_endless_workers_exits_cleanly(tmp_path):
+    """Two folds' worth of workers, then a normal exit: no hang at shutdown."""
+    script = tmp_path / "folds.py"
+    script.write_text(
+        """
+import numpy as np
+from mist.data_loading import generic_loader as gl
+
+array = np.zeros((10, 10, 10, 1), dtype=np.float32)
+array[5, 5, 5, 0] = 1
+paths = []
+for i in range(3):
+    paths.append(f"case{i}.npy")
+    np.save(paths[-1], array)
+
+for fold in range(2):
+    loader = gl.get_training_dataset(
+        paths, paths, None, 2, (4, 4, 4), [1], 0.5, fold, 2, 0, 1
+    )
+    for _ in range(5):
+        loader.next()
+    loader.reset()
+    loader.next()
+print("done")
+"""
+    )
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2])}
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "done" in result.stdout
+
+
+# --------------------------------------------------------------------------- #
 # _extract_patch with a spatial-augmentation margin
 # --------------------------------------------------------------------------- #
 
@@ -360,6 +521,34 @@ def test_slice_with_padding_zero_pads_outside_bounds():
     np.testing.assert_array_equal(out[2:6, :, :2], array[0:4, 1:3, 2:4])
     assert np.all(out[:2] == 0)
     assert np.all(out[:, :, 2:] == 0)
+
+
+def test_slice_with_padding_never_reads_outside_the_slice(monkeypatch):
+    """A patch past the edge of a case neither pads nor reads the whole array."""
+
+    def fail(*args, **kwargs):
+        raise AssertionError("np.pad would read the whole memory-mapped case")
+
+    monkeypatch.setattr(gl.np, "pad", fail)
+    array = np.ones((4, 4, 4, 2), dtype=np.float32)
+    out = gl._slice_with_padding(array, starts=(2, -1, 0), shape=(4, 4, 4))
+    assert out.shape == (4, 4, 4, 2)
+    assert out.dtype == array.dtype
+    assert out.sum() == 2 * 3 * 4 * 2
+
+
+def test_slice_with_padding_inside_bounds_returns_a_view():
+    """A slice inside the array copies nothing."""
+    array = np.ones((4, 4, 4, 1), dtype=np.float32)
+    out = gl._slice_with_padding(array, starts=(0, 1, 1), shape=(2, 2, 2))
+    assert np.shares_memory(out, array)
+
+
+def test_slice_with_padding_entirely_outside_is_all_zeros():
+    """A slice that misses the array comes back as zeros of the right shape."""
+    array = np.ones((4, 4, 4, 1), dtype=np.float32)
+    assert not gl._slice_with_padding(array, starts=(9, 0, 0), shape=(2, 2, 2)).any()
+    assert not gl._slice_with_padding(array, starts=(-5, 0, 0), shape=(2, 2, 2)).any()
 
 
 def test_extract_patch_with_margin_centers_the_unmargined_patch():
@@ -508,7 +697,7 @@ def test_a_pass_starts_at_the_first_batch_and_ends_at_reset():
     """Validation workers don't read ahead before a pass, or after it until the next."""
     batches = [{"image": torch.zeros(1)}, {"image": torch.ones(1)}]
     loader = _CountingLoader(batches)
-    iterator = gl.GenericIterator(loader, torch.device("cpu"), lazy=True)
+    iterator = gl.GenericIterator(loader, torch.device("cpu"))
     assert loader.started == 0
     assert iterator.next()[0]["image"].item() == 0
     assert iterator.next()[0]["image"].item() == 1
@@ -519,10 +708,10 @@ def test_a_pass_starts_at_the_first_batch_and_ends_at_reset():
     assert loader.started == 2
 
 
-def test_a_training_iterator_starts_its_workers_up_front():
+def test_an_endless_iterator_starts_its_workers_up_front():
     """Training workers start reading as soon as the loader is built."""
     loader = _CountingLoader([{"image": torch.zeros(1)}])
-    gl.GenericIterator(loader, torch.device("cpu"))
+    gl.GenericIterator(loader, torch.device("cpu"), endless=True)
     assert loader.started == 1
 
 
@@ -540,7 +729,7 @@ def test_get_test_dataset_preserves_input_order(preprocessed):
 
 
 def test_get_test_dataset_rejects_empty_input():
-    """No images raises ValueError, matching dali_loader.py."""
+    """No images raises ValueError."""
     with pytest.raises(ValueError, match="No images found"):
         gl.get_test_dataset(image_paths=[], seed=0, num_workers=0)
 
@@ -660,3 +849,127 @@ def test_training_with_augmentation_enabled_reduces_loss(preprocessed):
     early = sum(losses[:5]) / 5
     best_late = min(losses[-10:])
     assert best_late < early, f"loss did not decrease: early={early:.4f}, best_late={best_late:.4f}"
+
+
+# --------------------------------------------------------------------------- #
+# Padding on the training device
+# --------------------------------------------------------------------------- #
+
+
+def test_padding_on_the_device_matches_padding_in_the_workers():
+    """The inside slice, padded later, equals the patch padded up front."""
+    rng = np.random.default_rng(0)
+    array = rng.random((9, 7, 5, 2)).astype(np.float32)
+    for _ in range(200):
+        shape = [int(s) for s in rng.integers(1, 14, size=3)]
+        starts = [int(s) for s in rng.integers(-8, 10, size=3)]
+        expected = gl._slice_with_padding(array, starts, shape)
+        inside, pad = gl._slice_inside(array, starts, shape)
+        padded = gl._pad_on_device(
+            gl._to_channels_first(inside), torch.tensor(pad, dtype=torch.int64)
+        )
+        np.testing.assert_array_equal(padded.numpy(), gl._to_channels_first(expected).numpy())
+
+
+@pytest.mark.parametrize(
+    ("dtype", "channels"),
+    [(np.float32, 1), (np.float32, 4), (np.uint8, 1), (np.float16, 2)],
+)
+def test_reading_a_patch_from_the_file_matches_slicing_the_memory_map(tmp_path, dtype, channels):
+    """Positioned reads give the memory map's slice and padding, at any window."""
+    rng = np.random.default_rng(2)
+    path = tmp_path / "case.npy"
+    np.save(path, (rng.random((9, 7, 11, channels)) * 100).astype(dtype))
+    array = gl._load_case(str(path))
+    windows = [([0, 0, 0], [9, 7, 11]), ([2, 1, 3], [4, 4, 4]), ([-3, 5, 9], [6, 6, 6])]
+    windows += [([-20, 0, 0], [5, 5, 5]), ([0, 0, 0], [20, 20, 20])]
+    for _ in range(100):
+        windows.append(
+            (
+                [int(s) for s in rng.integers(-8, 12, size=3)],
+                [int(s) for s in rng.integers(1, 14, size=3)],
+            )
+        )
+    for starts, shape in windows:
+        expected, expected_pad = gl._slice_inside(array, starts, shape)
+        read, pad = gl._read_inside(array, starts, shape)
+        assert pad == expected_pad
+        assert read.dtype == array.dtype
+        assert not isinstance(read, np.memmap)
+        np.testing.assert_array_equal(read, expected)
+
+
+@pytest.mark.parametrize("source", ["fortran", "in_memory"])
+def test_reading_a_patch_falls_back_to_slicing(tmp_path, source):
+    """Fortran-order files and in-memory arrays are sliced, with the same result."""
+    rng = np.random.default_rng(3)
+    data = rng.integers(0, 3, (9, 7, 11, 1)).astype(np.uint8)
+    if source == "fortran":
+        path = tmp_path / "label.npy"
+        np.save(path, np.asfortranarray(data))
+        array = gl._load_case(str(path))
+        assert not array.flags["C_CONTIGUOUS"]
+    else:
+        array = data
+    read, pad = gl._read_inside(array, [-2, 3, 4], [6, 6, 6])
+    expected, expected_pad = gl._slice_inside(data, [-2, 3, 4], [6, 6, 6])
+    assert pad == expected_pad
+    np.testing.assert_array_equal(read, expected)
+    read[...] = 0  # A new, writable array, never a view of the caller's data.
+    assert data.any()
+
+
+def test_reading_a_patch_from_a_truncated_file_raises(tmp_path):
+    """A file shorter than its header says fails clearly instead of returning garbage."""
+    path = tmp_path / "case.npy"
+    np.save(path, np.ones((9, 7, 11, 1), np.float32))
+    array = gl._load_case(str(path))
+    with open(path, "r+b") as file:
+        file.truncate(array.offset + 100)
+    with pytest.raises(OSError, match="Unexpected end of file"):
+        gl._read_inside(array, [5, 0, 0], [3, 7, 11])
+
+
+def test_patches_past_the_edge_are_padded_after_batching(tmp_path, monkeypatch):
+    """A batch of patches larger than their images matches the old worker padding."""
+    rng = np.random.default_rng(1)
+    paths = {"image": [], "label": []}
+    for i, size in enumerate([(6, 5, 4), (7, 6, 3)]):
+        for key, array in (
+            ("image", rng.random((*size, 2)).astype(np.float32)),
+            ("label", rng.integers(0, 3, (*size, 1)).astype(np.uint8)),
+        ):
+            path = tmp_path / f"{key}_{i}.npy"
+            np.save(path, array)
+            paths[key].append(str(path))
+
+    # Fix each patch's window, so both paths cut the same patches.
+    windows = iter([([-2, -1, 0], [8, 8, 8]), ([1, -3, -2], [8, 8, 8])] * 2)
+    monkeypatch.setattr(gl, "_patch_window", lambda *args: next(windows))
+    monkeypatch.setattr(gl, "_target_device", lambda rank: torch.device("cpu"))
+
+    def first_batch(pad_on_device):
+        monkeypatch.setattr(gl, "_PAD_ON_DEVICE", pad_on_device)
+        loader = gl.get_training_dataset(
+            image_paths=paths["image"],
+            label_paths=paths["label"],
+            dtm_paths=None,
+            batch_size=2,
+            roi_size=(4, 4, 4),
+            labels=[1, 2],
+            oversampling=0.0,
+            seed=0,
+            num_workers=0,
+            rank=0,
+            world_size=1,
+            patch_margin=(2, 2, 2),
+        )
+        # The same seed gives both loaders the same case order.
+        return loader.next()[0]
+
+    on_device = first_batch(True)
+    in_workers = first_batch(False)
+    assert on_device.keys() == in_workers.keys() == {"image", "label"}
+    for key in on_device:
+        assert on_device[key].shape == (2, on_device[key].shape[1], 8, 8, 8)
+        assert torch.equal(on_device[key], in_workers[key])

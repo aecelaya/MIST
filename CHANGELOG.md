@@ -3,10 +3,65 @@
 All notable changes to MIST are listed here, newest first. MIST follows
 [semantic versioning](https://semver.org/) from 2.3.0 onward.
 
-## 2.5.0rc0 — Unreleased
+## 3.0.0rc0 — 2026-11-16
+
+MIST 3.0 removes NVIDIA DALI and makes MIST's own data loader the only one. It
+also includes everything in 2.5.0rc0 (planning at training time, FP16, new
+augmentation, `nnunet-plain`, probability resampling, and the rest below).
+2.5.0 was never released as final: 2.5.0rc0, on PyPI as tag `v2.5.0-rc`, became
+this release. See
+[Upgrading to 3.0](https://mist-medical.readthedocs.io/en/latest/upgrading/).
+
+**Inference on results folders from 2.x and 2.5.0rc0 keeps working.**
+`mist_predict`, `test_on_fold`, and `mist_evaluate` read their `config.json`
+and checkpoints as before. Predicted labels can differ slightly at boundaries
+for folders from before 2.5.0, because predictions are now restored to the
+original image by resampling probabilities instead of labels. `tests/compat`
+checks this against results folders trained by 2.4.1 and 2.5.0rc0.
+
+### Breaking
+
+- **NVIDIA DALI is gone.** MIST's generic loader is the only data loader, on
+  NVIDIA, AMD ROCm, and CPU machines. In benchmarks with BF16 it was faster than
+  MIST's DALI pipeline, which reads whole volumes for each patch:
+  - H100, full LiTS: 13 s per epoch against 67 s with DALI.
+  - 2× A100, full LiTS: 24 s against 88 s. The generic loader scales 1.92x
+    from 1 to 2 GPUs; DDP costs about 4% per step.
+  - BraTS: a tie, 20 s against 21–22 s per epoch.
+  - `/dev/shm` peaked at 1.3 GB.
+
+  Results from 2.x keep working: `"data_loader": "dali"` in `config.json` now
+  means the generic loader, with a warning, and `pip install
+  "mist-medical[dali]"` or `[train]` still installs (both extras are empty and
+  will be removed in 4.0).
+- **Training results differ from 2.x** even with the same config: patch
+  sampling, augmentation, the planned patch and batch size, the saved model, and
+  the default precision all changed (see Changed below).
+- New configs use **4 data loader workers per GPU** (`training.hardware.num_cpu_workers`)
+  instead of 8. On 2× A100 with LiTS, 4 workers trained as fast as all cores (25
+  against 24 s per epoch), the first epoch dropped from 87 to 40 s, and
+  validation from 1:48 to 1:31. Existing configs keep their value.
+- `training.dali_foreground_prob` is now `training.foreground_prob`. Configs that
+  use the old name keep working.
+- **`--results` and `--numpy` are required.** `mist_analyze`, `mist_preprocess`,
+  `mist_train`, `mist_run_all`, and `mist_finalize` no longer default to
+  `./results` and `./numpy`, and `mist_analyze` and `mist_run_all` also require
+  `--data`. `mist_analyze` without `--results` used to crash with a `TypeError`.
+
+### Removed
+
+- `mist/data_loading/dali_loader.py`, `mist/data_loading/data_loading_utils.py`,
+  and the `nvidia-dali-cuda120` dependency of the `[dali]` and `[train]` extras.
+- The benchmark notebooks in `examples/` and the manual GPU checks in
+  `tests/regression/gpu/`, including the planner's memory calibration. Git
+  history keeps them. `examples/` keeps the MIST demos.
 
 ### Added
 
+- **`resenc-pocket`**: the ResEnc UNet with 32 filters in every stage, as
+  `nnunet-pocket` is to `nnunet-res`. It has the same stages and residual blocks
+  as `resenc` and about 1.8M parameters at six stages. Encoder weights transfer
+  between `resenc-pocket` models stage by stage; `resenc` checkpoints don't fit.
 - **FP16 mixed precision.** `training.amp: "fp16"` trains in FP16 on any GPU,
   including those without BF16 hardware, such as the V100, T4, and Quadro RTX
   6000, and the automatic test can now choose it (see `training.amp` below). Training scales gradients, computes the
@@ -18,9 +73,7 @@ All notable changes to MIST are listed here, newest first. MIST follows
   `nnunet-plain` 3.5 to 4 times faster than FP32.
 - **`nnunet-plain`** — a plain convolutional U-Net with two convolutions per
   stage, no depth limit, and downsampling of an axis only when its spacing is
-  under twice the finest spacing among axes that can still be downsampled. Its
-  parameter names match nnU-Net's `PlainConvUNet`, so those checkpoints load
-  directly.
+  under twice the finest spacing among axes that can still be downsampled.
 - **`nnunet-res`** — a clearer name for the residual network MIST has called
   `nnunet`.
 
@@ -29,7 +82,7 @@ All notable changes to MIST are listed here, newest first. MIST follows
   without data loading on an A100, steps ran a median of 1.6 times faster with BF16
   and 1.25 times with FP32, after one to seven extra minutes per fold. Checkpoints
   keep the same weight names, so they work with or without it. Inference doesn't
-  use it. `benchmarks/mist_compile_benchmark.ipynb` measures its effect on a GPU.
+  use it.
 - `mist_train` warns about mistakes in `config.json`: keys MIST doesn't use, with
   the likely spelling, and values of the wrong type or range, such as
   `"compile": "false"`. These are only warnings, so existing configs still train.
@@ -39,14 +92,23 @@ All notable changes to MIST are listed here, newest first. MIST follows
   the training time on large datasets. Configs without this setting validate
   every epoch, as they did before. With `val_percent` above 0, only validated
   epochs can be chosen as the best model.
+- `mist_train` warns when PyTorch 2.9 runs with a cuDNN older than 9.15, as
+  PyTorch 2.9's CUDA wheels do. That combination runs most 3D convolutions in
+  BF16 and FP16 without cuDNN: on an H100, nnunet-plain trained about 3x slower
+  in BF16 than in FP32, so the precision test kept FP32. After
+  `pip install -U "nvidia-cudnn-cu12>=9.15"`, BF16 trained twice as fast as
+  FP32 with half the memory. The warning prints that command.
 
 ### Changed
 
-- DALI stays the default data loader on NVIDIA GPUs with DALI installed, and
-  the generic loader on other machines. `"auto"` resolves as in 2.4.
-- Benchmark notebooks and manual GPU check scripts moved from `examples/` and
-  `tests/regression/gpu/` to a new `benchmarks/` folder, with a README for
-  each. `examples/` keeps the MIST demos.
+- The generic loader reads each training patch with one positioned read per
+  position along the first axis, instead of copying it through a memory map of
+  the file. On NFS, the memory map turned each LiTS-sized patch into tens of
+  thousands of page faults, and training on two Quadro RTX 6000s took over 5
+  seconds per step. On a local disk, reads take a few milliseconds longer per
+  patch.
+- New configs set `training.hardware.data_loader` to `"generic"`, and older
+  configs that say `"auto"` get it too.
 - **The patch and batch size are now chosen at the start of training,** from an
   estimate of the network's GPU memory, instead of at analysis from a fixed voxel
   budget. `mist_analyze` leaves both as `"auto"`, and the first `mist_train` plans
@@ -102,9 +164,16 @@ All notable changes to MIST are listed here, newest first. MIST follows
   DTMs too (previously zoom was skipped when DTMs were used). Scaling keeps DTM
   distances valid: unnormalized DTMs are divided by the scale factor, and
   quasi-2D patches, which scale only in-plane, skip scaling when DTMs are used.
-- Augmentation runs in PyTorch on each batch on the training device, so the
-  DALI and generic loaders now apply identical transforms. The loaders only
-  extract patches.
+- Augmentation runs in PyTorch on each batch on the training device. The data
+  loader only extracts patches.
+- The generic loader's training workers now last the whole fold instead of
+  restarting at every pass over the data and every epoch, and each worker
+  remembers where each case's foreground is (up to 10,000 voxels per class)
+  after scanning its label once. Patches that run past the image edge no longer
+  read the whole case, and only their part inside the image is sent from the
+  workers; the GPU adds the zero padding. Patches enlarged for spatial
+  augmentation are often mostly padding on small images such as BraTS, so this
+  sends much less data per batch.
 - New config keys under `training.augmentation.transforms`: `rotation`,
   `scaling`, `low_resolution`, and `gamma`. Missing keys mean enabled, so older
   configs get the new transforms; their `zoom` key is read as `scaling`.
@@ -130,9 +199,21 @@ All notable changes to MIST are listed here, newest first. MIST follows
 - `--resume` warns if `--val-percent` or `--validate-every` differ from the
   saved run.
 
+- The Docker image installs cuDNN 9.15 or later. PyTorch 2.9's CUDA wheels come
+  with cuDNN 9.10, which runs most 3D convolutions in BF16 and FP16 about 3x
+  slower than FP32.
+
 ### Fixed
 
 - Includes every fix in 2.4.1.
+- **The generic loader no longer scans labels in every worker.** `mist_preprocess`
+  saves each case's foreground locations in a new `foreground` folder, and the
+  generic loader uses them. Training warns about data without them; run
+  `mist_preprocess` again to save them.
+- **`mist_run_all` passes all training flags on to training.** It used to
+  accept `--val-percent`, `--validate-every`, `--pretrained-weights`,
+  `--pretrained-config`, and `--input-channel-strategy` and then ignore them.
+  It now rejects `--resume` with an error that points to `mist_train --resume`.
 
 ## 2.4.1 — 2026-11-09
 

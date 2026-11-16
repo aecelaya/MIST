@@ -56,48 +56,25 @@ def test_resolve_communication_backend(monkeypatch, requested, accelerator, expe
     [
         ("auto", "cpu", "generic"),
         ("auto", "rocm", "generic"),
+        ("auto", "cuda", "generic"),
         ("generic", "cuda", "generic"),
-        ("dali", "cpu", "dali"),  # An explicit value always passes through untouched.
+        ("custom", "cuda", "custom"),  # Unknown names are left for the registry.
     ],
 )
 def test_resolve_data_loader(monkeypatch, requested, accelerator, expected) -> None:
-    """ "auto" resolves per accelerator; any other value passes through.
-
-    Cases that would actually reach the CUDA/"dali"-registered branch are
-    covered by the two dedicated tests below instead, since that branch
-    depends on data_loader_registry state, not just the accelerator.
-    """
+    """ "auto" is the generic loader on every machine, without a warning."""
     monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
-    assert hardware.resolve_data_loader(requested) == expected
-
-
-def test_resolve_data_loader_cuda_with_dali_registered(monkeypatch) -> None:
-    """ "auto" resolves to "dali" on CUDA when it's actually installed."""
-    from mist.data_loading import data_loader_registry
-
-    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
-    monkeypatch.setattr(
-        data_loader_registry, "list_registered_data_loaders", lambda: ["dali", "generic"]
-    )
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        assert hardware.resolve_data_loader("auto") == "dali"
+        assert hardware.resolve_data_loader(requested) == expected
 
 
-def test_resolve_data_loader_cuda_without_dali_warns_and_falls_back(monkeypatch) -> None:
-    """ "auto" on CUDA without DALI installed warns and falls back to "generic".
-
-    Regression guard: a CUDA machine that skipped `pip install
-    "mist-medical[dali]"` used to hit a ValueError deep inside
-    build_dataloaders() ("Data loader 'dali' is not registered") instead of
-    training on the generic loader with a clear warning.
-    """
-    from mist.data_loading import data_loader_registry
-
-    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
-    monkeypatch.setattr(data_loader_registry, "list_registered_data_loaders", lambda: ["generic"])
-    with pytest.warns(UserWarning, match=r"mist-medical\[dali\]"):
-        assert hardware.resolve_data_loader("auto") == "generic"
+@pytest.mark.parametrize("accelerator", ["cpu", "cuda", "rocm"])
+def test_resolve_data_loader_maps_dali_to_generic_with_warning(monkeypatch, accelerator) -> None:
+    """MIST 2.x configs that say "dali" still train and predict, with a warning."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    with pytest.warns(UserWarning, match="removed NVIDIA DALI"):
+        assert hardware.resolve_data_loader("dali") == "generic"
 
 
 @pytest.mark.parametrize(
@@ -124,7 +101,7 @@ def test_bf16_supported_true_on_ampere(monkeypatch) -> None:
     """bf16_supported is True on Ampere or newer (compute capability >= 8)."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.version, "hip", None, raising=False)
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (8, 0))
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *_: (8, 0))
     assert hardware.bf16_supported() is True
 
 
@@ -136,7 +113,7 @@ def test_bf16_supported_false_on_pre_ampere(monkeypatch) -> None:
     """
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.version, "hip", None, raising=False)
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (7, 5))
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *_: (7, 5))
     assert hardware.bf16_supported() is False
 
 
@@ -238,7 +215,7 @@ def test_resolve_amp_auto_follows_the_hardware_without_warning(monkeypatch, supp
 def test_resolve_amp_supported_returns_true(monkeypatch) -> None:
     """A True request on Ampere+ hardware resolves to True."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (8, 0))
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *_: (8, 0))
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         assert hardware.resolve_amp(True) is True
@@ -254,7 +231,7 @@ def test_resolve_amp_no_cuda_falls_back_with_warning(monkeypatch) -> None:
 def test_resolve_amp_pre_ampere_falls_back_with_device_name(monkeypatch) -> None:
     """A True request on a pre-Ampere GPU downgrades and names the device."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (7, 5))
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *_: (7, 5))
     monkeypatch.setattr(torch.cuda, "get_device_name", lambda idx=0: "Tesla T4")
     with pytest.warns(UserWarning, match="Tesla T4"):
         assert hardware.resolve_amp(True) is False
@@ -263,7 +240,7 @@ def test_resolve_amp_pre_ampere_falls_back_with_device_name(monkeypatch) -> None
 def test_resolve_amp_warn_false_is_silent(monkeypatch) -> None:
     """warn=False suppresses the downgrade warning."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (7, 5))
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *_: (7, 5))
     monkeypatch.setattr(torch.cuda, "get_device_name", lambda idx=0: "Tesla T4")
     with warnings.catch_warnings():
         warnings.simplefilter("error")
@@ -312,7 +289,7 @@ def test_autocast_context_enabled_uses_cpu_device_type_on_cpu(monkeypatch) -> No
 def test_resolve_amp_keeps_fp16_on_a_gpu(monkeypatch) -> None:
     """FP16 runs on any GPU, so it's kept quietly, even on a pre-Ampere card."""
     monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (7, 5))
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *_: (7, 5))
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         assert hardware.resolve_amp("fp16") == hardware.FP16
@@ -333,3 +310,50 @@ def test_autocast_context_uses_fp16_or_bf16(monkeypatch) -> None:
     hardware.autocast_context("fp16")
     hardware.autocast_context(True)
     assert [kwargs["dtype"] for kwargs in created] == [torch.float16, torch.bfloat16]
+
+
+@pytest.mark.parametrize(
+    ("accelerator", "version", "cudnn", "warns"),
+    [
+        ("cuda", "2.9.1+cu128", 91002, True),
+        ("cuda", "2.9.0", 91002, True),
+        ("cuda", "2.10.0a0+git", 91200, True),
+        ("cuda", "2.9.1+cu128", 92801, False),
+        ("cuda", "2.9.1+cu128", 91500, False),
+        ("cuda", "2.8.0+cu128", 91002, False),
+        ("cuda", "2.9.1+cu128", None, False),
+        ("rocm", "2.9.1+rocm6.4", 91002, False),
+        ("cpu", "2.9.1", None, False),
+    ],
+)
+def test_slow_half_precision_warning(monkeypatch, accelerator, version, cudnn, warns) -> None:
+    """Warn only for PyTorch 2.9 or newer on CUDA with cuDNN older than 9.15."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: accelerator)
+    monkeypatch.setattr(torch, "__version__", version)
+    monkeypatch.setattr(torch.backends.cudnn, "version", lambda: cudnn)
+    monkeypatch.setattr(torch.version, "cuda", "12.8", raising=False)
+    warning = hardware.slow_half_precision_warning()
+    assert (warning is not None) == warns
+    if warns:
+        assert 'pip install -U "nvidia-cudnn-cu12>=9.15"' in warning
+
+
+def test_slow_half_precision_warning_names_cuda_13_package(monkeypatch) -> None:
+    """CUDA 13 builds need the cu13 cuDNN package."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
+    monkeypatch.setattr(torch, "__version__", "2.9.1+cu130")
+    monkeypatch.setattr(torch.backends.cudnn, "version", lambda: 91300)
+    monkeypatch.setattr(torch.version, "cuda", "13.0", raising=False)
+    assert "nvidia-cudnn-cu13>=9.15" in hardware.slow_half_precision_warning()
+
+
+def test_slow_half_precision_warning_survives_cudnn_error(monkeypatch) -> None:
+    """A cuDNN that refuses the GPU gives no warning instead of an error."""
+    monkeypatch.setattr(hardware, "get_accelerator_type", lambda: "cuda")
+    monkeypatch.setattr(torch, "__version__", "2.9.1+cu128")
+
+    def _refuse():
+        raise RuntimeError("cuDNN version 91500 is not compatible with devices with SM < 7.5.")
+
+    monkeypatch.setattr(torch.backends.cudnn, "version", _refuse)
+    assert hardware.slow_half_precision_warning() is None

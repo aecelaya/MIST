@@ -23,50 +23,14 @@ a configuration file for when you need more control.
 
 ## Installation
 
-**CPU** (default — runs the full pipeline: train, predict, evaluate,
-everything):
-
 ```bash
 pip install mist-medical
 ```
 
-**NVIDIA GPU** (recommended — adds DALI-accelerated data loading):
-
-```bash
-pip install "mist-medical[dali]"
-```
-
-<!-- prettier-ignore -->
-> [!NOTE]
-> Upgrading from an older MIST release? `pip install "mist-medical[train]"`
-> still works too — it's kept as an identical alias for `[dali]`, so nothing
-> in an existing script or notebook breaks.
-
-**AMD ROCm GPU** (install a ROCm-enabled PyTorch build first — PyPI's default
-`torch` wheel has no ROCm support — matching your driver's ROCm version, then
-MIST on top with no extra needed; see
-[Accelerator support](https://mist-medical.readthedocs.io/en/latest/advanced_topics/#accelerator-support-nvidia-amd-rocm-cpu)
-for details):
-
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/rocm6.4
-pip install mist-medical
-```
-
-**Development**:
-
-```bash
-git clone https://github.com/mist-medical/MIST.git
-cd MIST
-pip install -e .            # CPU
-pip install -e ".[dali]"    # NVIDIA GPU acceleration (recommended on CUDA)
-```
-
-**Docker** (NVIDIA GPU required, driver ≥ 525.x):
-
-```bash
-docker pull mistmedical/mist:latest
-```
+This works on CPUs and NVIDIA GPUs. For AMD GPUs, install a ROCm build of
+PyTorch first (see [Accelerator support](https://mist-medical.readthedocs.io/en/latest/advanced_topics/#accelerator-support-nvidia-amd-rocm-cpu)).
+Docker: `docker pull mistmedical/mist:latest`. Upgrading from 2.x? See
+[Upgrading to 3.0](https://mist-medical.readthedocs.io/en/latest/upgrading/).
 
 ## Quick Start
 
@@ -109,34 +73,33 @@ mist_predict --models-dir /path/to/results/models \
 
 ## Key Features
 
-- **Automatic configuration** — analysis step determines target spacing, patch
-  size, normalization, and foreground cropping from your data
+- **Automatic configuration** — analysis chooses target spacing,
+  normalization, and foreground cropping from your data; the first training run
+  chooses patch size, batch size, and precision for the GPU
 - **Five-fold cross-validation** by default, with custom fold assignment support
 - **Multi-GPU training** via PyTorch DDP on NVIDIA CUDA or AMD ROCm; uses all
   visible GPUs automatically
-- **GPU-accelerated data loading** via NVIDIA DALI during training, with a
-  generic CPU-based data loader used automatically on AMD ROCm or CPU-only
-  hardware — no NVIDIA-specific dependencies required to train at all
+- **Fast data loading** that reads only each training patch, with augmentation
+  on the GPU — on NVIDIA, AMD ROCm, or CPU-only hardware, with no
+  NVIDIA-specific dependencies
 - **Sliding window inference** with configurable overlap and patch blending
 - **Test-time augmentation** and **multi-model ensembling** at inference
-- **Postprocessing** with learnable, per-class morphological strategies
+- **Postprocessing** with per-class morphological strategies defined in JSON
 - **CPU training and inference** — the full pipeline, `mist_train` included,
   runs on any machine, including Macs and laptops without an NVIDIA GPU
 
 ## Supported Architectures
 
-| Model                                    | Key                                                                    |
-| ---------------------------------------- | ---------------------------------------------------------------------- |
-| nnU-Net (default)                        | `nnunet-plain`                                                         |
-| nnU-Net Residual                         | `nnunet-res`, `nnunet`                                                 |
-| nnU-Net Pocket                           | `nnunet-pocket`                                                        |
-| ResEnc UNet                              | `resenc`                                                               |
-| Primus (medium / large / X)              | `primus-medium`, `primus-large`, `primus-x`                            |
-| PrimusV2 (small / base / medium / large) | `primusv2-small`, `primusv2-base`, `primusv2-medium`, `primusv2-large` |
-| MedNeXt (small / base / medium / large)  | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`     |
-| FMG-Net                                  | `fmgnet`                                                               |
-| W-Net                                    | `wnet`                                                                 |
-| Swin UNETR (small / base / large)        | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                 |
+| Model        | Variants                                                                 |
+| ------------ | ------------------------------------------------------------------------ |
+| nnU-Net      | `nnunet-plain` (default), `nnunet-res` (alias `nnunet`), `nnunet-pocket` |
+| ResEnc UNet  | `resenc`, `resenc-pocket`                                                |
+| MedNeXt      | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`       |
+| SwinUNETR-V2 | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                   |
+| Primus       | `primus-medium`, `primus-large`, `primus-x`                              |
+| PrimusV2     | `primusv2-small`, `primusv2-base`, `primusv2-medium`, `primusv2-large`   |
+| FMG-Net      | `fmgnet`                                                                 |
+| W-Net        | `wnet`                                                                   |
 
 Change the architecture in `config.json` or pass `--model <key>` at the command
 line.
@@ -182,6 +145,13 @@ Full documentation, including configuration reference and advanced topics, is at
 
 ## What's New
 
+- November 2026 — **MIST 3.0** (release candidate) — NVIDIA DALI is gone, and
+  MIST's own data loader is the only one, on NVIDIA, AMD, and CPU machines. It
+  trained full LiTS in 13 s per epoch on an H100, against 67 s with DALI.
+  Planning at training time, FP16, nnU-Net-style augmentation, and the new
+  default `nnunet-plain` come from 2.5.0rc0. Models trained with 2.x keep
+  working; see
+  [Upgrading to 3.0](https://mist-medical.readthedocs.io/en/latest/upgrading/).
 - November 2026 — **MIST 2.4.0** — new ResEnc UNet (`resenc`), Primus, and
   PrimusV2 architectures, and fine-tuning from the openly available
   nnFoundationCNN and nnFoundationViT pretrained encoders with
@@ -190,9 +160,6 @@ Full documentation, including configuration reference and advanced topics, is at
 - October 2026 — **MIST 2.3.0, the first stable release** — CPU and AMD ROCm
   training, `mist_finalize` for per-fold distributed training, probability-level
   and parallel ensembling, and no more ANTs dependency.
-  `pip install --upgrade mist-medical`, or
-  `pip install --upgrade "mist-medical[dali]"` for DALI-accelerated data loading
-  on NVIDIA GPUs (highly recommended).
 - July 2026 — **Interactive Colab demo** — run the full pipeline on a free Colab
   GPU with the
   [heart segmentation notebook](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_heart_demo.ipynb).

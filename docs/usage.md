@@ -17,17 +17,29 @@ consists of three main stages:
 3. **Training** – Trains models on the preprocessed data using five-fold cross
    validation, producing a set of models for inference.
 
-MIST also provides auxiliary commands for **postprocessing**, **test-time
-prediction**, **evaluation**, and **dataset conversion**.
+MIST also provides commands for **inference**, **ensembling**,
+**postprocessing**, **evaluation**, **ranking**, and **dataset conversion**.
 
 ## Running the full pipeline
 
-To run the entire pipeline with default arguments, use the `mist_run_all`
-command:
+`mist_run_all` runs `mist_analyze`, `mist_preprocess`, and `mist_train` in
+order:
 
 - `--data` (**required**): Path to your dataset JSON file.
-- `--numpy`: Path to save preprocessed NumPy files. _(default: `./numpy`)_
-- `--results`: Path to save pipeline outputs. _(default: `./results`)_
+- `--numpy` (**required**): Path to save preprocessed NumPy files.
+- `--results` (**required**): Path to save pipeline outputs.
+
+It also passes on these flags from the three commands below: `--nfolds`,
+`--num-workers-analyze`, `--verify`, `--num-workers-preprocess`,
+`--no-preprocess`, `--compute-dtms`, `--model`, `--patch-size`, `--loss`,
+`--composite-loss-weighting`, `--epochs`, `--warmup-epochs`,
+`--batch-size-per-gpu`, `--learning-rate`, `--lr-scheduler`, `--optimizer`,
+`--l2-penalty`, `--folds`, `--num-workers-evaluate`, `--val-percent`,
+`--validate-every`, `--pretrained-weights`, `--pretrained-config`,
+`--input-channel-strategy`, and `--overwrite`.
+
+`mist_run_all` doesn't accept `--resume`, because it reruns the analysis. To
+continue an interrupted run, use `mist_train --resume`.
 
 !!! note
 
@@ -48,7 +60,7 @@ See below for more details about each command and how to run them individually.
 
 ## Output
 
-The output of the MIST pipeline is stored under the `./results` directory, with
+The output of the MIST pipeline is stored in the `--results` directory, with
 the following structure:
 
 ```text
@@ -94,21 +106,16 @@ Run analysis alone with the `mist_analyze` command. This command has the
 following arguments:
 
 - `--data` (**required**): Path to your dataset JSON file.
-- `--results`: Directory to save analysis outputs. _(default: `./results`)_
+- `--results` (**required**): Directory to save analysis outputs.
 - `--nfolds`: How many folds to split the dataset into. _(default: 5)_
 - `--num-workers-analyze`: Number of parallel workers for dataset analysis.
   _(default: 1)_
 - `--verify`: Verify dataset integrity before analysis (checks headers,
   dimensions, and that all declared files are present).
-- `--overwrite`: Overwrite previous results/configuration.
+- `--overwrite`: Overwrite an existing `config.json`. Without it,
+  `mist_analyze` stops if one exists.
 
-!!! note
-
-    Paths in the dataset JSON file (i.e., `train-data` and `test-data`) can be
-    absolute or relative. Relative paths are resolved relative to the **location
-    of the JSON file itself**, so the JSON and its data can be moved to a
-    different location or machine without editing the paths, as long as their
-    relative structure is preserved.
+See [Data Format](getting_started.md#data-format) for the dataset JSON.
 
 ### Example
 
@@ -131,8 +138,8 @@ analysis step.
 To run the preprocessing portion of the MIST pipeline only, use the
 `mist_preprocess` command. This command has the following arguments:
 
-- `--results`: Path to the output of the analysis step. _(default: `./results`)_
-- `--numpy`: Path to save the preprocessed NumPy files. _(default: `./numpy`)_
+- `--results` (**required**): Path to the output of the analysis step.
+- `--numpy` (**required**): Path to save the preprocessed NumPy files.
 - `--num-workers-preprocess`: Number of parallel workers for preprocessing.
   _(default: 1)_
 - `--compute-dtms`: Compute per-class Distance Transform Maps (DTMs) from ground
@@ -140,7 +147,8 @@ To run the preprocessing portion of the MIST pipeline only, use the
   boundary and are required by certain loss functions (`bl`, `hdos`, `gsl`).
 - `--no-preprocess`: Skip preprocessing steps and only convert raw NIfTI files
   into NumPy format.
-- `--overwrite`: Overwrite previous preprocessing output.
+- `--overwrite`: Write into a `--numpy` folder that already has files. Without
+  it, `mist_preprocess` stops.
 
 !!! note
 
@@ -151,10 +159,13 @@ To run the preprocessing portion of the MIST pipeline only, use the
     `--compute-dtms` is also passed.
 
 The output folder has `images`, `labels`, and, with `--compute-dtms`, `dtms`
-folders of NumPy arrays, one per case. Data preprocessed before MIST 2.4.1 stores
-labels in a layout that makes the DALI loader much slower on large images;
-training still works, but warns, and runs faster after `mist_preprocess` is run
-again.
+folders of NumPy arrays, one per case. It also has a `foreground` folder with the
+locations of each label class in each case, which training uses to center patches
+on foreground without scanning every label. Data preprocessed by MIST 2.x
+(including 2.5.0rc0) lacks this folder, and data from 2.4.0 or earlier also
+stores labels in a slower layout. Training still works, but warns, and runs
+faster after `mist_preprocess` is run again (see
+[Upgrading to 3.0](upgrading.md)).
 
 ### Example
 
@@ -172,14 +183,16 @@ The next step in the MIST pipeline is to take the preprocessed data and train
 models using a cross validation scheme. Training produces a set of models that
 can later be used for inference or ensemble prediction.
 
-To run the training stage only, use the `mist_train` command. This command has
-the following arguments:
+To run the training stage only, use the `mist_train` command. Flags that change
+training settings also save the new value to `config.json`. Defaults below are
+those of a new `config.json`; without the flag, `mist_train` uses whatever the
+config says. This command has the following arguments:
 
-- `--numpy`: Path to the preprocessed NumPy data. _(default: `./numpy`)_
-- `--results`: Path to save training outputs (models, logs, predictions, etc.).
-  _(default: `./results`)_. This should also contain the output of the analysis
-  pipeline.
-- `--overwrite`: Overwrite previous configuration/results.
+- `--numpy` (**required**): Path to the preprocessed NumPy data.
+- `--results` (**required**): Path to the output of the analysis step, where
+  training writes models, logs, and predictions.
+- `--overwrite`: Train even if `results.csv` already exists. Without it,
+  `mist_train` stops.
 
 **Hardware:**
 
@@ -197,26 +210,30 @@ the following arguments:
 **Model:**
 
 - `--model`: Network architecture. _(default: `nnunet-plain`)_
-- `--patch-size`: Patch size as three integers: `X Y Z`. This will overwrite the
-  choice of patch size determined by the analysis pipeline.
+- `--patch-size`: Patch size as three integers: `X Y Z`. Replaces the planned
+  patch size (see
+  [Patch and batch size selection](advanced_topics.md#patch-and-batch-size-selection)).
 
 **Loss function:**
 
 - `--loss`: Loss function for training. _(default: `dice_ce`)_
-- `--composite-loss-weighting`: Weighting schedule for composite losses.
-  _(default: `None`)_
+- `--composite-loss-weighting`: Weighting schedule for composite losses:
+  `constant`, `linear`, or `cosine`. _(default: none)_
 
 **Training loop:**
 
 - `--epochs`: Number of epochs per fold. _(default: `1000`)_
-- `--batch-size-per-gpu`: Batch size per GPU worker. _(default: `2`)_
+- `--batch-size-per-gpu`: Batch size per GPU. _(default: planned at the first
+  `mist_train`)_
 - `--learning-rate`: Initial learning rate. _(default: `0.001`)_
-- `--lr-scheduler`: Learning rate scheduler _(default: `cosine`)_.
+- `--lr-scheduler`: `cosine`, `polynomial`, or `constant`. _(default:
+  `cosine`)_
 - `--warmup-epochs`: Number of linear warmup epochs before the main LR schedule
   begins. _(default: `20`)_
-- `--optimizer`: Optimizer _(default: `adamw`)_.
+- `--optimizer`: `adamw`, `adam`, or `sgd`. _(default: `adamw`)_
 - `--l2-penalty`: L2 penalty (weight decay). _(default: `0.0001`)_
-- `--folds`: Specify which folds to run. If not provided, all folds are trained.
+- `--folds`: Which folds to train, e.g. `--folds 0 1`. If not provided, all
+  folds are trained.
 - `--val-percent`: Percentage of each fold's training data to set aside as a
   validation set. If above `0.0`, the model with the lowest smoothed validation
   loss is saved; otherwise, the held-out fold is used for validation and the
@@ -264,11 +281,11 @@ mist_train --numpy /path/to/preprocessed/data \
 ```
 
 At the end of the training loop, MIST will run inference on the held out fold
-and write the predictions to `./results/predictions/train/raw`. If this
+and write the predictions to `predictions/train/raw` in `--results`. If this
 invocation trained every configured fold (the default, and the case in the
 example above), it then evaluates the results with the metrics specified in the
 `evaluation` entry of the configuration file, saving the computed metrics to
-`./results/results.csv`. If `--folds` was used to train only a subset of the
+`results.csv` in `--results`. If `--folds` was used to train only a subset of the
 folds (e.g. one fold per node on an HPC cluster), this step is skipped instead —
 see [Finalizing a distributed run](#finalizing-a-distributed-run) below.
 
@@ -325,8 +342,8 @@ for the full workflow.
 
 The `mist_finalize` command takes the following arguments:
 
-- `--results`: Path to the MIST results directory shared by every per-fold job.
-  _(default: `./results`)_
+- `--results` (**required**): Path to the MIST results directory shared by every
+  per-fold job.
 - `--num-workers-evaluate`: Number of parallel workers for evaluation.
   _(default: `1`)_
 - `--device`: Device for held-out test-set inference (ignored if no test set is
@@ -338,18 +355,15 @@ The `mist_finalize` command takes the following arguments:
 mist_finalize --results /shared/results --num-workers-evaluate 4
 ```
 
-`mist_finalize` is safe to re-run: each run recomputes `results.csv` (and
-test-set predictions, if configured) from whatever is currently in the results
-directory, rather than depending on state from a previous run. If any configured
-fold is still missing a saved model when it runs, it prints a warning naming the
-missing fold(s) rather than silently producing partial results.
+`mist_finalize` is safe to re-run. If a fold is still missing its model, it
+warns and names the fold.
 
 ## Averaging Model Weights
 
-`mist_average_weights` averages the weights from multiple fold checkpoints
-produced by `mist_train` into a single checkpoint by element-wise averaging.
-Averaged weights generalize better than any single fold model and are the
-recommended input for `--pretrained-weights` when using transfer learning.
+`mist_average_weights` averages the weights of several fold models into one
+checkpoint. Use it to make a single starting point for `--pretrained-weights`
+(see [Transfer learning](advanced_topics.md#transfer-learning)). It isn't used
+for inference: `mist_predict` ensembles the fold models in `models/` directly.
 
 The `mist_average_weights` command takes the following arguments:
 
@@ -380,15 +394,18 @@ The main MIST pipeline is responsible for training and evaluating models. The
 
 The `mist_predict` command uses the following arguments:
 
-- `--models-dir`: (**required**) Path to the `./results/models` directory.
-- `--config`: (**required**) Path to the `./results/config.json` file.
+- `--models-dir`: (**required**) Path to the `models` directory in your results
+  folder.
+- `--config`: (**required**) Path to the `config.json` file in your results
+  folder.
 - `--paths-csv`: (**required**) Path to CSV file containing patient IDs and
   paths to imaging data. Must have an `id` column and one column per image type
   matching the dataset's image keys (e.g., `t1`, `t2`). See the table below for
   the required format.
 - `--output`: (**required**) Path to directory containing predictions.
 - `--device`: Device to run inference with. This can be `cpu`, `cuda`, or the
-  integer ID of a specific GPU (i.e., `1`). _(default: `cuda`)_.
+  integer ID of a specific GPU (i.e., `1`). `cuda` also means an AMD ROCm GPU.
+  If the GPU isn't available, MIST warns and uses the CPU. _(default: `cuda`)_
 - `--postprocess-strategy`: Path to postprocessing strategy JSON file. See below
   for more details on defining postprocessing strategies in MIST.
 - `--output-probs`: If set, also write each patient's final (post

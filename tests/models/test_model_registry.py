@@ -24,7 +24,7 @@ def clear_registry():
     tests/data_loading/test_data_loader_registry.py's clear_registry) left
     list_registered_models() empty for any test running afterward in the
     same session, which is exactly the trap
-    tests/regression/cpu_rocm/test_stage4_cpu_end_to_end.py fell into: its
+    tests/integration/test_cpu_end_to_end.py fell into: its
     real `mist_train --model nnunet-pocket` CLI parse failed with
     "invalid choice: 'nnunet-pocket' (choose from )" whenever this file's
     tests happened to run first.

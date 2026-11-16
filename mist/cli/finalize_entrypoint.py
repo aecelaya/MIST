@@ -53,7 +53,7 @@ def _parse_finalize_args(argv: list[str] | None = None) -> argparse.Namespace:
             "each node runs `mist_train --folds i`)."
         ),
     )
-    parser.arg("--results", type=str, help="Path to output of the MIST pipeline.")
+    parser.arg("--results", type=str, required=True, help="Path to output of the MIST pipeline.")
     parser.arg(
         "--num-workers-evaluate",
         type=argmod.positive_int,
@@ -70,11 +70,7 @@ def _parse_finalize_args(argv: list[str] | None = None) -> argparse.Namespace:
             "a CUDA index like '0'."
         ),
     )
-    ns = parser.parse_args(argv)
-
-    if not ns.results:
-        ns.results = str(Path("./results").expanduser().resolve())
-    return ns
+    return parser.parse_args(argv)
 
 
 def _check_folds_complete(results_dir: Path, config: dict) -> None:

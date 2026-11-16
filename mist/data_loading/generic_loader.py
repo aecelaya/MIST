@@ -1,29 +1,18 @@
-"""Generic, accelerator-agnostic data loader for MIST.
+"""MIST's data loader, for CPU, NVIDIA, and AMD ROCm machines.
 
-`dali_loader.py` requires an NVIDIA GPU (`nvidia-dali-cuda120`), so it can't
-run on CPU-only or AMD ROCm hardware. This module is the CPU/ROCm-friendly
-alternative: it runs entirely on the CPU (NumPy for patch extraction,
-`torch.utils.data.Dataset`/`DataLoader` for batching and worker-process
-parallelism) and hands a finished batch off to the target accelerator only
-once, inside `.next()`.
+It runs on the CPU (NumPy for patch extraction, `torch.utils.data.Dataset`/
+`DataLoader` for batching and worker-process parallelism) and hands a finished
+batch to the target accelerator only once, inside `.next()`.
 
-`get_training_dataset`/`get_validation_dataset`/`get_test_dataset` match
-`dali_loader.py`'s signatures and its `.next()`/`.reset()` iterator contract
-exactly -- `.next()` returns `[{"image": ..., "label": ..., "dtm": ...}]`
-already on the target device, and `.reset()` starts a fresh pass -- so
-nothing downstream (`patch_3d_trainer.py`, `inference_runners.py`) needs to
-know or care which loader backend is active. See `cpu_rocm_support_plan.md`
-Stages 2-3.
+`get_training_dataset`/`get_validation_dataset`/`get_test_dataset` return
+iterators with a `.next()`/`.reset()` contract: `.next()` returns
+`[{"image": ..., "label": ..., "dtm": ...}]` already on the target device, and
+`.reset()` marks an epoch boundary. `patch_3d_trainer.py` and
+`inference_runners.py` use only that contract.
 
-This is deliberately *not* a byte-for-byte reimplementation of DALI's
-pipeline. Patch extraction and foreground-oversampled patch placement are
-careful approximations of `dali_loader.py`'s `random_object_bbox`/
-`roi_random_crop` combination -- matching the same foreground-sampling
-*rate*, not the same RNG stream or connected-component-object semantics,
-since the two loaders were never going to share an RNG stream anyway (see
-`cpu_rocm_support_plan.md`'s Stage 2 release gate: a statistical, not
-exact-match, equivalence check). For the same reason, patch placement here
-uses a fresh, unseeded `numpy.random.Generator` per `__getitem__` call rather
+With probability `oversampling`, a training patch is centered on a voxel of a
+foreground class chosen uniformly among the classes present, so small classes
+are sampled as often as large ones. Patch placement uses a fresh, unseeded `numpy.random.Generator` per `__getitem__` call rather
 than one seeded from `training.seed`: a `DataLoader` with `num_workers > 0`
 forks/spawns separate worker processes, and a single `Generator` seeded once
 in the parent would otherwise be copied into every worker with identical
@@ -31,14 +20,14 @@ state, making all of them draw the same "random" sequence independently.
 `training.seed` still governs the (much simpler, single-process) shuffling
 of case order between epochs, which doesn't have that pitfall.
 
-Augmentation is not done here: like dali_loader.py, this loader only
-extracts patches (enlarged by `patch_margin` when rotation or scaling is
-enabled), and mist.data_loading.augmentation augments each batch in PyTorch
-on the training device, so both loaders share one implementation.
+Augmentation is not done here: this loader only extracts patches (enlarged by
+`patch_margin` when rotation or scaling is enabled), and
+mist.data_loading.augmentation augments each batch in PyTorch on the training
+device.
 
 Every `DataLoader` built here with `num_workers > 0` explicitly requests
 the "fork" multiprocessing context (see `_multiprocessing_context()`).
-Found necessary during Stage 4's real end-to-end CPU run: on macOS, whose
+Found necessary during a real end-to-end CPU run: on macOS, whose
 default start method is "spawn", a real `mist_train` process that had used
 any multi-worker `DataLoader` here would hang *indefinitely* at interpreter
 shutdown -- confirmed via a stack sample showing the main thread stuck in
@@ -50,14 +39,23 @@ worker parallelism.
 """
 
 import platform
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset, Sampler, default_collate
 
+from mist.preprocessing import foreground_locations
 from mist.utils import hardware
+
+# Training patches that run past the image edge are sent as only the part inside
+# the image, and padded with zeros on the training device. Patches enlarged for
+# spatial augmentation are often mostly padding on small images, such as BraTS,
+# and each sent byte is copied in the main process before it reaches the device.
+# False pads in the workers instead, as before 2.5.0; it's here for comparison.
+_PAD_ON_DEVICE = True
 
 # Validation and test loaders read whole volumes, which for LiTS-sized images
 # are about 600 MiB each, image and label. Every volume a worker reads ahead sits
@@ -66,13 +64,6 @@ from mist.utils import hardware
 # workers keep up.
 _FULL_VOLUME_MAX_WORKERS = 2
 _FULL_VOLUME_PREFETCH = 1
-
-# Deliberately not imported from data_loading_utils.py: that module imports
-# nvidia.dali at the top for its DALI-graph-building helpers, so importing it
-# here would defeat the entire point of this module (running without DALI
-# installed). This is the same validation dali_loader.py's pipelines run via
-# data_loading_utils.validate_train_and_eval_inputs, just duplicated instead
-# of shared to keep this module import-safe with no NVIDIA/DALI dependency.
 
 
 def _validate_train_and_eval_inputs(
@@ -161,10 +152,8 @@ def _full_volume_workers(num_workers: int) -> dict[str, Any]:
 def _target_device(rank: int) -> torch.device:
     """Resolve the device .next() should move a finished batch to.
 
-    Mirrors dali_loader.py's device_id=rank convention. Delegates to
-    hardware.get_device_for_rank() (added in Stage 4 once base_trainer.py
-    needed the identical logic at its own model.to()/tensor-device call
-    sites) rather than duplicating it here.
+    Delegates to hardware.get_device_for_rank(), which base_trainer.py also
+    uses for its model and tensors, rather than duplicating it here.
     """
     return hardware.get_device_for_rank(rank)
 
@@ -192,16 +181,15 @@ def _load_case(path: str) -> np.ndarray:
     for any file read, unlike an app-level cache that would just keep
     growing). This matters a lot here: `_PatchTrainingDataset` calls this
     once per patch drawn, and MIST's epochs are step-count-based
-    (`min_steps_per_epoch`), not dataset-length-based (`GenericIterator`
-    auto-restarts the underlying `DataLoader` iterator on `StopIteration`),
+    (`min_steps_per_epoch`), not dataset-length-based (the training
+    `DataLoader` cycles through the cases endlessly),
     so on any dataset where `steps_per_epoch * batch_size` exceeds the case
     count -- true for most real training runs -- the same case's full
     volume gets reloaded from scratch many times within a single epoch. A
     plain `np.load()` pays that cost in full every time; mmap only pages in
     the bytes actually touched, which for `_extract_patch`'s final crop
-    (`image[slices]`) is roughly the patch's own size, not the whole
-    volume, whenever no padding is needed (the common case -- see
-    `_pad_to_roi`). Confirmed as the real bottleneck, not a CPU/worker-count
+    is roughly the patch's own size, not the whole volume (see
+    `_slice_with_padding`). Confirmed as the real bottleneck, not a CPU/worker-count
     one, on a real 2x A100 run: doubling `num_cpu_workers` (8 -> 16) made no
     difference, which rules out augmentation-compute throughput and points
     at disk read throughput instead.
@@ -214,19 +202,6 @@ def _load_case(path: str) -> np.ndarray:
     hits an in-place write anywhere in this pipeline.
     """
     return np.load(path, mmap_mode="r")
-
-
-def _pad_to_roi(array: np.ndarray, roi_size: tuple[int, int, int]) -> np.ndarray:
-    """Zero-pad the spatial (first 3) axes of a (D, H, W, C) array to roi_size.
-
-    Matches dali_loader.py's `fn.pad(image, axes=(0, 1, 2), shape=roi_size)`:
-    a no-op on any axis already >= the corresponding roi_size entry.
-    """
-    pad_widths = [(0, max(0, roi - array.shape[axis])) for axis, roi in enumerate(roi_size)]
-    pad_widths.append((0, 0))  # Channel axis is never padded.
-    if all(width == (0, 0) for width in pad_widths):
-        return array
-    return np.pad(array, pad_widths, mode="constant", constant_values=0)
 
 
 def _random_anchor(
@@ -251,14 +226,13 @@ def _random_anchor(
 
 
 def _foreground_anchor_center(
-    label: np.ndarray,
+    locations: dict[int | None, np.ndarray],
     labels: Sequence[int],
     rng: np.random.Generator,
 ) -> tuple[int, int, int] | None:
     """Pick a random foreground voxel's (d, h, w) coordinate to center on.
 
-    Mirrors dali_loader.py's equal per-class weighting (its label_weights =
-    [1 / len(labels)] * len(labels)): shuffle the foreground classes into a
+    Weights each foreground class equally: shuffle the foreground classes into a
     random order, then return a random voxel of the first one actually
     present in this example. Falls back to any nonzero voxel if none of the
     configured classes are present, and to None (caller falls back to a
@@ -266,15 +240,10 @@ def _foreground_anchor_center(
     """
     class_order = list(labels)
     rng.shuffle(class_order)
-    label_channel = label[..., 0]
-    for class_id in class_order:
-        coords = np.argwhere(label_channel == class_id)
-        if coords.size:
+    for class_id in [*class_order, None]:
+        coords = locations.get(class_id)
+        if coords is not None:
             return tuple(int(c) for c in coords[rng.integers(0, coords.shape[0])])
-
-    coords = np.argwhere(label_channel != 0)
-    if coords.size:
-        return tuple(int(c) for c in coords[rng.integers(0, coords.shape[0])])
     return None
 
 
@@ -285,56 +254,124 @@ def _slice_with_padding(
 ) -> np.ndarray:
     """Slice a (D, H, W, C) array, zero-padding any part outside its bounds.
 
-    Matches dali_loader.py's `fn.slice(..., out_of_bounds_policy="pad")`.
+    Only the part of the slice inside the array is read, so a memory-mapped case is
+    not loaded in full just because a patch runs past its edge.
     """
-    before = [max(0, -start) for start in starts]
-    after = [
-        max(0, start + size - dim)
-        for start, size, dim in zip(starts, shape, array.shape[:3], strict=True)
-    ]
-    if any(before) or any(after):
-        array = np.pad(
-            array,
-            [*zip(before, after, strict=True), (0, 0)],
-            mode="constant",
-            constant_values=0,
-        )
-    return array[
-        tuple(
-            slice(start + pad, start + pad + size)
-            for start, pad, size in zip(starts, before, shape, strict=True)
-        )
-    ]
+    inside = []
+    target = []
+    for start, size, dim in zip(starts, shape, array.shape[:3], strict=True):
+        low = min(max(0, start), dim)
+        high = max(min(dim, start + size), low)
+        inside.append(slice(low, high))
+        target.append(slice(low - start, low - start + high - low))
+
+    inside = tuple(inside)
+    if tuple(s.stop - s.start for s in inside) == tuple(shape):
+        return array[inside]
+
+    patch = np.zeros((*shape, array.shape[-1]), dtype=array.dtype)
+    patch[tuple(target)] = array[inside]
+    return patch
 
 
-def _extract_patch(
-    image: np.ndarray,
+def _slice_inside(
+    array: np.ndarray,
+    starts: Sequence[int],
+    shape: Sequence[int],
+) -> tuple[np.ndarray, list[tuple[int, int]]]:
+    """Slice the part of a (D, H, W, C) patch inside the array, and say how to pad it.
+
+    Padding the result with zeros by the returned amounts gives exactly what
+    _slice_with_padding returns, without making the padding here.
+
+    Returns:
+        The slice inside the array, and (before, after) zero padding per axis.
+    """
+    inside = []
+    pad = []
+    for start, size, dim in zip(starts, shape, array.shape[:3], strict=True):
+        low = min(max(0, start), dim)
+        high = max(min(dim, start + size), low)
+        inside.append(slice(low, high))
+        # A patch wholly outside the array along an axis is all padding.
+        before = min(max(low - start, 0), size - (high - low))
+        pad.append((before, size - before - (high - low)))
+    return array[tuple(inside)], pad
+
+
+def _read_inside(
+    array: np.ndarray,
+    starts: Sequence[int],
+    shape: Sequence[int],
+) -> tuple[np.ndarray, list[tuple[int, int]]]:
+    """Read the part of a (D, H, W, C) patch inside a memory-mapped array.
+
+    Gives the same result as _slice_inside, but reads the file with one
+    positioned read per position along the first axis instead of copying
+    through the memory map. Each read covers the patch's rows of the second axis
+    in full, a contiguous block, and the third axis is cut afterward. Copying
+    through the memory map turns a patch into tens of thousands of page faults,
+    which on network filesystems such as NFS made LiTS-sized patches take
+    seconds; a few hundred large reads don't. Arrays that aren't a C-ordered
+    memory map (Fortran-order labels from before 2.5.0, or in-memory arrays)
+    are sliced as before.
+
+    Returns:
+        The slice inside the array, as a new in-memory array, and (before,
+        after) zero padding per axis.
+    """
+    view, pad = _slice_inside(array, starts, shape)
+    if not (
+        isinstance(array, np.memmap)
+        and array.filename
+        and array.ndim == 4
+        and array.flags["C_CONTIGUOUS"]
+        and view.size
+    ):
+        return np.array(view), pad
+
+    depth, rows, cols = view.shape[:3]
+    _, height, width, channels = array.shape
+    d0 = int(np.clip(starts[0], 0, array.shape[0]))
+    h0 = int(np.clip(starts[1], 0, height))
+    w0 = int(np.clip(starts[2], 0, width))
+    row_bytes = width * channels * array.itemsize
+    block = np.empty((depth, rows, width, channels), dtype=array.dtype)
+    with open(array.filename, "rb", buffering=0) as file:
+        for i in range(depth):
+            file.seek(array.offset + ((d0 + i) * height + h0) * row_bytes)
+            target = memoryview(block[i]).cast("B")
+            done = 0
+            while done < len(target):  # A read may return fewer bytes than asked.
+                count = file.readinto(target[done:])
+                if not count:
+                    raise OSError(f"Unexpected end of file reading {array.filename}.")
+                done += count
+    return block[:, :, w0 : w0 + cols], pad
+
+
+def _pad_on_device(array: torch.Tensor, pad: torch.Tensor) -> torch.Tensor:
+    """Zero-pad a (C, D, H, W) tensor by (before, after) amounts per spatial axis."""
+    widths = [int(amount) for axis in reversed(range(3)) for amount in pad[axis]]
+    return F.pad(array, widths) if any(widths) else array
+
+
+def _patch_window(
     label: np.ndarray,
-    dtm: np.ndarray | None,
     roi_size: tuple[int, int, int],
     labels: list[int] | None,
     oversampling: float | None,
     rng: np.random.Generator,
-    patch_margin: tuple[int, int, int] = (0, 0, 0),
-) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-    """Extract one (D, H, W, C)-shaped patch, foreground-oversampled.
-
-    Approximates dali_loader.py's biased_crop_fn: pads up to roi_size, then
-    -- with probability `oversampling` -- centers the crop on a random
-    foreground voxel (falling back to a plain random crop if the example has
-    no foreground at all); otherwise the crop is placed uniformly at random.
-    See the module docstring for why this matches DALI statistically, not
-    exactly. The crop is then extended by `patch_margin` voxels on each side
-    (zero-padded where it leaves the image), keeping the same center.
-    """
-    image = _pad_to_roi(image, roi_size)
-    label = _pad_to_roi(label, roi_size)
-    if dtm is not None:
-        dtm = _pad_to_roi(dtm, roi_size)
-
+    patch_margin: tuple[int, int, int],
+    get_locations: Callable[[], dict[int | None, np.ndarray]] | None,
+) -> tuple[list[int], list[int]]:
+    """Choose where a patch starts and its shape, including the margin."""
     center = None
     if labels and oversampling and rng.random() < oversampling:
-        center = _foreground_anchor_center(label, labels, rng)
+        locations = (
+            get_locations() if get_locations else foreground_locations.find(label, labels, rng)
+        )
+        center = _foreground_anchor_center(locations, labels, rng)
 
     anchors = [
         _random_anchor(
@@ -347,7 +384,34 @@ def _extract_patch(
     ]
     starts = [anchor - margin for anchor, margin in zip(anchors, patch_margin, strict=True)]
     shape = [roi + 2 * margin for roi, margin in zip(roi_size, patch_margin, strict=True)]
+    return starts, shape
 
+
+def _extract_patch(
+    image: np.ndarray,
+    label: np.ndarray,
+    dtm: np.ndarray | None,
+    roi_size: tuple[int, int, int],
+    labels: list[int] | None,
+    oversampling: float | None,
+    rng: np.random.Generator,
+    patch_margin: tuple[int, int, int] = (0, 0, 0),
+    get_locations: Callable[[], dict[int | None, np.ndarray]] | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Extract one (D, H, W, C)-shaped patch, foreground-oversampled.
+
+    With probability `oversampling`, centers the crop on a random foreground
+    voxel (falling back to a plain random crop if the example has no foreground
+    at all); otherwise the crop is placed uniformly at random. The crop is then
+    extended by
+    `patch_margin` voxels on each side, keeping the same center. Anything
+    outside the image, including along an axis smaller than roi_size, is
+    zero-padded. `get_locations` supplies the case's foreground locations, so
+    the caller can cache them; by default they're found from `label`.
+    """
+    starts, shape = _patch_window(
+        label, roi_size, labels, oversampling, rng, patch_margin, get_locations
+    )
     image = _slice_with_padding(image, starts, shape)
     label = _slice_with_padding(label, starts, shape)
     if dtm is not None:
@@ -357,8 +421,6 @@ def _extract_patch(
 
 def _to_channels_first(array: np.ndarray) -> torch.Tensor:
     """Move a (D, H, W, C) array to (C, D, H, W).
-
-    Matches dali_loader.py's final `fn.transpose(image, perm=[3, 0, 1, 2])`.
 
     Uses `np.array(..., order="C")` (default `copy=True`) rather than
     `np.ascontiguousarray`, which is a no-op -- returns the input unchanged,
@@ -380,7 +442,9 @@ class _PatchTrainingDataset(Dataset):
     All reading and patch extraction happens here, on the CPU, in worker
     processes managed by the DataLoader -- see the module docstring for why
     patch placement uses a fresh, unseeded RNG per call rather than one
-    seeded up front.
+    seeded up front. Each worker keeps its own cache of foreground locations,
+    filled the first time it needs a case's: from the file mist_preprocess saved
+    if there is one, otherwise by scanning the label.
     """
 
     def __init__(
@@ -402,9 +466,26 @@ class _PatchTrainingDataset(Dataset):
         self._oversampling = oversampling
         self._extract_patches = extract_patches
         self._patch_margin = tuple(int(m) for m in patch_margin)
+        self._foreground_cache: dict[int, dict[int | None, np.ndarray]] = {}
 
     def __len__(self) -> int:
         return len(self._image_paths)
+
+    def _cached_locations(
+        self,
+        index: int,
+        label: np.ndarray,
+        rng: np.random.Generator,
+    ) -> dict[int | None, np.ndarray]:
+        """Return a case's foreground locations, finding them only once."""
+        if index not in self._foreground_cache:
+            saved = foreground_locations.load(
+                foreground_locations.path_for(self._label_paths[index]), self._labels
+            )
+            if saved is None:
+                saved = foreground_locations.find(label, self._labels, rng)
+            self._foreground_cache[index] = saved
+        return self._foreground_cache[index]
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         image = _load_case(self._image_paths[index])
@@ -412,6 +493,27 @@ class _PatchTrainingDataset(Dataset):
         dtm = _load_case(self._dtm_paths[index]) if self._dtm_paths else None
 
         rng = np.random.default_rng()
+
+        if self._extract_patches and _PAD_ON_DEVICE:
+            starts, shape = _patch_window(
+                label,
+                self._roi_size,
+                self._labels,
+                self._oversampling,
+                rng,
+                self._patch_margin,
+                lambda: self._cached_locations(index, label, rng),
+            )
+            image, pad = _read_inside(image, starts, shape)
+            label, _ = _read_inside(label, starts, shape)
+            batch = {
+                "image": _to_channels_first(image),
+                "label": _to_channels_first(label),
+                "pad": torch.tensor(pad, dtype=torch.int64),
+            }
+            if dtm is not None:
+                batch["dtm"] = _to_channels_first(_read_inside(dtm, starts, shape)[0])
+            return batch
 
         if self._extract_patches:
             image, label, dtm = _extract_patch(
@@ -423,6 +525,7 @@ class _PatchTrainingDataset(Dataset):
                 self._oversampling,
                 rng,
                 self._patch_margin,
+                get_locations=lambda: self._cached_locations(index, label, rng),
             )
 
         batch = {
@@ -434,11 +537,22 @@ class _PatchTrainingDataset(Dataset):
         return batch
 
 
+def _collate_patches(samples: list[dict[str, torch.Tensor]]) -> dict[str, Any]:
+    """Batch training patches, leaving any that need padding for the device.
+
+    Patches entirely inside their images stack as usual. Otherwise the patches
+    differ in shape, so they're kept apart, and GenericIterator pads and stacks
+    them on the training device.
+    """
+    if all(not sample["pad"].any() for sample in samples):
+        return default_collate([{k: v for k, v in s.items() if k != "pad"} for s in samples])
+    return {"_unpadded": samples}
+
+
 class _FullVolumeDataset(Dataset):
     """CPU-side dataset yielding one full (unpatched) example per index.
 
-    Used for validation and test, matching dali_loader.py's EvalPipeline and
-    TestPipeline: no patch extraction, no shuffling.
+    Used for validation and test: no patch extraction, no shuffling.
     """
 
     def __init__(
@@ -459,30 +573,52 @@ class _FullVolumeDataset(Dataset):
         return batch
 
 
+class _EndlessShuffleSampler(Sampler[int]):
+    """Yield shuffled passes over a dataset's indices, forever.
+
+    The DataLoader's iterator then never ends, so one pool of workers serves a
+    whole fold (batchgenerators' infinite data loaders work the same way).
+    Every case still appears once per pass, and a batch that spans two passes
+    is full-sized rather than cut short at the end of a pass.
+    """
+
+    def __init__(self, num_examples: int, generator: torch.Generator):
+        self._num_examples = num_examples
+        self._generator = generator
+
+    def __iter__(self) -> Iterator[int]:
+        while True:
+            yield from torch.randperm(self._num_examples, generator=self._generator).tolist()
+
+    def __len__(self) -> int:
+        return self._num_examples
+
+
 class GenericIterator:
-    """DALI-compatible iterator: `.next()` -> `[batch on device]`, `.reset()`.
+    """Iterator with `.next()` -> `[batch on device]` and `.reset()`.
 
     This is the "chokepoint" mentioned in the module docstring -- the only
     place a CPU-loaded batch is moved to the target accelerator -- which is
     what keeps `patch_3d_trainer.py` and `inference_runners.py` backend-
     agnostic.
 
-    With `lazy=True`, as for validation and test, workers start at the first
-    `.next()` and stop at `.reset()`, so nothing they read ahead sits in shared
-    memory between passes.
+    With `endless=True`, the data loader never runs out and `.reset()` does
+    nothing, so its worker processes and their caches last until this iterator
+    is dropped at the end of the fold, which shuts them down. Otherwise, as for
+    validation, workers start at the first `.next()` and stop at `.reset()`, so
+    nothing they read ahead sits in shared memory between passes.
     """
 
-    def __init__(self, data_loader: DataLoader, device: torch.device, lazy: bool = False):
+    def __init__(self, data_loader: DataLoader, device: torch.device, endless: bool = False):
         self._data_loader = data_loader
         self._device = device
-        self._lazy = lazy
-        self._iterator = None if lazy else iter(self._data_loader)
+        self._endless = endless
+        self._iterator = iter(self._data_loader) if endless else None
 
     def next(self) -> list[dict[str, torch.Tensor]]:
         """Return the next batch, auto-restarting when the pass is exhausted.
 
-        Mirrors dali_loader.py's DALIGenericIterator, which is constructed
-        there without an explicit `size`/`reader_name`: MIST's training loop
+        MIST's training loop
         can call `.next()` more times per "epoch" than the dataset has
         batches for (see `training.min_steps_per_epoch`), so this must never
         raise `StopIteration` on its own -- only an explicit `.reset()` call
@@ -495,15 +631,31 @@ class GenericIterator:
         except StopIteration:
             self._iterator = iter(self._data_loader)
             batch = next(self._iterator)
+        if "_unpadded" in batch:
+            samples = batch["_unpadded"]
+            keys = [key for key in samples[0] if key != "pad"]
+            return [
+                {
+                    key: torch.stack(
+                        [
+                            _pad_on_device(
+                                sample[key].to(self._device, non_blocking=True), sample["pad"]
+                            )
+                            for sample in samples
+                        ]
+                    )
+                    for key in keys
+                }
+            ]
         return [{key: value.to(self._device, non_blocking=True) for key, value in batch.items()}]
 
     def reset(self) -> None:
-        """Start a fresh pass over the dataset (reshuffles a shuffling loader).
+        """End this pass, stopping its workers, unless the data loader is endless.
 
-        A lazy iterator stops its workers here instead; the next `.next()`
-        starts the fresh pass.
+        The next `.next()` starts a fresh pass.
         """
-        self._iterator = None if self._lazy else iter(self._data_loader)
+        if not self._endless:
+            self._iterator = None
 
 
 def get_training_dataset(
@@ -521,11 +673,10 @@ def get_training_dataset(
     extract_patches: bool = True,
     patch_margin: tuple[int, int, int] = (0, 0, 0),
 ) -> GenericIterator:
-    """Generic-loader equivalent of dali_loader.get_training_dataset.
+    """Build the training iterator of foreground-oversampled patches.
 
-    Same signature and `.next()`/`.reset()` contract as dali_loader.py (see
-    the module docstring). Like dali_loader.py, this only extracts patches;
-    augmentation happens afterwards in mist.data_loading.augmentation.
+    This only extracts patches; augmentation happens afterwards in
+    mist.data_loading.augmentation.
 
     Args:
         image_paths: List of file paths to the image data.
@@ -537,8 +688,9 @@ def get_training_dataset(
             excluded), used for foreground-oversampled patch placement.
         oversampling: Probability of centering a patch on a foreground voxel
             rather than placing it uniformly at random.
-        seed: Random seed for shuffling case order between epochs.
-        num_workers: Number of DataLoader worker processes.
+        seed: Random seed for shuffling case order between passes.
+        num_workers: Number of DataLoader worker processes. They last for the
+            whole fold, not one pass over the data.
         rank: The rank of the current process.
         world_size: The total number of processes.
         extract_patches: Whether to extract a roi_size patch from each
@@ -569,20 +721,14 @@ def get_training_dataset(
     data_loader = DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=True,
+        sampler=_EndlessShuffleSampler(len(dataset), shuffle_generator),
+        collate_fn=_collate_patches if extract_patches and _PAD_ON_DEVICE else None,
         num_workers=num_workers,
-        generator=shuffle_generator,
-        drop_last=False,
         multiprocessing_context=_multiprocessing_context(num_workers),
         pin_memory=_pin_memory(),
         prefetch_factor=_prefetch_factor(num_workers),
-        # Deliberately NOT persistent_workers=True: MIST builds a fresh
-        # training DataLoader per fold, and worker pools from earlier folds
-        # were never explicitly torn down before the next one existed --
-        # see the module docstring for the "fork" note right above this,
-        # found via the same Stage 4 hang.
     )
-    return GenericIterator(data_loader, device=_target_device(rank))
+    return GenericIterator(data_loader, device=_target_device(rank), endless=True)
 
 
 def get_validation_dataset(
@@ -593,16 +739,16 @@ def get_validation_dataset(
     rank: int,
     world_size: int,
 ) -> GenericIterator:
-    """Generic-loader equivalent of dali_loader.get_validation_dataset.
+    """Build the validation iterator.
 
     Streams full (unpatched) images and labels, sharded across ranks but not
-    shuffled -- matching dali_loader.py's EvalPipeline (shuffle_input=False).
+    shuffled.
 
     Args:
         image_paths: List of file paths to the image data.
         label_paths: List of file paths to the label data.
-        seed: Unused here (validation is never shuffled); accepted for
-            parity with dali_loader.py, which also takes it unconditionally.
+        seed: Unused here (validation is never shuffled); accepted so every
+            loader takes the same arguments.
         num_workers: Number of DataLoader worker processes.
         rank: The rank of the current process.
         world_size: The total number of processes.
@@ -625,7 +771,7 @@ def get_validation_dataset(
         **_full_volume_workers(num_workers),
         pin_memory=_pin_memory(),
     )
-    return GenericIterator(data_loader, device=_target_device(rank), lazy=True)
+    return GenericIterator(data_loader, device=_target_device(rank))
 
 
 def get_test_dataset(
@@ -635,17 +781,17 @@ def get_test_dataset(
     rank: int = 0,
     world_size: int = 1,
 ) -> GenericIterator:
-    """Generic-loader equivalent of dali_loader.get_test_dataset.
+    """Build the test iterator.
 
     Streams full (unpatched) images in the exact order given -- no shuffling,
     no sharding by default (rank/world_size default to 0/1, matching
-    dali_loader.py and inference_runners.py::test_on_fold's assumption that
-    the loader yields batches in the same order as its input file list).
+    inference_runners.py::test_on_fold's assumption that the loader yields
+    batches in the same order as its input file list).
 
     Args:
         image_paths: List of file paths to the image data.
-        seed: Unused here (test is never shuffled); accepted for parity with
-            dali_loader.py, which also takes it unconditionally.
+        seed: Unused here (test is never shuffled); accepted so every loader
+            takes the same arguments.
         num_workers: Number of DataLoader worker processes.
         rank: The rank of the current process. Defaults to 0.
         world_size: The total number of processes. Defaults to 1.
@@ -668,4 +814,4 @@ def get_test_dataset(
         **_full_volume_workers(num_workers),
         pin_memory=_pin_memory(),
     )
-    return GenericIterator(data_loader, device=_target_device(rank), lazy=True)
+    return GenericIterator(data_loader, device=_target_device(rank))

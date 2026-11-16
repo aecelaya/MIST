@@ -1,0 +1,52 @@
+# =============================================================================
+# Inference compatibility fixtures
+#
+# Trains tiny models with released MIST versions and saves their predictions,
+# for tests/compat. Run it by hand; it uploads one tarball per version as a
+# workflow artifact. Attach those to the compat-fixtures-v1 release, which the
+# test workflow downloads. See tests/compat/generate_fixtures.py.
+#
+# Runs on CPU, so 2.4.1's config records the generic loader rather than DALI.
+# =============================================================================
+name: Build Inference Compatibility Fixtures
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['2.3.0', '2.4.0', '2.4.1', '2.5.0rc0']
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+
+    # The released package, not this checkout: the script is run by path, so
+    # it imports the installed mist.
+    - name: Install MIST ${{ matrix.version }}
+      run: |
+        python -m pip install --upgrade pip
+        pip install "mist-medical==${{ matrix.version }}"
+
+    - name: Train and predict
+      run: |
+        python tests/compat/generate_fixtures.py --out "compat/${{ matrix.version }}" --device cpu
+        tar -czf "mist-compat-${{ matrix.version }}.tar.gz" -C compat "${{ matrix.version }}"
+
+    - name: Upload fixtures
+      uses: actions/upload-artifact@v7
+      with:
+        name: mist-compat-${{ matrix.version }}
+        path: mist-compat-${{ matrix.version }}.tar.gz

@@ -76,6 +76,9 @@ class BaseTrainer(ABC):
             print_warning(f"config.json: {problem}")
         for problem in training_utils.preprocessed_data_problems(self.numpy_dir):
             print_warning(problem)
+        slow_half_precision = hardware.slow_half_precision_warning()
+        if slow_half_precision is not None:
+            print_warning(slow_half_precision)
 
         # Snapshot config before CLI overrides so resume checks can compare.
         _original_config = copy.deepcopy(self.config)
@@ -280,11 +283,8 @@ class BaseTrainer(ABC):
             hw["communication_backend"]
         )
 
-        # Resolve the data loader backend the same way: "auto" becomes
-        # "dali" on CUDA or "generic" on ROCm/CPU, while an explicit value is
-        # left untouched. `.get(..., "auto")` tolerates a config.json written
-        # before this key existed at all, not just one that already says
-        # "auto" -- both are treated as "not yet resolved".
+        # "auto" and 2.x's "dali" become the generic loader. `.get(..., "auto")`
+        # tolerates a config.json written before this key existed at all.
         hw["data_loader"] = hardware.resolve_data_loader(hw.get("data_loader", "auto"))
 
         # Write the updated configuration to the config.json file.
@@ -392,11 +392,7 @@ class BaseTrainer(ABC):
         CPU-only hardware has no GPU count to report: num_gpus is set to 0
         there, rather than raising. Downstream batch-size math
         (`max(1, num_gpus)`, just below) and `fit()`'s own CPU world_size
-        fallback already treat 0 the same as a single process -- see
-        `cpu_rocm_support_plan.md` Stage 4, which is where this CPU-hostile
-        unconditional raise was found and fixed (a real end-to-end CPU
-        training run hit it immediately -- Stage 0's coupling-site audit
-        missed this one).
+        fallback already treat 0 the same as a single process.
         """
         if hardware.get_accelerator_type() == "cpu":
             self.config["training"]["hardware"]["num_gpus"] = 0
@@ -768,10 +764,7 @@ class BaseTrainer(ABC):
         if use_ddp:
             model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
-        # Send model to device. Found unconditionally hardcoded to "cuda:
-        # <rank>" during Stage 4 of cpu_rocm_support_plan.md, when a real
-        # end-to-end CPU training run hit it immediately -- Stage 0's
-        # coupling-site audit missed this one.
+        # Send model to device: "cuda:<rank>" on CUDA and ROCm, "cpu" on CPU.
         model.to(hardware.get_device_for_rank(rank))
 
         # Compile in place rather than with torch.compile(model), whose wrapper would
@@ -1127,8 +1120,7 @@ class BaseTrainer(ABC):
             model_name = str(self.models_dir / f"fold_{fold}.pt")
 
         # Stop training flag if we encounter nan or inf losses. Same
-        # accelerator-aware device as build_components()'s model.to() above
-        # -- also hardcoded to "cuda:<rank>" until Stage 4 found it.
+        # accelerator-aware device as build_components()'s model.to() above.
         stop_training = torch.tensor(
             [0], dtype=torch.int, device=hardware.get_device_for_rank(rank)
         )
@@ -1367,7 +1359,7 @@ class BaseTrainer(ABC):
         # Train model. torch.cuda.device_count() is 0 on CPU-only hardware
         # (there are no CUDA/ROCm devices to count), so it can't be used
         # directly as the process count -- CPU training always runs as a
-        # single process today (see cpu_rocm_support_plan.md Stage 1).
+        # single process.
         world_size = torch.cuda.device_count() if accelerator != "cpu" else 1
         if world_size > 1:
             mp.spawn(  # type: ignore

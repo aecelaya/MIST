@@ -36,8 +36,8 @@ def _patch_minimal_cli(monkeypatch) -> None:
         return argparse.ArgumentParser(**kwargs)
 
     def _add_train_args(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--results", type=str, default=None)
-        parser.add_argument("--numpy", type=str, default=None)
+        parser.add_argument("--results", type=str, required=True)
+        parser.add_argument("--numpy", type=str, required=True)
         parser.add_argument("--gpus", nargs="+", type=int, default=[-1])
         parser.add_argument("--folds", nargs="+", type=int, default=None)
         parser.add_argument("--num-workers-evaluate", type=int, default=1)
@@ -53,14 +53,15 @@ def _patch_minimal_cli(monkeypatch) -> None:
 # =============================================================================
 
 
-def test_parse_train_args_fallbacks(tmp_path, monkeypatch):
-    """It sets default ./results and ./numpy when not provided."""
+def test_parse_train_args_requires_paths(monkeypatch):
+    """It errors when --results or --numpy is missing."""
     _patch_minimal_cli(monkeypatch)
-    monkeypatch.chdir(tmp_path)
-
-    ns = entry._parse_train_args(argv=[])
-    assert Path(ns.results) == (tmp_path / "results").resolve()
-    assert Path(ns.numpy) == (tmp_path / "numpy").resolve()
+    with pytest.raises(SystemExit):
+        entry._parse_train_args(argv=[])
+    with pytest.raises(SystemExit):
+        entry._parse_train_args(argv=["--results", "r"])
+    with pytest.raises(SystemExit):
+        entry._parse_train_args(argv=["--numpy", "n"])
 
 
 def test_parse_train_args_explicit(tmp_path, monkeypatch):

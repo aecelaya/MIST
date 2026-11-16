@@ -1,8 +1,7 @@
 """Training-time data augmentation for MIST.
 
 Augmentation runs in PyTorch on each training batch after the data loader has
-moved it to the training device, so the DALI and generic loaders share one
-implementation. The loaders only extract patches: when rotation or scaling is
+moved it to the training device. The data loader only extracts patches: when rotation or scaling is
 enabled, they crop a larger patch around the same center (see
 `spatial_margin`), and the spatial transform resamples it down to the final
 patch size, so rotated or zoomed-out patches have real image content at their
@@ -536,8 +535,7 @@ def _gaussian_blur(volume: torch.Tensor, sigmas: Sequence[float]) -> torch.Tenso
 class AugmentedIterator:
     """Wrap a training iterator so each batch is augmented on its device.
 
-    Keeps the `.next()` / `.reset()` contract shared by the DALI and generic
-    loaders: `.next()` returns a one-element list holding the batch dict.
+    Keeps the data loader's `.next()` / `.reset()` contract: `.next()` returns a one-element list holding the batch dict.
     """
 
     def __init__(self, iterator: Any, augmenter: BatchAugmenter):

@@ -747,3 +747,27 @@ def test_validate_encoder_compatibility_source_without_any_patch_size():
     with pytest.warns(UserWarning, match="spacing compatibility") as record:
         validate_encoder_compatibility(source, target)
     assert len(record) == 1
+
+
+def test_validate_encoder_compatibility_resenc_pocket_is_stagewise():
+    """resenc-pocket, like resenc, warns on a patch size mismatch."""
+    source = {
+        "model": {"architecture": "resenc-pocket"},
+        "spatial_config": {"patch_size": [128, 128, 128], "target_spacing": [1, 1, 1]},
+    }
+    target = {
+        "model": {"architecture": "resenc-pocket"},
+        "spatial_config": {"patch_size": [96, 96, 96], "target_spacing": [1, 1, 1]},
+    }
+    with pytest.warns(UserWarning, match="matching stages still transfer"):
+        validate_encoder_compatibility(source, target)
+
+
+def test_validate_encoder_compatibility_resenc_pocket_and_resenc_differ():
+    """resenc weights don't transfer to resenc-pocket: the widths differ."""
+    config = {"spatial_config": {"patch_size": [96, 96, 96], "target_spacing": [1, 1, 1]}}
+    with pytest.raises(ValueError, match="Architecture mismatch"):
+        validate_encoder_compatibility(
+            {"model": {"architecture": "resenc"}, **config},
+            {"model": {"architecture": "resenc-pocket"}, **config},
+        )

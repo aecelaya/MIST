@@ -29,7 +29,7 @@ _real_save_checkpoint = bt.BaseTrainer.save_checkpoint
 
 
 class DummyIter:
-    """DALI-style loader with .next()[0] and .reset()."""
+    """Loader with .next()[0] and .reset()."""
 
     def __init__(self, batch, length: int):
         self._batch = batch
@@ -171,7 +171,7 @@ def patch_paths(monkeypatch):
 def patch_cuda_and_moves(monkeypatch):
     """Patch CUDA availability and device moves so tests run CPU-only."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True, raising=False)
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (8, 0), raising=False)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *_: (8, 0), raising=False)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1, raising=False)
     monkeypatch.setattr(torch.cuda, "set_device", lambda idx: None, raising=False)
 
@@ -814,8 +814,8 @@ def test_init_warns_about_mistakes_in_config_file(tmp_pipeline, mist_args, monke
     assert any("training.compil'" in warning for warning in warnings)
 
 
-def test_init_warns_about_fortran_order_labels(tmp_pipeline, mist_args, monkeypatch):
-    """Labels saved in Fortran order by an older mist_preprocess get a warning."""
+def test_init_warns_about_data_preprocessed_by_an_older_mist(tmp_pipeline, mist_args, monkeypatch):
+    """Fortran-order labels and missing foreground locations each get a warning."""
     _, numpy_dir = tmp_pipeline
     (numpy_dir / "labels").mkdir(exist_ok=True)
     label = np.expand_dims(np.zeros((4, 5, 6), dtype=np.uint8).T, axis=-1)
@@ -826,12 +826,14 @@ def test_init_warns_about_fortran_order_labels(tmp_pipeline, mist_args, monkeypa
     DummyTrainer(mist_args)
 
     assert any("Fortran order" in warning for warning in warnings)
+    assert any("foreground locations" in warning for warning in warnings)
 
 
-def test_init_is_quiet_about_c_order_labels(tmp_pipeline, mist_args, monkeypatch):
-    """C-order labels get no data warning."""
+def test_init_is_quiet_about_data_from_this_mist(tmp_pipeline, mist_args, monkeypatch):
+    """C-order labels with saved locations get no data warnings."""
     _, numpy_dir = tmp_pipeline
     (numpy_dir / "labels").mkdir(exist_ok=True)
+    (numpy_dir / "foreground").mkdir(exist_ok=True)
     np.save(numpy_dir / "labels" / "case.npy", np.zeros((4, 5, 6, 1), dtype=np.uint8))
     warnings = []
     monkeypatch.setattr(bt, "print_warning", warnings.append)
@@ -916,8 +918,8 @@ def test_update_num_gpus_is_zero_on_cpu(tmp_pipeline, mist_args, monkeypatch):
 
     Regression guard for a real bug: this used to unconditionally raise
     "CUDA is not available" here, which meant CPU-only training could never
-    even construct a trainer -- found via a real end-to-end CPU training run
-    (cpu_rocm_support_plan.md Stage 4), not by this mocked test alone.
+    even construct a trainer. tests/integration/test_cpu_end_to_end.py checks
+    it in a real run.
     """
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=False)
 

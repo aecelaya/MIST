@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from mist.preprocessing import foreground_locations
 from mist.utils import hardware
 
 
@@ -245,7 +246,7 @@ def get_npy_paths(
 
 
 def preprocessed_data_problems(numpy_dir: Path) -> list[str]:
-    """Find signs that the data was preprocessed by a MIST before 2.4.1.
+    """Find signs that the data was preprocessed by MIST 2.x.
 
     Checks one label file, since mist_preprocess saves them all the same way.
 
@@ -258,10 +259,17 @@ def preprocessed_data_problems(numpy_dir: Path) -> list[str]:
     labels = sorted((numpy_dir / "labels").glob("*.npy"))
     if not labels:
         return []
+    problems = []
     label = np.load(labels[0], mmap_mode="r")
     if label.flags.f_contiguous and not label.flags.c_contiguous:
-        return [
-            "Labels are saved in Fortran order, which makes the DALI loader much "
-            "slower on large images. Run mist_preprocess again to fix this."
-        ]
-    return []
+        problems.append(
+            "Labels are saved in Fortran order, so the data loader can't read "
+            "patches with positioned reads, which is slower on network "
+            "filesystems. Run mist_preprocess again to fix this."
+        )
+    if not (numpy_dir / foreground_locations.FOLDER).is_dir():
+        problems.append(
+            "There are no saved foreground locations, so the generic loader scans "
+            "each label in each worker. Run mist_preprocess again to save them."
+        )
+    return problems

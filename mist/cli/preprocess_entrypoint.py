@@ -19,20 +19,7 @@ def _parse_preprocess_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Add preprocessing-specific args.
     argmod.add_preprocess_args(parser)
 
-    ns = parser.parse_args(argv)
-
-    # Enforce/derive required paths for this pipeline.
-    if not ns.results:
-        parser.error(
-            "--results is required (directory containing config.json, "
-            "train_paths.csv, fg_bboxes.csv)."
-        )
-
-    # Default NumPy output to ./numpy (under the current working directory)
-    # if not provided.
-    if not ns.numpy:
-        ns.numpy = str(Path("./numpy").expanduser().resolve())
-    return ns
+    return parser.parse_args(argv)
 
 
 def _ensure_analyze_artifacts(ns: argparse.Namespace) -> Path:

@@ -28,11 +28,18 @@ class ResEncUNet(MISTModel):
     load by key. The decoder does not keep a reference to the encoder, so its
     keys omit the duplicate "decoder.encoder." entries found upstream.
 
+    With use_pocket_model, every stage has INITIAL_FILTERS (32) filters instead
+    of doubling, as in nnunet-pocket. The block counts and topology are the
+    same, but the encoder is much smaller, so nnU-Net and nnssl checkpoints
+    (sized for the full widths) don't load into it.
+
     Attributes:
         encoder: The residual encoder.
         decoder: The plain UNet decoder.
         use_deep_supervision: Whether to return deep supervision outputs during
             training.
+        use_pocket_model: Whether every stage keeps 32 filters (resenc-pocket)
+            instead of doubling them.
     """
 
     def __init__(
@@ -42,6 +49,7 @@ class ResEncUNet(MISTModel):
         patch_size: Sequence[int],
         target_spacing: Sequence[float],
         use_deep_supervision: bool,
+        use_pocket_model: bool = False,
     ):
         super().__init__()
         if len(patch_size) != 3:
@@ -59,9 +67,13 @@ class ResEncUNet(MISTModel):
 
         kernel_sizes, strides, _ = nnunet_utils.get_unet_params(patch_size, target_spacing)
         n_stages = len(strides)
-        features_per_stage = [
-            min(2**i * constants.INITIAL_FILTERS, constants.MAX_FILTERS_3D) for i in range(n_stages)
-        ]
+        if use_pocket_model:
+            features_per_stage = [constants.INITIAL_FILTERS] * n_stages
+        else:
+            features_per_stage = [
+                min(2**i * constants.INITIAL_FILTERS, constants.MAX_FILTERS_3D)
+                for i in range(n_stages)
+            ]
 
         self.encoder = ResidualEncoder(
             in_channels=in_channels,

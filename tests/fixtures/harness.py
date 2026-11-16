@@ -1,12 +1,10 @@
 """Pipeline-running test harness: run the real pipeline and capture its artifacts.
 
-Originally the Stage 0 regression harness for the ANTs -> SimpleITK
-migration (now complete); ``run_pipeline`` is genuinely reused, load-bearing
-infrastructure for unrelated tests that need a real, deterministic
-``mist_analyze -> mist_preprocess`` run rather than mocked pipeline
-internals -- see ``tests/data_loading/test_generic_loader.py`` and
-``tests/regression/cpu_rocm/``. This module drives that over the fixed
-fixture set (see :mod:`fixtures`) and captures every intermediate artifact:
+``run_pipeline`` gives tests a real, deterministic
+``mist_analyze -> mist_preprocess`` run rather than mocked pipeline internals
+(see ``tests/data_loading/test_generic_loader.py`` and ``tests/integration/``).
+It drives that over the fixed fixture set (see :mod:`fixtures`) and captures
+every intermediate artifact:
 
     results/config.json         (analyze)
     results/train_paths.csv     (analyze)
@@ -15,16 +13,12 @@ fixture set (see :mod:`fixtures`) and captures every intermediate artifact:
     numpy/labels/<id>.npy       (preprocess)
     numpy/dtms/<id>.npy         (preprocess)
 
-Prediction artifacts require a trained model; :func:`run_prediction` is a
-thin, optional hook for when a model/config is available.
+The module also has a `capture`/`diff` CLI, for capturing a golden artifact
+set once and diffing later runs against it, for changes to image I/O or
+resampling that must not change preprocessed outputs::
 
-The module also still has a `capture`/`diff` CLI from its original migration
-role, for capturing a golden artifact set once and diffing future runs
-against it -- no longer part of any current regression gate, but left in
-case a future cross-implementation change needs the same technique::
-
-      python -m tests.regression.ants_sitk.harness capture --golden-dir GOLDEN
-      python -m tests.regression.ants_sitk.harness diff    --golden-dir GOLDEN
+      python -m tests.fixtures.harness capture --golden-dir GOLDEN
+      python -m tests.fixtures.harness diff    --golden-dir GOLDEN
 """
 
 from __future__ import annotations
@@ -41,7 +35,7 @@ from typing import Any
 
 import numpy as np
 
-from tests.regression.ants_sitk import fixtures
+from tests.fixtures import fixtures
 
 # Placeholder that absolute paths are collapsed to before comparison, so an
 # artifact captured under one working directory diffs cleanly against a run
@@ -114,19 +108,6 @@ def run_pipeline(
     preprocess_entry(preprocess_argv)
 
     return PipelineOutputs(results_dir=results_dir, numpy_dir=numpy_dir)
-
-
-def run_prediction(*_args: Any, **_kwargs: Any) -> None:
-    """Optional Stage 5 hook (predictions require a trained model).
-
-    Intentionally not implemented for the Stage 0 gate: the migration plan
-    defers trained-model prediction diffs to Stage 5. Wire a model/config in
-    here when that stage begins.
-    """
-    raise NotImplementedError(
-        "Prediction capture is a Stage 5 concern and needs a trained model. "
-        "The Stage 0 gate covers analyze + preprocess artifacts only."
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -369,9 +350,8 @@ def diff_artifacts(
 
     ``replacements`` maps working-directory roots to a placeholder so path
     strings inside JSON/CSV artifacts compare across different run locations.
-    Defaults (``atol=rtol=0``) require exact equality, which is the correct
-    gate for the Stage 0 self-diff sanity check; later migration stages loosen
-    the tolerance for floating-point artifacts.
+    Defaults (``atol=rtol=0``) require exact equality; pass a tolerance for
+    floating-point artifacts when a change may move them slightly.
     """
     replacements = replacements or []
     report = DiffReport()
@@ -461,7 +441,9 @@ def diff_against_golden(golden_dir: Path, *, atol: float = 0.0, rtol: float = 0.
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Stage 0 ANTs->SimpleITK regression harness.")
+    parser = argparse.ArgumentParser(
+        description="Capture and diff MIST analyze/preprocess artifacts."
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     cap = sub.add_parser("capture", help="Capture golden artifacts.")

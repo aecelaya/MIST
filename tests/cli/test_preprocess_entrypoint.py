@@ -32,14 +32,12 @@ def test_parse_preprocess_args_requires_results(tmp_path, monkeypatch):
         entry._parse_preprocess_args([])
 
 
-def test_parse_preprocess_args_defaults_numpy(tmp_path, monkeypatch):
-    """If --numpy not provided, default to ./numpy under CWD."""
+def test_parse_preprocess_args_requires_numpy(tmp_path, monkeypatch, capsys):
+    """_parse_preprocess_args errors, naming --numpy, if --numpy is missing."""
     monkeypatch.chdir(tmp_path)
-    results = tmp_path / "res"
-    ns = entry._parse_preprocess_args(["--results", str(results)])
-    assert ns.results == str(results)
-    # New default is ./numpy (CWD), not <results>/numpy
-    assert Path(ns.numpy) == (tmp_path / "numpy").resolve()
+    with pytest.raises(SystemExit):
+        entry._parse_preprocess_args(["--results", str(tmp_path / "res")])
+    assert "--numpy" in capsys.readouterr().err
 
 
 def test_parse_preprocess_args_keeps_explicit_numpy(tmp_path, monkeypatch):
@@ -115,6 +113,8 @@ def test_preprocess_entry_integration_parsing_and_run(tmp_path, monkeypatch):
     argv = [
         "--results",
         str(results),
+        "--numpy",
+        str(tmp_path / "numpy"),
         "--no-preprocess",
         "--compute-dtms",
     ]
@@ -147,19 +147,17 @@ def test_preprocess_entry_integration_parsing_and_run(tmp_path, monkeypatch):
     ns = observed["ns"]
     assert ns is not None
     assert Path(ns.results) == results
-    # Default numpy is ./numpy in CWD (tmp_path)
-    assert Path(ns.numpy) == (tmp_path / "numpy").resolve()
+    assert Path(ns.numpy) == tmp_path / "numpy"
     assert ns.no_preprocess is True
     assert ns.compute_dtms is True
     assert Path(ns.numpy).exists()
 
 
 def test_preprocess_entry_blocks_when_numpy_nonempty_without_overwrite(tmp_path, monkeypatch):
-    """Raises if default ./numpy contains files and --overwrite not set."""
+    """Raises if --numpy contains files and --overwrite is not set."""
     monkeypatch.chdir(tmp_path)
     results = _mk_results_with_required_artifacts(tmp_path)
 
-    # Fill the default ./numpy (since we won't pass --numpy).
     default_numpy = tmp_path / "numpy"
     default_numpy.mkdir(parents=True, exist_ok=True)
     _touch(default_numpy / "existing.npy", "x")
@@ -167,7 +165,7 @@ def test_preprocess_entry_blocks_when_numpy_nonempty_without_overwrite(tmp_path,
     # Keep preprocess from actually running if our guard failed.
     monkeypatch.setattr(entry.preprocess, "preprocess_dataset", lambda *_: _, raising=True)
 
-    argv = ["--results", str(results)]
+    argv = ["--results", str(results), "--numpy", str(default_numpy)]
     with pytest.raises(FileExistsError):
         entry.preprocess_entry(argv)
 
@@ -180,6 +178,6 @@ def test_preprocess_entry_raises_when_analyze_artifacts_missing(tmp_path, monkey
 
     monkeypatch.setattr(entry.preprocess, "preprocess_dataset", lambda *_: _, raising=True)
 
-    argv = ["--results", str(results)]
+    argv = ["--results", str(results), "--numpy", str(tmp_path / "numpy")]
     with pytest.raises(FileNotFoundError):
         entry.preprocess_entry(argv)

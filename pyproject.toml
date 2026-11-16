@@ -1,6 +1,6 @@
 [project]
 name = "mist-medical"
-version = "2.5.0rc0"
+version = "3.0.0rc0"
 requires-python = ">= 3.10"
 description = "MIST is a simple and scalable end-to-end framework for medical imaging segmentation."
 readme = "README.md"
@@ -53,20 +53,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# NVIDIA DALI, for GPU-accelerated data loading. Not required to train at all
-# -- the base install trains on CPU (and AMD ROCm) via a generic, DALI-free
-# data loader; this extra only matters on CUDA hardware, where it's the
-# default, faster path. Recommended whenever training on an NVIDIA GPU. See
-# cpu_rocm_support_plan.md.
-#
-# `dali` is the current, documented name. `train` is kept as an identical
-# alias for backward compatibility -- it's the extra name from MIST
-# releases before this CPU/ROCm effort, so existing users' scripts, docs,
-# and notebooks already reference `pip install "mist-medical[train]"`;
-# breaking that silently isn't worth the naming cleanliness. New docs
-# should point people at `dali`, not this alias.
-dali = ["nvidia-dali-cuda120"]
-train = ["nvidia-dali-cuda120"]
+# MIST 3.0 removed NVIDIA DALI, so the base install trains on every machine.
+# `dali` and `train` are empty so that `pip install "mist-medical[dali]"` and
+# `pip install "mist-medical[train]"` from 2.x scripts and docs still work.
+# They will be removed in MIST 4.0.
+dali = []
+train = []
 dev = ["pytest"]
 
 [project.urls]
