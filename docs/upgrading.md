@@ -19,8 +19,11 @@ In short:
 ## Installing
 
 ```console
-pip install -U mist-medical
+pip install -U --pre mist-medical
 ```
+
+`--pre` is needed while 3.0 is a release candidate. Without it, pip stays on
+2.4.1.
 
 `pip install "mist-medical[dali]"` and `pip install "mist-medical[train]"`
 still work, but install nothing extra. Both extras will be removed in 4.0, so

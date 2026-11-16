@@ -6,6 +6,13 @@ segmentation. It handles everything from raw NIfTI files to trained models and
 evaluated predictions, with sensible defaults that work well out of the box and
 a configuration file for when you need more control.
 
+!!! note "These docs are for MIST 3.0.0rc0"
+
+    3.0 is a release candidate, so `pip install mist-medical` still installs
+    2.4.1. To try 3.0, run `pip install --pre mist-medical`, and see
+    [Upgrading to 3.0](upgrading.md) for what changed. For 2.4.1, read the
+    [stable docs](https://mist-medical.readthedocs.io/en/stable/).
+
 !!! tip "Try MIST in your browser"
 
     The **[end-to-end Colab demo](https://colab.research.google.com/github/mist-medical/MIST/blob/main/examples/mist_heart_demo.ipynb)**

@@ -3,7 +3,7 @@
 All notable changes to MIST are listed here, newest first. MIST follows
 [semantic versioning](https://semver.org/) from 2.3.0 onward.
 
-## 3.0.0 — Unreleased
+## 3.0.0rc0 — 2026-11-16
 
 MIST 3.0 removes NVIDIA DALI and makes MIST's own data loader the only one. It
 also includes everything in 2.5.0rc0 (planning at training time, FP16,
