@@ -63,8 +63,8 @@ the original images are finer than the training spacing. Along the
 low-resolution axis of anisotropic images, both use nearest-neighbor
 interpolation, so nothing changes there.
 
-MIST's test suite checks this against results folders trained by 2.4.1 and
-2.5.0rc0 (`tests/compat`).
+MIST's test suite checks this against results folders trained by 2.3.0, 2.4.0,
+2.4.1, and 2.5.0rc0 (`tests/compat`).
 
 **Old config settings.** These still work:
 

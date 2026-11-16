@@ -1,6 +1,6 @@
 """Build inference-compatibility fixtures with an installed release of MIST.
 
-MIST 3.0 promises that results folders from 2.x and 2.5.0rc0 keep working for
+MIST 3.0 promises that results folders from 2.x (2.3.0 on) keep working for
 inference. This script trains tiny models with whatever `mist-medical` is
 installed, saves that version's own predictions next to them, and
 tests/compat/test_inference_compat.py checks that the current code reproduces
@@ -44,6 +44,7 @@ import importlib.metadata
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -132,15 +133,24 @@ def write_dataset(root: Path) -> list[str]:
 
 
 def run(*command: str) -> None:
-    """Run one MIST command, printing it first."""
+    """Run one MIST command, printing it first.
+
+    The command comes from the same environment as this Python, so the venv
+    doesn't need to be activated.
+    """
+    local = Path(sys.executable).parent / command[0]
+    if local.is_file():
+        command = (str(local), *command[1:])
     print("+", " ".join(command), flush=True)
     subprocess.run(command, check=True)
 
 
 def default_models(version: str) -> list[str]:
-    """The 2.x default network under its 2.x name, resenc, and nnunet-plain from 2.5."""
-    models = ["nnunet", "resenc"]
+    """The 2.x default network under its 2.x name, resenc from 2.4, nnunet-plain from 2.5."""
+    models = ["nnunet"]
     major, minor = (int(part) for part in version.split(".")[:2])
+    if (major, minor) >= (2, 4):
+        models.append("resenc")
     if (major, minor) >= (2, 5):
         models.append("nnunet-plain")
     return models

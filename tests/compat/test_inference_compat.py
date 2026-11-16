@@ -1,6 +1,7 @@
 """Results folders from older MIST releases still predict the same labels.
 
-Each fixture is a results folder trained by a released MIST (2.4.1, 2.5.0rc0)
+Each fixture is a results folder trained by a released MIST (2.3.0, 2.4.0,
+2.4.1, 2.5.0rc0)
 with that version's own predictions saved next to it; generate_fixtures.py
 builds them. These tests run the current mist_predict, test_on_fold, and
 mist_evaluate on those folders, on the CPU.
