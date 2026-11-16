@@ -248,7 +248,11 @@ def slow_half_precision_warning() -> str | None:
         major, minor = (int(part) for part in torch.__version__.split("+")[0].split(".")[:2])
     except ValueError:
         return None
-    cudnn = torch.backends.cudnn.version()
+    try:
+        cudnn = torch.backends.cudnn.version()
+    except RuntimeError:
+        # cuDNN refuses to load for this GPU; training reports that itself.
+        return None
     if (major, minor) < (2, 9) or cudnn is None or cudnn >= _FAST_HALF_CONV3D_CUDNN:
         return None
     cuda_major = (torch.version.cuda or "12").split(".")[0]
