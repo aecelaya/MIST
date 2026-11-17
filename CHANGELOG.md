@@ -3,6 +3,17 @@
 All notable changes to MIST are listed here, newest first. MIST follows
 [semantic versioning](https://semver.org/) from 2.3.0 onward.
 
+## Unreleased
+
+### Fixed
+
+- **Docker image:** it installed the latest stable MIST (2.4.1) instead of the
+  release it was named after; the publish workflow now pins the version, and the
+  build checks it. The image also adds a C compiler, which `torch.compile` needs
+  and which caused `Failed to find C compiler` at the start of training, and sets
+  `USER` and `LOGNAME` so it runs under a numeric UID with no account in the
+  image.
+
 ## 3.0.0rc0 — 2026-11-16
 
 MIST 3.0 removes NVIDIA DALI and makes MIST's own data loader the only one. It

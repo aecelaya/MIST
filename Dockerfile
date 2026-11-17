@@ -5,6 +5,19 @@ FROM ${PYTORCH_IMAGE}
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_BREAK_SYSTEM_PACKAGES=1
 
+# torch.compile (on by default in training) builds Triton's CUDA helpers with a
+# host C compiler, even on a GPU. The PyTorch runtime image has none, so
+# training failed with "Failed to find C compiler".
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# MONAI calls getpass.getuser(), which fails for a numeric UID with no passwd
+# entry (docker run -u, Kubernetes runAsUser) unless USER or LOGNAME is set.
+# These defaults cover any UID; override them at run time if you like.
+ENV USER=mist \
+    LOGNAME=mist
+
 # Install MIST. The publish workflow passes the release's version, so a
 # pre-release image gets the pre-release (pip skips pre-releases otherwise).
 # Left empty, a local build installs the latest stable release.
@@ -25,6 +38,9 @@ RUN pip install --no-cache-dir -U "nvidia-cudnn-cu12>=9.15"
 
 # Fail the build if PyTorch still loads the old cuDNN. This needs no GPU.
 RUN python -c "import torch; v = torch.backends.cudnn.version(); print('cuDNN', v); assert v and v >= 91500, v"
+
+# Fail the build if the compiler is missing or the training CLI can't import.
+RUN python -c "import shutil; assert shutil.which('gcc'), 'gcc missing'; from mist.cli.train_entrypoint import train_entry; print('gcc and mist_train import OK')"
 
 # Create app directory.
 RUN mkdir /app

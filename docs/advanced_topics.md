@@ -1213,6 +1213,22 @@ gives the data loader workers the host's shared memory; without it, set
 `--shm-size` (see
 [Training data-loading parallelism](#training-data-loading-parallelism)).
 
+The image also includes a C compiler, which `torch.compile` needs (see
+[Compiling the model](#compiling-the-model)). When you run it as a non-root user,
+as with `-u` above or `runAsUser` in Kubernetes:
+
+- **Username.** The image sets `USER` and `LOGNAME` to `mist`, so a numeric UID
+  with no account in the image still works. You can override them.
+- **Temporary files.** Keep `TMPDIR` short and on local disk, such as `/tmp`.
+  Data loader workers hand batches over Unix sockets created under `TMPDIR`, and
+  a long path, for example a run folder on a network filesystem, fails with
+  `OSError: AF_UNIX path too long`.
+- **Compiler caches.** Compiled kernels are cached under `/tmp` and your home
+  folder. They must be writable, and the filesystem must allow running code: a
+  `tmpfs` mounted without `exec` fails with `failed to map segment from shared
+  object`. To move the caches, set `TRITON_CACHE_DIR` and
+  `TORCHINDUCTOR_CACHE_DIR`.
+
 ## Custom cross validation
 
 By default, MIST uses a **random five-fold cross validation** split. The folds
@@ -1439,7 +1455,10 @@ New configs set `training.compile` to `true`, which compiles the model with
 configs from before this setting train without it. Compiling takes extra time at
 the start of each fold, usually a few minutes at most, and steps then run faster.
 Checkpoints don't change, so models train, resume, and predict the same way either
-way. To turn it off, for example after a compiler error, set `training.compile` to
+way. On NVIDIA GPUs, compiling needs a C compiler such as `gcc` (on Debian or
+Ubuntu, `apt-get install build-essential`); without one, training fails with
+`Failed to find C compiler`. The [Docker image](#docker) includes one. To turn
+compiling off, for example after a compiler error, set `training.compile` to
 `false` in `config.json`.
 
 ## Multi-GPU training
