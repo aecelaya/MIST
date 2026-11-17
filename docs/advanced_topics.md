@@ -1223,11 +1223,11 @@ as with `-u` above or `runAsUser` in Kubernetes:
   Data loader workers hand batches over Unix sockets created under `TMPDIR`, and
   a long path, for example a run folder on a network filesystem, fails with
   `OSError: AF_UNIX path too long`.
-- **Compiler caches.** Compiled kernels are cached under `/tmp` and your home
-  folder. They must be writable, and the filesystem must allow running code: a
-  `tmpfs` mounted without `exec` fails with `failed to map segment from shared
-  object`. To move the caches, set `TRITON_CACHE_DIR` and
-  `TORCHINDUCTOR_CACHE_DIR`.
+- **Compiler caches.** Compiled kernels are cached under `/tmp` (the image sets
+  `TRITON_CACHE_DIR=/tmp/triton`). `/tmp` must be writable and allow running
+  code: a `tmpfs` mounted without `exec` fails with `failed to map segment from
+  shared object`. To keep the caches elsewhere, for example on a persistent
+  volume, set `TRITON_CACHE_DIR` and `TORCHINDUCTOR_CACHE_DIR`.
 
 ## Custom cross validation
 

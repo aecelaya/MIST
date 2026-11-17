@@ -12,7 +12,8 @@ All notable changes to MIST are listed here, newest first. MIST follows
   build checks it. The image also adds a C compiler, which `torch.compile` needs
   and which caused `Failed to find C compiler` at the start of training, and sets
   `USER` and `LOGNAME` so it runs under a numeric UID with no account in the
-  image.
+  image, and `TRITON_CACHE_DIR=/tmp/triton`, because Triton's default cache in
+  the home folder isn't writable under such a UID.
 
 ## 3.0.0rc0 — 2026-11-16
 
