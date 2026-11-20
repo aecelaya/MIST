@@ -293,8 +293,8 @@ and _fixed_ topology:
 
 | Architecture              | Constraint                          | Notes                                                                                                      |
 | ------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `nnunet-plain`            | Depends on the planned depth        | No depth limit: an axis must be divisible by `2^(times it's downsampled)`; raises an error at model construction if violated. For example, 256 is downsampled six times and needs a multiple of 64 |
-| `nnunet-res`, `nnunet`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: the low-res axis uses stride-1, so any value is valid there                      |
+| `nnunet-plain`, `nnunet-plain-pocket` | Depends on the planned depth | No depth limit: an axis must be divisible by `2^(times it's downsampled)`; raises an error at model construction if violated. For example, 256 is downsampled six times and needs a multiple of 64 |
+| `nnunet-res`, `nnunet`, `nnunet-res-pocket`, `nnunet-pocket` | Multiples of 32 on downsampled axes | Adaptive: the low-res axis uses stride-1, so any value is valid there                      |
 | `resenc`, `resenc-pocket` | Multiples of 32 on downsampled axes | Same adaptive topology as `nnunet-res`                                                                     |
 | `fmgnet`, `wnet`          | Multiples of 32 on downsampled axes | Same adaptive topology as `nnunet-res`                                                                     |
 | `mednext-*`               | All dimensions divisible by **16**  | Fixed 4-stage encoder (`2⁴ = 16`); no adaptation for anisotropic axes                                      |
@@ -312,16 +312,16 @@ MIST's default network architecture is `nnunet-plain`, a plain convolutional
 U-Net with two deep supervision heads. Choose another with `--model` or
 `model.architecture`:
 
-| Model        | Variants (`model.architecture`)                                          |
-| ------------ | ------------------------------------------------------------------------ |
-| nnU-Net      | `nnunet-plain` (default), `nnunet-res` (alias `nnunet`), `nnunet-pocket` |
-| ResEnc UNet  | `resenc`, `resenc-pocket`                                                |
-| MedNeXt      | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`       |
-| SwinUNETR-V2 | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                   |
-| Primus       | `primus-medium`, `primus-large`, `primus-x`                              |
-| PrimusV2     | `primusv2-small`, `primusv2-base`, `primusv2-medium`, `primusv2-large`   |
-| FMG-Net      | `fmgnet`                                                                 |
-| W-Net        | `wnet`                                                                   |
+| Model        | Variants (`model.architecture`)                                                                                             |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| nnU-Net      | `nnunet-plain` (default), `nnunet-plain-pocket`, `nnunet-res` (alias `nnunet`), `nnunet-res-pocket` (alias `nnunet-pocket`) |
+| ResEnc UNet  | `resenc`, `resenc-pocket`                                                                                                   |
+| MedNeXt      | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`                                                          |
+| SwinUNETR-V2 | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                                                                      |
+| Primus       | `primus-medium`, `primus-large`, `primus-x`                                                                                 |
+| PrimusV2     | `primusv2-small`, `primusv2-base`, `primusv2-medium`, `primusv2-large`                                                      |
+| FMG-Net      | `fmgnet`                                                                                                                    |
+| W-Net        | `wnet`                                                                                                                      |
 
 `nnunet-plain` has two plain convolutions per stage and no limit on depth: an
 axis is downsampled while its spacing is under twice the finest spacing among
@@ -334,21 +334,27 @@ residual block per stage and at most five downsamplings. The name `nnunet` still
 builds this same network, so existing configurations and checkpoints keep
 working, and either name can load weights saved under the other.
 
-A pocket version of nnUNet is available as a dedicated architecture. Rather than
-doubling the filter count at each depth level, `nnunet-pocket` uses a constant
-32 filters throughout the network. This reduces parameter count significantly
-and can be a good choice. We used this model in the BraTS 2024 and 2025 adult
-glioma competition and won 3rd place both years with a pocket model that had
-~700K parameters.
+Both nnU-Net networks have a pocket version. Rather than doubling the filter
+count at each stage, a pocket network keeps a constant 32 filters throughout,
+which cuts the parameter count by a factor of about 40 (at a 128³ patch, about
+0.76M for `nnunet-plain-pocket` against 31.2M for `nnunet-plain`):
+
+- `nnunet-plain-pocket` is `nnunet-plain` with 32 filters per stage. It differs
+  from `nnunet-plain` only in width, so the two make a clean comparison of
+  network width.
+- `nnunet-res-pocket` is `nnunet-res` with 32 filters per stage. The name
+  `nnunet-pocket` still builds this same network, so existing configurations and
+  checkpoints keep working. We used it in the BraTS 2024 and 2025 adult glioma
+  challenges, placing 3rd both years with about 700K parameters.
 
 ### Example
 
-Run the MIST training pipeline with the pocket nnUNet.
+Run the MIST training pipeline with the plain pocket network.
 
 ```console
 mist_train --numpy /path/to/preprocessed/npy/files \
            --results /path/to/results/folder \
-           --model nnunet-pocket
+           --model nnunet-plain-pocket
 ```
 
 ### Residual Encoder UNet (ResEnc)
@@ -371,7 +377,7 @@ so encoder weights pretrained with nnU-Net or nnssl (for example,
 nnFoundationCNN) load directly with `--pretrained-weights`. See
 [Checkpoints from other frameworks](#checkpoints-from-other-frameworks).
 
-`resenc-pocket` keeps 32 filters in every stage, as `nnunet-pocket` does, with
+`resenc-pocket` keeps 32 filters in every stage, as the nnU-Net pocket networks do, with
 the same stages and residual blocks as `resenc`. At six stages it has about
 1.8M parameters, against about 102M for `resenc`. Because the widths differ,
 `resenc` checkpoints such as nnFoundationCNN don't load into it. Encoder

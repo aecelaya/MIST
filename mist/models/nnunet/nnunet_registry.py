@@ -7,7 +7,7 @@ from mist.models.nnunet.mist_plain_nnunet import PlainNNUNet
 
 
 def _create_nnunet_base(use_pocket_model: bool, **kwargs) -> NNUNet:
-    """Shared factory logic for nnUNet and nnunet-pocket.
+    """Shared factory logic for nnunet-res and nnunet-res-pocket.
 
     Args:
         use_pocket_model: Whether to use constant-width filters (pocket mode).
@@ -33,9 +33,17 @@ def _create_nnunet_base(use_pocket_model: bool, **kwargs) -> NNUNet:
     )
 
 
-@register_model("nnunet-plain")
-def create_nnunet_plain(**kwargs) -> PlainNNUNet:
-    """Create nnU-Net's PlainConvUNet with deep supervision, MIST's default network."""
+def _create_nnunet_plain_base(use_pocket_model: bool, **kwargs) -> PlainNNUNet:
+    """Shared factory logic for nnunet-plain and nnunet-plain-pocket.
+
+    Args:
+        use_pocket_model: Whether to use a constant 32 filters per stage.
+        **kwargs: Model configuration, must include in_channels, out_channels,
+            patch_size, and target_spacing.
+
+    Returns:
+        An instance of the PlainNNUNet model.
+    """
     required_keys = ["in_channels", "out_channels", "patch_size", "target_spacing"]
     for key in required_keys:
         if key not in kwargs:
@@ -47,7 +55,20 @@ def create_nnunet_plain(**kwargs) -> PlainNNUNet:
         patch_size=kwargs["patch_size"],
         target_spacing=kwargs["target_spacing"],
         use_deep_supervision=True,
+        use_pocket_model=use_pocket_model,
     )
+
+
+@register_model("nnunet-plain")
+def create_nnunet_plain(**kwargs) -> PlainNNUNet:
+    """Create nnU-Net's PlainConvUNet with deep supervision, MIST's default network."""
+    return _create_nnunet_plain_base(use_pocket_model=False, **kwargs)
+
+
+@register_model("nnunet-plain-pocket")
+def create_nnunet_plain_pocket(**kwargs) -> PlainNNUNet:
+    """Create nnunet-plain with a constant 32 filters in every stage."""
+    return _create_nnunet_plain_base(use_pocket_model=True, **kwargs)
 
 
 @register_model("nnunet-res")
@@ -62,7 +83,13 @@ def create_nnunet(**kwargs) -> NNUNet:
     return create_nnunet_res(**kwargs)
 
 
+@register_model("nnunet-res-pocket")
+def create_nnunet_res_pocket(**kwargs) -> NNUNet:
+    """Create nnunet-res with a constant 32 filters in every stage."""
+    return _create_nnunet_base(use_pocket_model=True, **kwargs)
+
+
 @register_model("nnunet-pocket")
 def create_nnunet_pocket(**kwargs) -> NNUNet:
-    """Create a pocket nnUNet with constant 32-filter width across all depths."""
-    return _create_nnunet_base(use_pocket_model=True, **kwargs)
+    """Create the same network as nnunet-res-pocket; this name is kept for compatibility."""
+    return create_nnunet_res_pocket(**kwargs)

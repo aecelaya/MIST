@@ -65,8 +65,9 @@ def average_fold_weights(
 # target_spacing. Both must match for encoder weights to be compatible.
 _ADAPTIVE_ARCHITECTURES = {
     "nnunet-plain",
+    "nnunet-plain-pocket",
     "nnunet-res",
-    "nnunet-pocket",
+    "nnunet-res-pocket",
     "resenc",
     "resenc-pocket",
     "fmgnet",
@@ -78,7 +79,7 @@ _ADAPTIVE_ARCHITECTURES = {
 # stages or changes some kernels, so the shared stages still transfer exactly
 # and the rest keep their random initialization. Mismatches warn instead of
 # raising for these.
-_STAGEWISE_ARCHITECTURES = {"resenc", "resenc-pocket", "nnunet-plain"}
+_STAGEWISE_ARCHITECTURES = {"resenc", "resenc-pocket", "nnunet-plain", "nnunet-plain-pocket"}
 
 
 def validate_encoder_compatibility(
@@ -89,9 +90,11 @@ def validate_encoder_compatibility(
     """Validate that source and target configs have compatible encoder structure.
 
     For adaptive architectures, patch_size and target_spacing must also match.
-    For stagewise architectures (resenc, nnunet-plain), a spatial mismatch only
-    warns, since the shared stages still transfer exactly. An alias and the name
-    it stands for (nnunet and nnunet-res) count as the same architecture.
+    For stagewise architectures (resenc and nnunet-plain, and their pocket
+    versions), a spatial mismatch only warns, since the shared stages still
+    transfer exactly. An alias and the name it stands for (nnunet and
+    nnunet-res, nnunet-pocket and nnunet-res-pocket) count as the same
+    architecture.
 
     Args:
         source_config: MIST config dict for the pretrained source model.

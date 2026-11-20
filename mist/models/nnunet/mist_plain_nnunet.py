@@ -70,6 +70,10 @@ class PlainNNUNet(MISTModel):
     decoder keeps no reference to the encoder, so its keys omit the duplicate
     "decoder.encoder." entries found upstream.
 
+    With use_pocket_model, every stage has a constant 32 filters instead of
+    doubling up to 320 (Celaya et al., 2022), and the topology is unchanged.
+    This is nnunet-plain-pocket, which differs from nnunet-plain only in width.
+
     Attributes:
         encoder: The plain convolutional encoder.
         decoder: The plain UNet decoder.
@@ -84,6 +88,7 @@ class PlainNNUNet(MISTModel):
         patch_size: Sequence[int],
         target_spacing: Sequence[float],
         use_deep_supervision: bool,
+        use_pocket_model: bool = False,
     ):
         super().__init__()
         if len(patch_size) != 3:
@@ -109,10 +114,13 @@ class PlainNNUNet(MISTModel):
                 "these values."
             )
 
-        features_per_stage = [
-            min(2**i * constants.INITIAL_FILTERS, constants.MAX_FILTERS_3D)
-            for i in range(len(strides))
-        ]
+        if use_pocket_model:
+            features_per_stage = [constants.INITIAL_FILTERS] * len(strides)
+        else:
+            features_per_stage = [
+                min(2**i * constants.INITIAL_FILTERS, constants.MAX_FILTERS_3D)
+                for i in range(len(strides))
+            ]
         self.encoder = PlainConvEncoder(
             in_channels=in_channels,
             features_per_stage=features_per_stage,

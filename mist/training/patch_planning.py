@@ -258,7 +258,7 @@ def axis_divisors(
     for prefix, divisor in _FIXED_DIVISORS.items():
         if architecture.startswith(prefix):
             return [divisor] * len(patch_size)
-    if architecture == "nnunet-plain":
+    if architecture in ("nnunet-plain", "nnunet-plain-pocket"):
         return get_plain_unet_params(patch_size, target_spacing)[2]
     _, strides, _ = get_unet_params(patch_size, target_spacing)
     return [int(np.prod([s[axis] for s in strides])) for axis in range(len(patch_size))]

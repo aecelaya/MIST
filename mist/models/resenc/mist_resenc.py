@@ -29,7 +29,7 @@ class ResEncUNet(MISTModel):
     keys omit the duplicate "decoder.encoder." entries found upstream.
 
     With use_pocket_model, every stage has INITIAL_FILTERS (32) filters instead
-    of doubling, as in nnunet-pocket. The block counts and topology are the
+    of doubling, as in nnunet-res-pocket. The block counts and topology are the
     same, but the encoder is much smaller, so nnU-Net and nnssl checkpoints
     (sized for the full widths) don't load into it.
 

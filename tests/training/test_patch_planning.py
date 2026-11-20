@@ -15,6 +15,7 @@ from mist.training.planning_constants import PlanningConstants as constants
 GIB = 1024**3
 ONE_OF_EACH_FAMILY = [
     "nnunet-plain",
+    "nnunet-plain-pocket",
     "nnunet-res",
     "nnunet-pocket",
     "resenc",
@@ -233,7 +234,16 @@ def test_batch_is_capped_by_the_dataset_and_shared_across_gpus():
 
 
 @pytest.mark.parametrize(
-    "name", ["nnunet-res", "nnunet-pocket", "nnunet-plain", "resenc", "resenc-pocket"]
+    "name",
+    [
+        "nnunet-res",
+        "nnunet-pocket",
+        "nnunet-res-pocket",
+        "nnunet-plain",
+        "nnunet-plain-pocket",
+        "resenc",
+        "resenc-pocket",
+    ],
 )
 def test_small_images_still_get_a_patch_the_network_can_build(name):
     """A network needing a minimum depth gets it, padding the small image."""

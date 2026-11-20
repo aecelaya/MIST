@@ -90,16 +90,16 @@ mist_predict --models-dir /path/to/results/models \
 
 ## Supported Architectures
 
-| Model        | Variants                                                                 |
-| ------------ | ------------------------------------------------------------------------ |
-| nnU-Net      | `nnunet-plain` (default), `nnunet-res` (alias `nnunet`), `nnunet-pocket` |
-| ResEnc UNet  | `resenc`, `resenc-pocket`                                                |
-| MedNeXt      | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`       |
-| SwinUNETR-V2 | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                   |
-| Primus       | `primus-medium`, `primus-large`, `primus-x`                              |
-| PrimusV2     | `primusv2-small`, `primusv2-base`, `primusv2-medium`, `primusv2-large`   |
-| FMG-Net      | `fmgnet`                                                                 |
-| W-Net        | `wnet`                                                                   |
+| Model        | Variants                                                                                                                    |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| nnU-Net      | `nnunet-plain` (default), `nnunet-plain-pocket`, `nnunet-res` (alias `nnunet`), `nnunet-res-pocket` (alias `nnunet-pocket`) |
+| ResEnc UNet  | `resenc`, `resenc-pocket`                                                                                                   |
+| MedNeXt      | `mednext-small`, `mednext-base`, `mednext-medium`, `mednext-large`                                                          |
+| SwinUNETR-V2 | `swinunetr-small`, `swinunetr-base`, `swinunetr-large`                                                                      |
+| Primus       | `primus-medium`, `primus-large`, `primus-x`                                                                                 |
+| PrimusV2     | `primusv2-small`, `primusv2-base`, `primusv2-medium`, `primusv2-large`                                                      |
+| FMG-Net      | `fmgnet`                                                                                                                    |
+| W-Net        | `wnet`                                                                                                                      |
 
 Change the architecture in `config.json` or pass `--model <key>` at the command
 line.

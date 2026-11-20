@@ -1,4 +1,4 @@
-"""Tests for nnunet-plain, the nnunet alias, and nnU-Net's planning rules."""
+"""Tests for nnunet-plain and its pocket version, the aliases, and nnU-Net's planning rules."""
 
 import pytest
 import torch
@@ -144,7 +144,44 @@ def test_nnunet_plain_encoder_state_dict_holds_only_encoder():
     assert keys and all(k.startswith("encoder.") for k in keys)
 
 
-# The alias.
+# The pocket version.
+
+
+def test_nnunet_plain_pocket_has_32_filters_in_every_stage():
+    """Pocket keeps the plain topology and holds the width at 32."""
+    full, pocket = (
+        _build(patch_size=(128, 128, 128)),
+        _build("nnunet-plain-pocket", patch_size=(128, 128, 128)),
+    )
+    assert isinstance(pocket, PlainNNUNet)
+    assert pocket.encoder.output_channels == [32] * 6
+    assert pocket.encoder.strides == full.encoder.strides
+    assert pocket.encoder.kernel_sizes == full.encoder.kernel_sizes
+
+
+def test_nnunet_plain_pocket_differs_from_nnunet_plain_only_in_width():
+    """Same parameter names, no residual blocks, and far fewer parameters."""
+    full = _build(patch_size=(128, 128, 128))
+    pocket = _build("nnunet-plain-pocket", patch_size=(128, 128, 128))
+    assert pocket.state_dict().keys() == full.state_dict().keys()
+    assert not any("conv3" in k for k in pocket.state_dict())
+    n_full = sum(p.numel() for p in full.parameters())
+    n_pocket = sum(p.numel() for p in pocket.parameters())
+    assert n_pocket < n_full / 20
+
+
+def test_nnunet_plain_pocket_runs_and_returns_deep_supervision():
+    """The pocket network trains with the same two deep supervision heads."""
+    model = _build("nnunet-plain-pocket", patch_size=(64, 64, 64)).train()
+    out = model(torch.zeros(2, 2, 64, 64, 64))
+    assert out["prediction"].shape == (2, 3, 64, 64, 64)
+    assert len(out["deep_supervision"]) == 2
+    model.eval()
+    with torch.no_grad():
+        assert model(torch.zeros(1, 2, 64, 64, 64)).shape == (1, 3, 64, 64, 64)
+
+
+# The aliases.
 
 
 def test_nnunet_and_nnunet_res_build_the_same_network():
@@ -161,9 +198,20 @@ def test_nnunet_keeps_its_residual_blocks():
     assert isinstance(_build("nnunet-plain"), PlainNNUNet)
 
 
+def test_nnunet_pocket_and_nnunet_res_pocket_build_the_same_network():
+    """nnunet-pocket keeps meaning the residual pocket network from earlier versions."""
+    alias, res = _build("nnunet-pocket"), _build("nnunet-res-pocket")
+    assert isinstance(alias, NNUNet) and isinstance(res, NNUNet)
+    assert any("conv3" in k for k in alias.state_dict())
+    res.load_state_dict(alias.state_dict(), strict=True)
+
+
 def test_canonical_architecture():
-    """Only the alias changes."""
+    """Only the aliases change."""
     assert canonical_architecture("nnunet") == "nnunet-res"
+    assert canonical_architecture("nnunet-pocket") == "nnunet-res-pocket"
+    assert canonical_architecture("nnunet-res-pocket") == "nnunet-res-pocket"
+    assert canonical_architecture("nnunet-plain-pocket") == "nnunet-plain-pocket"
     assert canonical_architecture("nnunet-res") == "nnunet-res"
     assert canonical_architecture("nnunet-plain") == "nnunet-plain"
     assert canonical_architecture("resenc") == "resenc"
@@ -176,7 +224,15 @@ def _config(architecture, patch_size=(64, 64, 64)):
     }
 
 
-@pytest.mark.parametrize("source, target", [("nnunet", "nnunet-res"), ("nnunet-res", "nnunet")])
+@pytest.mark.parametrize(
+    "source, target",
+    [
+        ("nnunet", "nnunet-res"),
+        ("nnunet-res", "nnunet"),
+        ("nnunet-pocket", "nnunet-res-pocket"),
+        ("nnunet-res-pocket", "nnunet-pocket"),
+    ],
+)
 def test_encoder_compatibility_treats_alias_as_same(source, target):
     """Pretrained weights move freely between the alias and its target."""
     model_loader.validate_encoder_compatibility(_config(source), _config(target))
@@ -190,10 +246,18 @@ def test_encoder_compatibility_alias_still_checks_patch_size():
         )
 
 
-def test_encoder_compatibility_plain_and_residual_differ():
-    """The plain and residual encoders can't exchange weights."""
+@pytest.mark.parametrize(
+    "source, target",
+    [
+        ("nnunet", "nnunet-plain"),
+        ("nnunet-pocket", "nnunet-plain-pocket"),
+        ("nnunet-plain", "nnunet-plain-pocket"),
+    ],
+)
+def test_encoder_compatibility_plain_and_residual_differ(source, target):
+    """Plain and residual encoders, or full and pocket widths, can't exchange weights."""
     with pytest.raises(ValueError, match="Architecture mismatch"):
-        model_loader.validate_encoder_compatibility(_config("nnunet"), _config("nnunet-plain"))
+        model_loader.validate_encoder_compatibility(_config(source), _config(target))
 
 
 def test_encoder_compatibility_plain_patch_mismatch_warns():

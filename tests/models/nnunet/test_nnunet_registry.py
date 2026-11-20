@@ -3,11 +3,15 @@
 import pytest
 
 from mist.models.nnunet.mist_nnunet import NNUNet
+from mist.models.nnunet.mist_plain_nnunet import PlainNNUNet
 
 # MIST imports.
 from mist.models.nnunet.nnunet_registry import (
     create_nnunet,
+    create_nnunet_plain,
+    create_nnunet_plain_pocket,
     create_nnunet_pocket,
+    create_nnunet_res_pocket,
 )
 
 
@@ -28,10 +32,18 @@ def test_create_nnunet_success(valid_config):
     assert isinstance(model, NNUNet)
 
 
-def test_create_nnunet_pocket_success(valid_config):
-    """Test that create_nnunet_pocket returns an NNUNet instance."""
-    model = create_nnunet_pocket(**valid_config)
+@pytest.mark.parametrize("factory", [create_nnunet_pocket, create_nnunet_res_pocket])
+def test_create_nnunet_pocket_success(valid_config, factory):
+    """nnunet-pocket and nnunet-res-pocket both build the residual NNUNet."""
+    model = factory(**valid_config)
     assert isinstance(model, NNUNet)
+
+
+@pytest.mark.parametrize("factory", [create_nnunet_plain, create_nnunet_plain_pocket])
+def test_create_nnunet_plain_success(valid_config, factory):
+    """nnunet-plain and nnunet-plain-pocket both build PlainNNUNet."""
+    model = factory(**valid_config)
+    assert isinstance(model, PlainNNUNet)
 
 
 @pytest.mark.parametrize(
@@ -49,3 +61,14 @@ def test_create_nnunet_missing_keys(valid_config, missing_key):
     config.pop(missing_key)
     with pytest.raises(ValueError, match=f"Missing required key '{missing_key}'"):
         create_nnunet(**config)
+
+
+@pytest.mark.parametrize(
+    "missing_key", ["in_channels", "out_channels", "patch_size", "target_spacing"]
+)
+def test_create_nnunet_plain_pocket_missing_keys(valid_config, missing_key):
+    """The plain factories check their configuration too."""
+    config = valid_config.copy()
+    config.pop(missing_key)
+    with pytest.raises(ValueError, match=f"Missing required key '{missing_key}'"):
+        create_nnunet_plain_pocket(**config)

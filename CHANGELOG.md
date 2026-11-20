@@ -5,6 +5,15 @@ All notable changes to MIST are listed here, newest first. MIST follows
 
 ## Unreleased
 
+### Added
+
+- **`nnunet-plain-pocket`**: `nnunet-plain` with 32 filters in every stage,
+  about 0.76M parameters at a 128³ patch against 31.2M. It differs from
+  `nnunet-plain` only in width. `nnunet-pocket`, the residual pocket network,
+  now has the clearer name `nnunet-res-pocket`; `nnunet-pocket` still builds the
+  same network, and configurations and checkpoints under either name are
+  interchangeable.
+
 ### Fixed
 
 - **Docker image:** it installed the latest stable MIST (2.4.1) instead of the

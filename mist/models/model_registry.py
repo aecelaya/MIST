@@ -7,7 +7,7 @@ MODEL_REGISTRY: dict[str, Callable] = {}
 
 # Names that build the same network as another registered name, so checkpoints
 # and configs written under either are interchangeable.
-_ARCHITECTURE_ALIASES = {"nnunet": "nnunet-res"}
+_ARCHITECTURE_ALIASES = {"nnunet": "nnunet-res", "nnunet-pocket": "nnunet-res-pocket"}
 
 
 def canonical_architecture(name: str) -> str:
