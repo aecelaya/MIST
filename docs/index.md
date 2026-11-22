@@ -6,7 +6,7 @@ segmentation. It handles everything from raw NIfTI files to trained models and
 evaluated predictions, with sensible defaults that work well out of the box and
 a configuration file for when you need more control.
 
-!!! note "These docs are for MIST 3.0.0rc0"
+!!! note "These docs are for MIST 3.0.0rc1"
 
     3.0 is a release candidate, so `pip install mist-medical` still installs
     2.4.1. To try 3.0, run `pip install --pre mist-medical`, and see
