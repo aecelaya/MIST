@@ -145,12 +145,13 @@ Full documentation, including configuration reference and advanced topics, is at
 
 ## What's New
 
-- November 2026 — **MIST 3.0** (release candidate) — NVIDIA DALI is gone, and
-  MIST's own data loader is the only one, on NVIDIA, AMD, and CPU machines. It
-  trained full LiTS in 13 s per epoch on an H100, against 67 s with DALI.
-  Planning at training time, FP16, nnU-Net-style augmentation, and the new
-  default `nnunet-plain` come from 2.5.0rc0. Models trained with 2.x keep
-  working; see
+- November 2026 — **MIST 3.0** — NVIDIA DALI is gone, and MIST's own data
+  loader is the only one, on NVIDIA, AMD, and CPU machines. It trained full LiTS
+  in 13 s per epoch on an H100, against 67 s with DALI. Patch size, batch size, and
+  precision are planned for the GPU at training time, FP16 works on any GPU, and
+  `nnunet-plain` is the new default network. In a matched five-fold comparison
+  on LiTS, MIST ranked ahead of nnU-Net overall and matched it on tumors. Models
+  trained with 2.x keep working; see
   [Upgrading to 3.0](https://mist-medical.readthedocs.io/en/latest/upgrading/).
 - November 2026 — **MIST 2.4.0** — new ResEnc UNet (`resenc`), Primus, and
   PrimusV2 architectures, and fine-tuning from the openly available

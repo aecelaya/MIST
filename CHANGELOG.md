@@ -3,6 +3,12 @@
 All notable changes to MIST are listed here, newest first. MIST follows
 [semantic versioning](https://semver.org/) from 2.3.0 onward.
 
+## 3.0.0 — 2026-11-22
+
+The first stable release of MIST 3.0. It contains everything in 3.0.0rc0 and
+3.0.0rc1 below, with no code changes since 3.0.0rc1. See
+[Upgrading to 3.0](docs/upgrading.md).
+
 ## 3.0.0rc1 — 2026-11-22
 
 The second release candidate for 3.0.0. It fixes the Docker image and adds a
