@@ -27,12 +27,19 @@ ENV TRITON_CACHE_DIR=/tmp/triton
 # Install MIST. The publish workflow passes the release's version, so a
 # pre-release image gets the pre-release (pip skips pre-releases otherwise).
 # Left empty, a local build installs the latest stable release.
+#
+# The workflow starts right after the PyPI upload, and PyPI's cached index can
+# take several minutes to list the new version (3.0.0's first build failed with
+# "No matching distribution found"). So retry every 30 s for up to 15 minutes.
 ARG MIST_VERSION=""
-RUN if [ -n "$MIST_VERSION" ]; then \
-        pip install --no-cache-dir "mist-medical==${MIST_VERSION}"; \
-    else \
-        pip install --no-cache-dir mist-medical; \
-    fi
+RUN if [ -n "$MIST_VERSION" ]; then spec="mist-medical==${MIST_VERSION}"; \
+    else spec="mist-medical"; fi; \
+    for attempt in $(seq 1 30); do \
+        pip install --no-cache-dir "$spec" && exit 0; \
+        echo "pip install $spec failed (attempt $attempt of 30); retrying in 30 s"; \
+        sleep 30; \
+    done; \
+    exit 1
 
 # Fail the build if pip installed a different version than asked for.
 RUN python -c "import sys; from importlib.metadata import version; v = version('mist-medical'); want = sys.argv[1]; print('mist-medical', v); assert not want or v == want, (v, want)" "$MIST_VERSION"
